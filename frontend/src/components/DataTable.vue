@@ -6,9 +6,10 @@ const props = defineProps({
   rows: { type: Array, default: () => [] },      // [{row_no, data:[]}]
   searchable: { type: Boolean, default: false },
   maxHeight: { type: Number, default: 500 },
-  highlight: { type: Array, default: () => [] }  // 列索引 → 特殊样式
+  highlight: { type: Array, default: () => [] },  // 列索引 → 特殊样式
+  showEdit: { type: Boolean, default: false }     // 显示编辑按钮
 })
-const emit = defineEmits(['delete'])
+const emit = defineEmits(['delete', 'edit'])
 
 const keyword = ref('')
 
@@ -39,7 +40,7 @@ function fmt(v) {
           <tr>
             <th>#</th>
             <th v-for="(h, i) in headers" :key="i">{{ h }}</th>
-            <th v-if="$attrs.onDelete || emit" style="width:50px"></th>
+            <th v-if="$attrs.onDelete || emit || showEdit" style="width:110px"></th>
           </tr>
         </thead>
         <tbody>
@@ -47,9 +48,11 @@ function fmt(v) {
             <td class="idx">{{ ri + 1 }}</td>
             <td v-for="(h, ci) in headers" :key="ci"
               :class="highlight.includes(ci) ? 'cell-strong' : ''">{{ fmt(row.data[ci]) }}</td>
-            <td v-if="emit" class="cell-del">
-              <button class="btn btn-sm btn-danger" title="删除该行"
-                @click="$emit('delete', row.row_no)">✕</button>
+            <td v-if="emit || showEdit" class="cell-del">
+              <button v-if="showEdit" class="btn btn-sm btn-outline" title="编辑"
+                @click="$emit('edit', row.row_no, row.data)" style="margin-right:4px">编辑</button>
+              <button v-if="emit" class="btn btn-sm btn-danger" title="删除"
+                @click="$emit('delete', row.row_no)">删除</button>
             </td>
           </tr>
         </tbody>

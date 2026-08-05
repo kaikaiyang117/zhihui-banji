@@ -51,10 +51,20 @@ def init_schema(conn: sqlite3.Connection):
         特长 TEXT,
         班级任职 TEXT,
         备注 TEXT,
+        监护人2姓名 TEXT DEFAULT '',
+        监护人2电话 TEXT DEFAULT '',
+        监护人2关系 TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now','localtime')),
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
-
+    ''')
+    # 兼容旧库：补全新列
+    for col, typ in [('监护人2姓名', "TEXT DEFAULT ''"), ('监护人2电话', "TEXT DEFAULT ''"), ('监护人2关系', "TEXT DEFAULT ''")]:
+        try:
+            conn.execute(f'ALTER TABLE students ADD COLUMN "{col}" {typ}')
+        except sqlite3.OperationalError:
+            pass
+    conn.executescript('''
     -- 通用工作表：表头元数据
     CREATE TABLE IF NOT EXISTS sheet_meta (
         sheet TEXT PRIMARY KEY,

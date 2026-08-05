@@ -15,6 +15,7 @@ NORMALIZE = {
     '民族': '民族', '家庭住址': '家庭住址', '监护人姓名': '监护人姓名',
     '监护人电话': '监护人电话', '监护人职业': '监护人职业', '是否住校': '是否住校',
     '特长': '特长', '班级任职': '班级任职', '备注': '备注',
+    '监护人2姓名': '监护人2姓名', '监护人2电话': '监护人2电话', '监护人2关系': '监护人2关系',
 }
 
 
@@ -31,10 +32,10 @@ def build_template() -> io.BytesIO:
         ws.cell(row=1, column=i, value=h)
         ws.cell(row=1, column=i).font = ws.cell(row=1, column=i).font.copy(weight='bold')
     for i, example in enumerate(['2201', '张三', '男', '2010-05', '汉', '汶川县威州镇',
-                                 '张大明', '13800000000', '务农', '住校', '书法', '纪律委员'], 1):
+                                 '张大明', '13800000000', '务农', '住校', '书法', '纪律委员', '',
+                                 '李芳', '13900000000', '母亲'], 1):
         ws.cell(row=2, column=i, value=example)
-    ws.cell(row=1, column=13).comment = None
-    for col, width in zip('ABCDEFGHIJKLM', [10, 10, 6, 10, 6, 22, 10, 14, 8, 8, 10, 10, 30]):
+    for col, width in zip('ABCDEFGHIJKLMNOP', [10, 10, 6, 10, 6, 22, 10, 14, 8, 8, 10, 10, 30, 10, 14, 10]):
         ws.column_dimensions[col].width = width
     buf = io.BytesIO()
     wb.save(buf)

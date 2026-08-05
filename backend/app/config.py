@@ -12,7 +12,7 @@ LEGACY_HEALTH = os.path.join(ROOT_DIR, '健康管理', '健康追踪表.xlsx')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 
 HOST = '127.0.0.1'
-PORT = 5000
+PORT = int(os.environ.get('WORKBENCH_PORT', '5000'))
 
 # 工作表 → 模块归属（前端分组）
 SHEET_META = {
@@ -44,4 +44,5 @@ SHEET_META = {
 }
 
 STUDENT_COLUMNS = ['学号', '姓名', '性别', '出生年月', '民族', '家庭住址', '监护人姓名',
-                   '监护人电话', '监护人职业', '是否住校', '特长', '班级任职', '备注']
+                   '监护人电话', '监护人职业', '是否住校', '特长', '班级任职', '备注',
+                   '监护人2姓名', '监护人2电话', '监护人2关系']
