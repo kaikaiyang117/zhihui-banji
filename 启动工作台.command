@@ -1,18 +1,23 @@
 #!/bin/bash
 # 美美大王工作台 - macOS 启动脚本
-# 双击 .command 文件即可运行，也可在终端中执行
-
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/backend"
 
 PORT="${WORKBENCH_PORT:-8080}"
-HOST="${WORKBENCH_HOST:-127.0.0.1}"
+HOST="${WORKBENCH_HOST:-0.0.0.0}"
+
+LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "未检测到")
 
 echo "========================================"
-echo "  美美大王工作台 v2.2"
-echo "  http://${HOST}:${PORT}"
+echo "  美美大王工作台 v2.3"
+echo ""
+echo "  本机访问: http://localhost:${PORT}"
+if [ "$LOCAL_IP" != "未检测到" ]; then
+  echo "  局域网访问: http://${LOCAL_IP}:${PORT}"
+fi
+echo ""
 echo "  按 Ctrl+C 停止"
 echo "========================================"
 
