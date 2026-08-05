@@ -11,7 +11,8 @@ LEGACY_BZR = os.path.join(ROOT_DIR, '班主任工作台', '班主任工作台.xl
 LEGACY_HEALTH = os.path.join(ROOT_DIR, '健康管理', '健康追踪表.xlsx')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 
-HOST = os.environ.get('WORKBENCH_HOST', '0.0.0.0')
+# 学生信息默认只在本机提供；确需局域网访问时显式设置 WORKBENCH_HOST。
+HOST = os.environ.get('WORKBENCH_HOST', '127.0.0.1')
 PORT = int(os.environ.get('WORKBENCH_PORT', '5000'))
 
 # 工作表 → 模块归属（前端分组）

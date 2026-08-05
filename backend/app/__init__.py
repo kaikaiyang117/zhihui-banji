@@ -8,18 +8,19 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .config import STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export
+from .routers import sheets, students, seating, stats, knowledge, export, p0, system
 
 app = FastAPI(title='美美大王工作台', version='2.2')
 
 for r in (sheets.router, students.router, seating.router,
-          stats.router, knowledge.router, export.router):
+          stats.router, knowledge.router, export.router, p0.router, system.router):
     app.include_router(r)
 
 
 @app.on_event('startup')
 def startup():
     db.get_conn()
+    p0.migrate_legacy_core_rows()
 
 
 @app.on_event('shutdown')

@@ -4,6 +4,7 @@ import {
   CalendarDays, Activity, BookOpen, Brain, Plus, Download, Upload,
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,
   Moon, FileEdit, FileDown, ChevronRight, Search, Trash2, Edit3,
+  ListTodo, ShieldCheck, CircleAlert,
   MoreHorizontal
 } from 'lucide-vue-next'
 
@@ -13,6 +14,7 @@ export const ICONS = {
   CalendarDays, Activity, BookOpen, Brain, Plus, Download, Upload,
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,
   Moon, FileEdit, FileDown, ChevronRight, Search, Trash2, Edit3,
+  ListTodo, ShieldCheck, CircleAlert,
   MoreHorizontal
 }
 

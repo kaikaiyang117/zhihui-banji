@@ -166,11 +166,17 @@ export const NAV = [
   {
     key: 'teacher', icon: 'School', title: '教师工作台', school: '汶川县七一映秀中学',
     groups: [
-      { title: '概览', items: [{ page: 'dashboard', icon: 'LayoutDashboard', label: '首页仪表盘' }] },
+      { title: '概览', items: [
+        { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },
+        { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' }
+      ] },
       { title: '学生管理', items: [
         { page: 'students', icon: 'Users', label: '学生信息' },
-        { page: 'special', icon: 'Tag', label: '特殊学生' },
+        { page: 'special', icon: 'Tag', label: '关注事项' },
         { page: 'comments', icon: 'Pencil', label: '评语管理' }
+      ] },
+      { title: '日常记录', items: [
+        { page: 'events', icon: 'FileEdit', label: '学生事件' }
       ] },
       { title: '教学管理', items: [
         { page: 'attendance', icon: 'ClipboardList', label: '考勤管理' },

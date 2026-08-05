@@ -1,0 +1,1 @@
+import{_ as t}from"./SheetPage-C1cZlLem.js";import{j as e,m as r}from"./index-pdM-M-aV.js";import"./api-Bu42C02h.js";import"./DataTable-BGVYrWFF.js";import"./AddModal-D7Gwqt8N.js";const p={__name:"Fund",setup(a){return(o,m)=>(r(),e(t,{title:"班费管理","sheet-name":"班费管理","add-button":"添加收支",highlight:[6],searchable:!0}))}};export{p as default};

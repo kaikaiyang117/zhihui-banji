@@ -90,6 +90,74 @@ def init_schema(conn: sqlite3.Connection):
         val TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (r, c)
     );
+
+    CREATE TABLE IF NOT EXISTS app_flags (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT ''
+    );
+
+    -- P0 核心流程：结构化记录，统一通过 student_id 关联学生
+    CREATE TABLE IF NOT EXISTS student_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        occurred_at TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        handling TEXT DEFAULT '',
+        parent_contacted INTEGER NOT NULL DEFAULT 0,
+        needs_followup INTEGER NOT NULL DEFAULT 0,
+        followup_due TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT '已完成',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS student_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+        event_id INTEGER REFERENCES student_events(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        source TEXT DEFAULT '手动创建',
+        due_at TEXT DEFAULT '',
+        priority TEXT NOT NULL DEFAULT '普通',
+        status TEXT NOT NULL DEFAULT '待处理',
+        notes TEXT DEFAULT '',
+        completed_at TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS focus_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        topic TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        evidence TEXT DEFAULT '',
+        action_plan TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT '待确认',
+        next_review_at TEXT DEFAULT '',
+        started_at TEXT DEFAULT (date('now','localtime')),
+        ended_at TEXT DEFAULT '',
+        conclusion TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS communications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        communicated_at TEXT NOT NULL,
+        method TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        feedback TEXT DEFAULT '',
+        agreement TEXT DEFAULT '',
+        followup_at TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT '已完成',
+        event_id INTEGER REFERENCES student_events(id) ON DELETE SET NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     ''')
     conn.commit()
 
@@ -149,3 +217,13 @@ def update_cell(sheet: str, row_no: int, col: int, value):
 def delete_row(sheet: str, row_no: int):
     get_conn().execute('DELETE FROM sheet_rows WHERE sheet=? AND row_no=?', (sheet, row_no))
     get_conn().commit()
+
+
+def replace_row(sheet: str, row_no: int, data: list):
+    """完整替换一行，供批量考勤等需要原子更新的流程使用。"""
+    cur = get_conn().execute(
+        'UPDATE sheet_rows SET data=?, updated_at=datetime(\'now\',\'localtime\') WHERE sheet=? AND row_no=?',
+        (json.dumps(data, ensure_ascii=False), sheet, row_no))
+    get_conn().commit()
+    if cur.rowcount == 0:
+        raise KeyError(f'行 {row_no} 不存在')
