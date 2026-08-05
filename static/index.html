@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美美大王工作台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- 顶部 Tab 切换 -->
+<div class="top-tabs">
+  <div class="top-tab active" data-tab="teacher">
+    <span class="tab-icon">🏫</span>
+    <span>教师工作台</span>
+  </div>
+  <div class="top-tab" data-tab="personal">
+    <span class="tab-icon">👤</span>
+    <span>个人工作台</span>
+  </div>
+</div>
+
+<div class="app-body">
+  <!-- 侧边导航 -->
+  <nav class="sidebar" id="sidebar">
+    <!-- 教师工作台导航（默认显示） -->
+    <div class="nav-panel active" id="nav-teacher">
+      <div class="sidebar-header">
+        <h2>教师工作台</h2>
+        <div class="sub">汶川县七一映秀中学</div>
+      </div>
+      <div class="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-group-title">概览</div>
+          <div class="nav-item active" data-page="dashboard">
+            <span class="icon">📊</span><span>首页仪表盘</span>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">学生管理</div>
+          <div class="nav-item" data-page="students"><span class="icon">👥</span><span>学生信息</span></div>
+          <div class="nav-item" data-page="special"><span class="icon">🏷️</span><span>特殊学生</span></div>
+          <div class="nav-item" data-page="comments"><span class="icon">✏️</span><span>评语管理</span></div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">教学管理</div>
+          <div class="nav-item" data-page="attendance"><span class="icon">📋</span><span>考勤管理</span></div>
+          <div class="nav-item" data-page="scores"><span class="icon">📈</span><span>成绩跟踪</span></div>
+          <div class="nav-item" data-page="points"><span class="icon">⭐</span><span>行为积分</span></div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">班级事务</div>
+          <div class="nav-item" data-page="seating"><span class="icon">🪑</span><span>座位表</span></div>
+          <div class="nav-item" data-page="parent-comm"><span class="icon">📞</span><span>家校沟通</span></div>
+          <div class="nav-item" data-page="meetings"><span class="icon">🎯</span><span>班会记录</span></div>
+          <div class="nav-item" data-page="fund"><span class="icon">💰</span><span>班费管理</span></div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">日志</div>
+          <div class="nav-item" data-page="diary"><span class="icon">📝</span><span>班主任日志</span></div>
+          <div class="nav-item" data-page="activities"><span class="icon">🎉</span><span>班级活动</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 个人工作台导航（默认隐藏） -->
+    <div class="nav-panel" id="nav-personal">
+      <div class="sidebar-header">
+        <h2>个人工作台</h2>
+        <div class="sub">健康 · 成长 · 考研</div>
+      </div>
+      <div class="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-group-title">健康管理</div>
+          <div class="nav-item active" data-page="health">
+            <span class="icon">💪</span><span>健康追踪</span>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">考研备考</div>
+          <div class="nav-item" data-page="kaoyan">
+            <span class="icon">📚</span><span>考研计划</span>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">知识管理</div>
+          <div class="nav-item" data-page="knowledge">
+            <span class="icon">🧠</span><span>知识库</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <span>凯凯小兵 🛡️ 为你值守</span>
+    </div>
+  </nav>
+
+  <!-- 主内容 -->
+  <main class="main" id="main-content">
+    <div class="loading">正在加载数据...</div>
+  </main>
+</div>
+
+<!-- 添加记录弹窗 -->
+<div class="modal-overlay" id="modal">
+  <div class="modal" id="modal-body"></div>
+</div>
+
+<script src="/lib/echarts.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

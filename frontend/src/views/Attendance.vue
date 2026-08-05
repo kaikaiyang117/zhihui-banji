@@ -1,0 +1,76 @@
+<script setup>
+import { ref, reactive, onMounted } from 'vue'
+import { get } from '../api'
+import DataTable from '../components/DataTable.vue'
+import AddModal from '../components/AddModal.vue'
+import { SHEET_FIELDS } from '../sheets'
+
+const data = ref(null)
+const stats = ref(null)
+const loading = ref(true)
+const showAdd = ref(false)
+const dateFrom = ref('')
+const dateTo = ref('')
+
+const STATUS_ICON = { '出勤': '✅', '迟到': '⏰', '请假': '📝', '缺勤': '❌' }
+const STATUS_COLOR = { '出勤': 'green', '迟到': 'orange', '请假': 'blue', '缺勤': 'red' }
+
+async function load() {
+  loading.value = true
+  try {
+    const [d, s] = await Promise.all([
+      get('/api/sheet/考勤管理'),
+      get('/api/stats/attendance')
+    ])
+    data.value = d
+    stats.value = s
+  } finally {
+    loading.value = false
+  }
+}
+
+function exportReport() {
+  const q = new URLSearchParams()
+  if (dateFrom.value) q.set('date_from', dateFrom.value)
+  if (dateTo.value) q.set('date_to', dateTo.value)
+  const a = document.createElement('a')
+  a.href = '/api/export/report/attendance?' + q.toString()
+  a.click()
+}
+
+onMounted(load)
+</script>
+
+<template>
+  <div>
+    <div class="page-title-bar">
+      <div class="page-title">考勤管理</div>
+      <div class="toolbar" style="margin-bottom:0">
+        <button class="btn btn-primary" @click="showAdd = true">📋 添加考勤</button>
+        <a class="btn btn-outline btn-export" href="/api/export/sheet/考勤管理">📥 导出明细</a>
+        <div class="report-bar">
+          <input type="date" v-model="dateFrom" title="开始日期">
+          <span>至</span>
+          <input type="date" v-model="dateTo" title="结束日期">
+          <button class="btn btn-outline" @click="exportReport">📊 导出汇总报表</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="stats?.status_count" class="overview-cards">
+      <div v-for="(v, k) in stats.status_count" :key="k" class="overview-card" style="flex:1">
+        <div class="oc-icon" :class="STATUS_COLOR[k] || 'blue'">{{ STATUS_ICON[k] || '📊' }}</div>
+        <div><div class="oc-label">{{ k }}</div><div class="oc-value">{{ v }}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">考勤明细</div>
+      <div v-if="loading" class="loading">加载中...</div>
+      <DataTable v-else :headers="data?.headers || []" :rows="data?.rows || []" :max-height="400" :searchable="true" />
+    </div>
+
+    <AddModal v-if="showAdd" title="添加考勤" :fields="SHEET_FIELDS['考勤管理']"
+      sheet-name="考勤管理" @success="showAdd = false; load()" @close="showAdd = false" />
+  </div>
+</template>

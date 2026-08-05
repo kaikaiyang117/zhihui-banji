@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 个人数据（Excel 表格含学生/健康等隐私信息，不入库）
+*.xlsx
+*.xls
+data/
+
+# Obsidian 知识库笔记（个人隐私，不入库）
+知识库/
+
+# Node
+frontend/node_modules/
+
+# 运行与缓存
+*.log
+*.err
+.workbuddy/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
