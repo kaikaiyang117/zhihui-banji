@@ -21,13 +21,13 @@ function tabTo(tab) {
 
 <template>
   <div class="app">
-    <div class="top-tabs">
+    <header class="top-tabs">
       <router-link v-for="tab in NAV" :key="tab.key"
         :to="tabTo(tab)" class="top-tab" :class="{ active: tab.key === activeTab }">
         <span class="tab-icon">{{ tab.icon }}</span>
         <span>{{ tab.title }}</span>
       </router-link>
-    </div>
+    </header>
     <div class="app-body">
       <aside class="sidebar">
         <div class="sidebar-header">
@@ -45,12 +45,45 @@ function tabTo(tab) {
           </div>
         </nav>
         <div class="sidebar-footer">
-          <span>凯凯小兵 🛡️ 为你值守</span>
+          <span>凯凯小兵 为你值守</span>
         </div>
       </aside>
       <main class="main">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <transition name="page" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </main>
     </div>
   </div>
 </template>
+
+<style>
+.page-enter-active {
+  transition: opacity 150ms cubic-bezier(0.25, 0.1, 0.25, 1),
+              transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.page-leave-active {
+  transition: opacity 100ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  position: absolute;
+  width: 100%;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: none !important;
+  }
+}
+</style>

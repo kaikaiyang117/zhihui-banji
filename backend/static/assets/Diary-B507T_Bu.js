@@ -1,0 +1,1 @@
+import{_ as t}from"./SheetPage-QCoVXx_M.js";import{j as e,f as r}from"./index-CmIlQMgp.js";import"./api-CcbgIInX.js";import"./DataTable-LMT-g9dU.js";import"./AddModal-CKbX5yoQ.js";const n={__name:"Diary",setup(a){return(o,m)=>(r(),e(t,{title:"班主任日志","sheet-name":"班主任日志","add-button":"📝 写日志",searchable:!0}))}};export{n as default};
