@@ -5,7 +5,7 @@ import { NAV } from './sheets'
 import { getIcon } from './icons'
 
 const route = useRoute()
-const activeTab = computed(() => route.path.startsWith('/p') ? 'personal' : 'teacher')
+const activeTab = computed(() => route.path.startsWith('/p/') ? 'personal' : 'teacher')
 const activeNav = computed(() => NAV.find(t => t.key === activeTab.value))
 
 function itemTo(item) {
