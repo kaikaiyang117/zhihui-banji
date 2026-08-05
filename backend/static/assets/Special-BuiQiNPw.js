@@ -1,0 +1,1 @@
+import{_ as t}from"./SheetPage-SkPrfiAE.js";import{x as e,i as o}from"./index-8P7HE5wu.js";import"./api-CcbgIInX.js";import"./DataTable-DfkeU8pS.js";import"./AddModal-Dm_4RKXu.js";const n={__name:"Special",setup(r){return(a,m)=>(o(),e(t,{title:"特殊学生档案","sheet-name":"特殊学生档案","add-button":"添加档案"}))}};export{n as default};

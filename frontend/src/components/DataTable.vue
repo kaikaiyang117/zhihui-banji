@@ -7,7 +7,8 @@ const props = defineProps({
   searchable: { type: Boolean, default: false },
   maxHeight: { type: Number, default: 500 },
   highlight: { type: Array, default: () => [] },  // 列索引 → 特殊样式
-  showEdit: { type: Boolean, default: false }     // 显示编辑按钮
+  showEdit: { type: Boolean, default: false },    // 显示编辑按钮
+  colWidths: { type: Array, default: () => [] }   // 每列宽度（px 数值或 'auto'）
 })
 const emit = defineEmits(['delete', 'edit'])
 
@@ -35,23 +36,30 @@ function fmt(v) {
     </div>
     <div v-if="!filtered.length" class="empty-state">暂无数据</div>
     <div v-else class="table-wrap" :style="{ maxHeight: maxHeight + 'px' }">
-      <table class="data-table">
+      <table class="data-table" :class="{ 'fixed-layout': colWidths.length }">
+        <colgroup v-if="colWidths.length">
+          <col style="width:30px">
+          <col v-for="(w, i) in colWidths" :key="i" :style="{ width: typeof w === 'number' ? w + 'px' : w }">
+          <col v-if="emit || showEdit" style="width:100px">
+        </colgroup>
         <thead>
           <tr>
             <th>#</th>
             <th v-for="(h, i) in headers" :key="i">{{ h }}</th>
-            <th v-if="$attrs.onDelete || emit || showEdit" style="width:110px"></th>
+            <th v-if="$attrs.onDelete || emit || showEdit"></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(row, ri) in filtered" :key="row.row_no">
             <td class="idx">{{ ri + 1 }}</td>
             <td v-for="(h, ci) in headers" :key="ci"
-              :class="highlight.includes(ci) ? 'cell-strong' : ''">{{ fmt(row.data[ci]) }}</td>
+              :class="highlight.includes(ci) ? 'cell-strong' : ''">
+              <span class="cell-text">{{ fmt(row.data[ci]) }}</span>
+            </td>
             <td v-if="emit || showEdit" class="cell-del">
-              <button v-if="showEdit" class="btn btn-sm btn-outline" title="编辑"
+              <button v-if="showEdit" class="btn btn-sm btn-outline"
                 @click="$emit('edit', row.row_no, row.data)" style="margin-right:4px">编辑</button>
-              <button v-if="emit" class="btn btn-sm btn-danger" title="删除"
+              <button v-if="emit" class="btn btn-sm btn-danger"
                 @click="$emit('delete', row.row_no)">删除</button>
             </td>
           </tr>

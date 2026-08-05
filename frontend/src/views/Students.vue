@@ -84,6 +84,7 @@ onMounted(load)
       <div v-if="loading" class="loading">加载中...</div>
       <DataTable v-else :headers="['学号','姓名','性别','出生年月','民族','家庭住址','监护人1姓名','监护人1电话','监护人1职业','监护人2姓名','监护人2电话','监护人2关系','是否住校','特长','班级任职','备注']"
         :rows="students.map((s, i) => ({ row_no: s.id, data: [s['学号'], s['姓名'], s['性别'], s['出生年月'], s['民族'], s['家庭住址'], s['监护人姓名'], s['监护人电话'], s['监护人职业'], s['监护人2姓名']||'', s['监护人2电话']||'', s['监护人2关系']||'', s['是否住校'], s['特长'], s['班级任职'], s['备注']] }))"
+        :col-widths="[64, 68, 46, 80, 54, 148, 76, 116, 60, 76, 116, 60, 56, 76, 76, 100]"
         :show-edit="true"
         @delete="rowNo => removeStudent(rowNo)"
         @edit="(rowNo, data) => startEdit(rowNo, data)" />

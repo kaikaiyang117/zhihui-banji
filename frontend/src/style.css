@@ -318,6 +318,10 @@ body {
   letter-spacing: -0.01em;
 }
 
+.data-table.fixed-layout {
+  table-layout: fixed;
+}
+
 .data-table th {
   background: rgba(0,0,0,0.02);
   padding: 10px 12px;
@@ -677,6 +681,12 @@ body {
 .idx { color: var(--text-tertiary); font-size: 11px; }
 .cell-strong { font-weight: 600; }
 .cell-del { text-align: center; white-space: nowrap; }
+.cell-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .import-result { margin-top: 12px; padding: 12px; background: var(--success-bg); border-radius: var(--radius-sm); font-size: 13px; }
 
 /* ── Responsive ── */
