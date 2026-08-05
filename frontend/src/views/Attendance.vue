@@ -4,7 +4,7 @@ import { get } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
-import { CheckCircle, Clock, FileText, XCircle, ClipboardList, Download, BarChart3 } from 'lucide-vue-next'
+import { CheckCircle, Clock, FileEdit, XCircle, ClipboardList, Download, BarChart3 } from 'lucide-vue-next'
 
 const data = ref(null)
 const stats = ref(null)
@@ -13,7 +13,7 @@ const showAdd = ref(false)
 const dateFrom = ref('')
 const dateTo = ref('')
 
-const STATUS_COMPONENT = { '出勤': CheckCircle, '迟到': Clock, '请假': FileText, '缺勤': XCircle }
+const STATUS_COMPONENT = { '出勤': CheckCircle, '迟到': Clock, '请假': FileEdit, '缺勤': XCircle }
 const STATUS_COLOR = { '出勤': 'green', '迟到': 'orange', '请假': 'blue', '缺勤': 'red' }
 
 async function load() {

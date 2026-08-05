@@ -5,7 +5,7 @@ import { get } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
-import { Download, BarChart3, Dumbbell, Moon } from 'lucide-vue-next'
+import { Download, Plus, Dumbbell, Moon } from 'lucide-vue-next'
 
 const weight = ref(null)
 const exercise = ref(null)
@@ -72,7 +72,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose(); window.removeEventListener('
       <div v-else-if="!weight?.rows?.length" class="empty-state">开始记录体重数据后这里会显示趋势图</div>
       <div v-else ref="chartEl" class="chart-box"></div>
       <div class="toolbar">
-        <button class="btn btn-primary" @click="modalKind = 'weight'"><BarChart3 :size="14" :stroke-width="2" /> 添加记录</button>
+        <button class="btn btn-primary" @click="modalKind = 'weight'"><Plus :size="14" :stroke-width="2" /> 添加记录</button>
       </div>
     </div>
 

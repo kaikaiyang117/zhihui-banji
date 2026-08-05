@@ -180,12 +180,12 @@ export const NAV = [
       { title: '班级事务', items: [
         { page: 'seating', icon: 'LayoutGrid', label: '座位表' },
         { page: 'parent-comm', icon: 'Phone', label: '家校沟通' },
-        { page: 'meetings', icon: 'Target', label: '班会记录' },
+        { page: 'meetings', icon: 'Presentation', label: '班会记录' },
         { page: 'fund', icon: 'DollarSign', label: '班费管理' }
       ] },
       { title: '日志', items: [
         { page: 'diary', icon: 'FileText', label: '班主任日志' },
-        { page: 'activities', icon: 'Trophy', label: '班级活动' }
+        { page: 'activities', icon: 'CalendarDays', label: '班级活动' }
       ] }
     ]
   },
