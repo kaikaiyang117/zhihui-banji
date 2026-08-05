@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { get, download } from '../api'
+import { Download, Users, CheckCircle, Clock, DollarSign, ClipboardList, Phone, FileText, TrendingUp } from 'lucide-vue-next'
 
 const stats = ref(null)
 
@@ -17,24 +18,24 @@ function rankClass(i) {
   <div v-if="stats">
     <div class="page-title-bar">
       <div class="page-title">首页仪表盘</div>
-      <a class="btn btn-outline btn-export" :href="'/api/export/sheet/' + encodeURIComponent('学生信息总表')">📥 导出Excel</a>
+      <a class="btn btn-outline btn-export" :href="'/api/export/sheet/' + encodeURIComponent('学生信息总表')"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
     </div>
 
     <div class="overview-cards">
       <div class="overview-card">
-        <div class="oc-icon blue">👥</div>
+        <div class="oc-icon blue"><Users :size="20" :stroke-width="2" /></div>
         <div><div class="oc-label">班级人数</div><div class="oc-value">{{ stats.total_students }}</div></div>
       </div>
       <div class="overview-card">
-        <div class="oc-icon green">✅</div>
+        <div class="oc-icon green"><CheckCircle :size="20" :stroke-width="2" /></div>
         <div><div class="oc-label">出勤</div><div class="oc-value">{{ stats.today_attendance['出勤'] }}</div></div>
       </div>
       <div class="overview-card">
-        <div class="oc-icon orange">⏰</div>
+        <div class="oc-icon orange"><Clock :size="20" :stroke-width="2" /></div>
         <div><div class="oc-label">迟到</div><div class="oc-value">{{ stats.today_attendance['迟到'] }}</div></div>
       </div>
       <div class="overview-card">
-        <div class="oc-icon red">💰</div>
+        <div class="oc-icon red"><DollarSign :size="20" :stroke-width="2" /></div>
         <div><div class="oc-label">班费余额</div><div class="oc-value">¥{{ Number(stats.class_fund_balance || 0).toFixed(2) }}</div></div>
       </div>
     </div>
@@ -66,11 +67,11 @@ function rankClass(i) {
     <div class="card">
       <div class="card-title">快捷操作</div>
       <div class="toolbar" style="margin-bottom:0">
-        <router-link to="/attendance" class="btn btn-primary">📋 快速考勤</router-link>
-        <router-link to="/parent-comm" class="btn btn-outline">📞 家校沟通</router-link>
-        <router-link to="/diary" class="btn btn-outline">📝 写日志</router-link>
-        <router-link to="/scores" class="btn btn-outline">📈 查看成绩</router-link>
-        <router-link to="/students" class="btn btn-outline">👥 学生信息</router-link>
+        <router-link to="/attendance" class="btn btn-primary"><ClipboardList :size="14" :stroke-width="2" /> 快速考勤</router-link>
+        <router-link to="/parent-comm" class="btn btn-outline"><Phone :size="14" :stroke-width="2" /> 家校沟通</router-link>
+        <router-link to="/diary" class="btn btn-outline"><FileText :size="14" :stroke-width="2" /> 写日志</router-link>
+        <router-link to="/scores" class="btn btn-outline"><TrendingUp :size="14" :stroke-width="2" /> 查看成绩</router-link>
+        <router-link to="/students" class="btn btn-outline"><Users :size="14" :stroke-width="2" /> 学生信息</router-link>
       </div>
     </div>
   </div>

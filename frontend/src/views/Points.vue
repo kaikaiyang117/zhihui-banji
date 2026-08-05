@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
+import { Star, Download } from 'lucide-vue-next'
 import { get, del } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
@@ -62,8 +63,8 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
     <div class="page-title-bar">
       <div class="page-title">行为积分</div>
       <div class="toolbar" style="margin-bottom:0">
-        <button class="btn btn-primary" @click="showAdd = true">⭐ 添加积分</button>
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/日常行为积分">📥 导出Excel</a>
+        <button class="btn btn-primary" @click="showAdd = true"><Star :size="14" :stroke-width="2" /> 添加积分</button>
+        <a class="btn btn-outline btn-export" href="/api/export/sheet/日常行为积分"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
       </div>
     </div>
 

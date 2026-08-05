@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
+import { Download } from 'lucide-vue-next'
 import { post, put, get, download, upload } from '../api'
 
 const props = defineProps({
@@ -128,7 +129,7 @@ function downloadTemplate() {
       <template v-if="mode === 'import'">
         <div class="form-group">
           <label>第一步：下载模板（含列名与示例）</label>
-          <button class="btn btn-outline" @click="downloadTemplate">📥 下载导入模板</button>
+          <button class="btn btn-outline" @click="downloadTemplate"><Download :size="14" :stroke-width="2" /> 下载导入模板</button>
         </div>
         <div class="form-group">
           <label>第二步：选择按模板填好的 Excel 文件</label>

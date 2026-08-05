@@ -100,7 +100,7 @@ body {
   font-weight: 600;
 }
 
-.tab-icon { font-size: 16px; line-height: 1; }
+.tab-icon { flex-shrink: 0; color: currentColor; }
 
 /* ── Sidebar ── */
 .app-body { display: flex; flex: 1; overflow: hidden; }
@@ -179,7 +179,13 @@ body {
   font-weight: 500;
 }
 
-.nav-item .icon { font-size: 16px; width: 20px; text-align: center; line-height: 1; }
+.nav-item-icon {
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.7;
+}
+
+.nav-item.active .nav-item-icon { opacity: 1; }
 
 .sidebar-footer {
   padding: 14px 18px;

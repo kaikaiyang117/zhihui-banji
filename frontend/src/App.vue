@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { NAV } from './sheets'
+import { getIcon } from './icons'
 
 const route = useRoute()
 const activeTab = computed(() => route.path.startsWith('/p') ? 'personal' : 'teacher')
@@ -17,6 +18,12 @@ function isActive(item) {
 function tabTo(tab) {
   return tab.key === 'teacher' ? '/dashboard' : '/p/health'
 }
+
+function renderIcon(name) {
+  const comp = getIcon(name)
+  if (!comp) return null
+  return h(comp, { size: 18, 'stroke-width': 2 })
+}
 </script>
 
 <template>
@@ -24,7 +31,7 @@ function tabTo(tab) {
     <header class="top-tabs">
       <router-link v-for="tab in NAV" :key="tab.key"
         :to="tabTo(tab)" class="top-tab" :class="{ active: tab.key === activeTab }">
-        <span class="tab-icon">{{ tab.icon }}</span>
+        <component :is="renderIcon(tab.icon)" class="tab-icon" />
         <span>{{ tab.title }}</span>
       </router-link>
     </header>
@@ -39,7 +46,7 @@ function tabTo(tab) {
             <div class="nav-group-title">{{ group.title }}</div>
             <router-link v-for="item in group.items" :key="item.page"
               :to="itemTo(item)" class="nav-item" :class="{ active: isActive(item) }">
-              <span class="icon">{{ item.icon }}</span>
+              <component :is="renderIcon(item.icon)" class="nav-item-icon" :size="16" :stroke-width="2" />
               <span>{{ item.label }}</span>
             </router-link>
           </div>

@@ -33,7 +33,7 @@ function fmt(v) {
         <input type="text" placeholder="搜索..." v-model="keyword">
       </div>
     </div>
-    <div v-if="!filtered.length" class="empty-state">暂无数据 🎒</div>
+    <div v-if="!filtered.length" class="empty-state">暂无数据</div>
     <div v-else class="table-wrap" :style="{ maxHeight: maxHeight + 'px' }">
       <table class="data-table">
         <thead>

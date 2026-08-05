@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { FileText, ExternalLink, BookOpen } from 'lucide-vue-next'
 import { get } from '../api'
 import AddModal from '../components/AddModal.vue'
 
@@ -57,18 +58,18 @@ onMounted(load)
     <div class="card">
       <div class="card-title">快速创建笔记</div>
       <div class="toolbar">
-        <button class="btn btn-primary" @click="showCreate = true">📝 新建笔记</button>
-        <button class="btn btn-outline" @click="window.open('obsidian://open?vault=知识库')">🔗 打开 Obsidian</button>
+        <button class="btn btn-primary" @click="showCreate = true"><FileText :size="14" :stroke-width="2" /> 新建笔记</button>
+        <button class="btn btn-outline" @click="window.open('obsidian://open?vault=知识库')"><ExternalLink :size="14" :stroke-width="2" /> 打开 Obsidian</button>
       </div>
       <div class="toolbar">
         <button v-for="t in ['备课笔记','班会记录','班主任日志','学生档案','考研知识点','读书笔记']" :key="t"
-          class="btn btn-outline" @click="() => { showCreate = true }">📖 {{ t }}</button>
+          class="btn btn-outline" @click="() => { showCreate = true }"><BookOpen :size="14" :stroke-width="2" /> {{ t }}</button>
       </div>
     </div>
 
     <div v-if="loading" class="loading">加载中...</div>
     <div v-else-if="!notes.length" class="card">
-      <div class="empty-state">知识库还是空的，点击上方按钮创建第一篇笔记吧 📝</div>
+      <div class="empty-state">知识库还是空的，点击上方按钮创建第一篇笔记吧</div>
     </div>
 
     <div v-for="g in grouped" :key="g.name" class="card">

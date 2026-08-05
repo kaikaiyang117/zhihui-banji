@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue'
 import { get, del, put } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
+import { Plus, Upload, Clipboard, Download } from 'lucide-vue-next'
 
 const students = ref([])
 const loading = ref(true)
@@ -65,10 +66,10 @@ onMounted(load)
     <div class="page-title-bar">
       <div class="page-title">学生信息</div>
       <div class="toolbar" style="margin-bottom:0">
-        <button class="btn btn-primary" @click="startAdd">➕ 添加学生</button>
-        <button class="btn btn-primary" @click="showImport = true">⬆️ 导入Excel</button>
-        <a class="btn btn-outline" href="/api/students/template">📋 模板下载</a>
-        <a class="btn btn-outline btn-export" href="/api/students/export">📥 导出Excel</a>
+        <button class="btn btn-primary" @click="startAdd"><Plus :size="14" :stroke-width="2" /> 添加学生</button>
+        <button class="btn btn-primary" @click="showImport = true"><Upload :size="14" :stroke-width="2" /> 导入Excel</button>
+        <a class="btn btn-outline" href="/api/students/template"><Clipboard :size="14" :stroke-width="2" /> 模板下载</a>
+        <a class="btn btn-outline btn-export" href="/api/students/export"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
       </div>
     </div>
 

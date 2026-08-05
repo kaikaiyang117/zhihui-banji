@@ -1,1 +1,0 @@
-import{_ as t}from"./SheetPage-QCoVXx_M.js";import{j as e,f as r}from"./index-CmIlQMgp.js";import"./api-CcbgIInX.js";import"./DataTable-LMT-g9dU.js";import"./AddModal-CKbX5yoQ.js";const i={__name:"ParentComm",setup(a){return(o,m)=>(r(),e(t,{title:"家校沟通","sheet-name":"家校沟通记录","add-button":"📞 添加记录",searchable:!0}))}};export{i as default};

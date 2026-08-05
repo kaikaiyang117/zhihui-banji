@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
+import { Download, BarChart3, BookOpen } from 'lucide-vue-next'
 import { get } from '../api'
 
 const stats = ref(null)
@@ -56,9 +57,9 @@ onBeforeUnmount(() => {
     <div class="page-title-bar">
       <div class="page-title">成绩跟踪</div>
       <div class="toolbar" style="margin-bottom:0">
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/成绩跟踪">📥 导出明细</a>
-        <button class="btn btn-outline" @click="exportReport('月考1')">📊 月考1汇总</button>
-        <button class="btn btn-outline" @click="exportReport('期中')">📊 期中汇总</button>
+        <a class="btn btn-outline btn-export" href="/api/export/sheet/成绩跟踪"><Download :size="14" :stroke-width="2" /> 导出明细</a>
+        <button class="btn btn-outline" @click="exportReport('月考1')"><BarChart3 :size="14" :stroke-width="2" /> 月考1汇总</button>
+        <button class="btn btn-outline" @click="exportReport('期中')"><BarChart3 :size="14" :stroke-width="2" /> 期中汇总</button>
       </div>
     </div>
 
@@ -66,7 +67,7 @@ onBeforeUnmount(() => {
       <div class="card-title">班级成绩概览</div>
       <div class="overview-cards">
         <div v-for="subj in stats.subjects" :key="subj" class="overview-card" style="flex:1">
-          <div class="oc-icon blue">📖</div>
+          <div class="oc-icon blue"><BookOpen :size="20" :stroke-width="2" /></div>
           <div>
             <div class="oc-label">{{ subj }}</div>
             <div style="font-size:12px;color:#666">月考:{{ stats.avg_scores.yuekao1[subj] ?? '-' }} / 期中:{{ stats.avg_scores.qizhong[subj] ?? '-' }}</div>

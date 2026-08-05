@@ -5,6 +5,7 @@ import { get } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
+import { Download, BarChart3, Dumbbell, Moon } from 'lucide-vue-next'
 
 const weight = ref(null)
 const exercise = ref(null)
@@ -62,7 +63,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose(); window.removeEventListener('
   <div>
     <div class="page-title-bar">
       <div class="page-title">健康追踪</div>
-      <a class="btn btn-outline btn-export" href="/api/export/sheet/运动记录">📥 导出Excel</a>
+      <a class="btn btn-outline btn-export" href="/api/export/sheet/运动记录"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
     </div>
 
     <div class="card">
@@ -71,15 +72,15 @@ onBeforeUnmount(() => { if (chart) chart.dispose(); window.removeEventListener('
       <div v-else-if="!weight?.rows?.length" class="empty-state">开始记录体重数据后这里会显示趋势图</div>
       <div v-else ref="chartEl" class="chart-box"></div>
       <div class="toolbar">
-        <button class="btn btn-primary" @click="modalKind = 'weight'">📊 添加记录</button>
+        <button class="btn btn-primary" @click="modalKind = 'weight'"><BarChart3 :size="14" :stroke-width="2" /> 添加记录</button>
       </div>
     </div>
 
     <div class="card">
       <div class="card-title">运动记录</div>
       <div class="toolbar">
-        <button class="btn btn-primary" @click="modalKind = 'exercise'">🏃 添加运动</button>
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/运动记录">📥 导出</a>
+        <button class="btn btn-primary" @click="modalKind = 'exercise'"><Dumbbell :size="14" :stroke-width="2" /> 添加运动</button>
+        <a class="btn btn-outline btn-export" href="/api/export/sheet/运动记录"><Download :size="14" :stroke-width="2" /> 导出</a>
       </div>
       <DataTable :headers="exercise?.headers || []" :rows="exercise?.rows || []" :max-height="300" />
     </div>
@@ -87,8 +88,8 @@ onBeforeUnmount(() => { if (chart) chart.dispose(); window.removeEventListener('
     <div class="card">
       <div class="card-title">睡眠记录</div>
       <div class="toolbar">
-        <button class="btn btn-primary" @click="modalKind = 'sleep'">😴 添加睡眠</button>
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/睡眠记录">📥 导出</a>
+        <button class="btn btn-primary" @click="modalKind = 'sleep'"><Moon :size="14" :stroke-width="2" /> 添加睡眠</button>
+        <a class="btn btn-outline btn-export" href="/api/export/sheet/睡眠记录"><Download :size="14" :stroke-width="2" /> 导出</a>
       </div>
       <DataTable :headers="sleep?.headers || []" :rows="sleep?.rows || []" :max-height="250" />
     </div>

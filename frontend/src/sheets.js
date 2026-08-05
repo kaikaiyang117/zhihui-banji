@@ -164,37 +164,37 @@ export const SHEET_FIELDS = {
 // 顶部 Tab / 侧边导航路由配置
 export const NAV = [
   {
-    key: 'teacher', icon: '🏫', title: '教师工作台', school: '汶川县七一映秀中学',
+    key: 'teacher', icon: 'School', title: '教师工作台', school: '汶川县七一映秀中学',
     groups: [
-      { title: '概览', items: [{ page: 'dashboard', icon: '📊', label: '首页仪表盘' }] },
+      { title: '概览', items: [{ page: 'dashboard', icon: 'LayoutDashboard', label: '首页仪表盘' }] },
       { title: '学生管理', items: [
-        { page: 'students', icon: '👥', label: '学生信息' },
-        { page: 'special', icon: '🏷️', label: '特殊学生' },
-        { page: 'comments', icon: '✏️', label: '评语管理' }
+        { page: 'students', icon: 'Users', label: '学生信息' },
+        { page: 'special', icon: 'Tag', label: '特殊学生' },
+        { page: 'comments', icon: 'Pencil', label: '评语管理' }
       ] },
       { title: '教学管理', items: [
-        { page: 'attendance', icon: '📋', label: '考勤管理' },
-        { page: 'scores', icon: '📈', label: '成绩跟踪' },
-        { page: 'points', icon: '⭐', label: '行为积分' }
+        { page: 'attendance', icon: 'ClipboardList', label: '考勤管理' },
+        { page: 'scores', icon: 'TrendingUp', label: '成绩跟踪' },
+        { page: 'points', icon: 'Star', label: '行为积分' }
       ] },
       { title: '班级事务', items: [
-        { page: 'seating', icon: '🪑', label: '座位表' },
-        { page: 'parent-comm', icon: '📞', label: '家校沟通' },
-        { page: 'meetings', icon: '🎯', label: '班会记录' },
-        { page: 'fund', icon: '💰', label: '班费管理' }
+        { page: 'seating', icon: 'LayoutGrid', label: '座位表' },
+        { page: 'parent-comm', icon: 'Phone', label: '家校沟通' },
+        { page: 'meetings', icon: 'Target', label: '班会记录' },
+        { page: 'fund', icon: 'DollarSign', label: '班费管理' }
       ] },
       { title: '日志', items: [
-        { page: 'diary', icon: '📝', label: '班主任日志' },
-        { page: 'activities', icon: '🎉', label: '班级活动' }
+        { page: 'diary', icon: 'FileText', label: '班主任日志' },
+        { page: 'activities', icon: 'Trophy', label: '班级活动' }
       ] }
     ]
   },
   {
-    key: 'personal', icon: '👤', title: '个人工作台', school: '健康 · 成长 · 考研',
+    key: 'personal', icon: 'User', title: '个人工作台', school: '健康 · 成长 · 考研',
     groups: [
-      { title: '健康管理', items: [{ page: 'health', icon: '💪', label: '健康追踪' }] },
-      { title: '考研备考', items: [{ page: 'kaoyan', icon: '📚', label: '考研计划' }] },
-      { title: '知识管理', items: [{ page: 'knowledge', icon: '🧠', label: '知识库' }] }
+      { title: '健康管理', items: [{ page: 'health', icon: 'Activity', label: '健康追踪' }] },
+      { title: '考研备考', items: [{ page: 'kaoyan', icon: 'BookOpen', label: '考研计划' }] },
+      { title: '知识管理', items: [{ page: 'knowledge', icon: 'Brain', label: '知识库' }] }
     ]
   }
 ]
