@@ -325,6 +325,25 @@ class AgentFoundationTest(unittest.TestCase):
 
         self.assertEqual(asyncio.run(run()), '班级共有 2 名学生。')
 
+    def test_planned_stream_emits_plan_progress_events(self):
+        class FakeStreamModel:
+            async def iter_complete(self, _messages, _tools):
+                yield ModelStreamEvent(response=ModelResponse('已完成查询。', []))
+
+        async def run():
+            return [
+                event async for event in AgentRunner(model_client=FakeStreamModel()).chat_stream(
+                    'planned-stream-session', '查看学生 A001 的详细信息',
+                    channel='web', actor_id='web-user'
+                )
+            ]
+
+        events = asyncio.run(run())
+        self.assertEqual(events[0]['type'], 'plan')
+        self.assertEqual(events[1]['status'], 'running')
+        self.assertEqual(events[2]['status'], 'completed')
+        self.assertEqual(events[-1], {'type': 'delta', 'content': '已完成查询。'})
+
     def test_session_store_keeps_tool_messages_with_their_call(self):
         store = SessionStore(max_messages=8)
         db.save_agent_session('trim-session', [

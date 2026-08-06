@@ -27,6 +27,7 @@ const agentInput = ref('')
 const agentMessages = ref([])
 const agentSending = ref(false)
 const agentError = ref('')
+const agentPlanIndex = ref(-1)
 const agentBody = ref(null)
 const agentInputEl = ref(null)
 const agentSuggestions = [
@@ -113,6 +114,34 @@ function appendAgentMessage(role, content) {
   scrollAgentToBottom()
 }
 
+function planStatusText(status) {
+  return ({ pending: '等待执行', running: '执行中', completed: '已完成', skipped: '已跳过', error: '失败' })[status] || status
+}
+
+function handleAgentPlanEvent(event) {
+  if (event.type === 'plan') {
+    const plan = {
+      role: 'plan',
+      goal: event.goal || '整理查询步骤',
+      steps: (event.steps || []).map(step => ({ ...step })),
+    }
+    if (agentPlanIndex.value < 0 || event.status === 'replanned') {
+      agentMessages.value.push(plan)
+      agentPlanIndex.value = agentMessages.value.length - 1
+    } else {
+      agentMessages.value[agentPlanIndex.value] = plan
+    }
+  } else if (event.type === 'plan_step' && agentPlanIndex.value >= 0) {
+    const plan = agentMessages.value[agentPlanIndex.value]
+    const step = plan?.steps?.find(item => item.id === event.id)
+    if (step) {
+      step.status = event.status
+      if (event.message) step.message = event.message
+    }
+  }
+  scrollAgentToBottom()
+}
+
 function scrollAgentToBottom() {
   nextTick(() => {
     if (agentBody.value) agentBody.value.scrollTop = agentBody.value.scrollHeight
@@ -130,6 +159,7 @@ async function sendAgentMessage() {
   appendAgentMessage('user', message)
   agentInput.value = ''
   agentError.value = ''
+  agentPlanIndex.value = -1
   agentSending.value = true
   let assistantIndex = -1
   try {
@@ -140,6 +170,10 @@ async function sendAgentMessage() {
       actor_id: 'web-user',
     }, async (event) => {
       if (event.type === 'error') throw new Error(event.message || 'Agent 流式响应失败，请稍后重试。')
+      if (event.type === 'plan' || event.type === 'plan_step') {
+        handleAgentPlanEvent(event)
+        return
+      }
       if (event.type !== 'delta' || !event.content) return
       if (assistantIndex < 0) {
         agentMessages.value.push({ role: 'assistant', content: '' })
@@ -172,6 +206,7 @@ async function resetAgentSession() {
   try {
     await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}`)
     agentMessages.value = []
+    agentPlanIndex.value = -1
     agentError.value = ''
     scrollAgentToBottom()
   } catch (error) {
@@ -270,7 +305,17 @@ onMounted(loadAccessInfo)
             </div>
           </div>
           <div v-for="(message, index) in agentMessages" :key="`${message.role}-${index}`" class="agent-message" :class="message.role">
-            <div v-if="message.role === 'assistant'" class="agent-message-bubble agent-markdown" v-html="renderAgentMarkdown(message.content)"></div>
+            <details v-if="message.role === 'plan'" class="agent-plan-card" open>
+              <summary><span class="agent-plan-mark">✦</span><span class="agent-plan-title">执行规划</span><span class="agent-plan-goal">{{ message.goal }}</span></summary>
+              <div class="agent-plan-steps">
+                <div v-for="step in message.steps" :key="step.id" class="agent-plan-step" :class="step.status">
+                  <span class="agent-plan-step-dot"></span>
+                  <span class="agent-plan-step-label">{{ step.label }}</span>
+                  <span class="agent-plan-step-status">{{ planStatusText(step.status) }}</span>
+                </div>
+              </div>
+            </details>
+            <div v-else-if="message.role === 'assistant'" class="agent-message-bubble agent-markdown" v-html="renderAgentMarkdown(message.content)"></div>
             <div v-else class="agent-message-bubble">{{ message.content }}</div>
           </div>
           <div v-if="agentSending" class="agent-message assistant">
@@ -452,17 +497,20 @@ onMounted(loadAccessInfo)
 .agent-suggestion:active { transform: scale(.98); }
 .agent-message { display: flex; align-items: flex-end; gap: 7px; margin: 9px 0; }
 .agent-message.user { justify-content: flex-end; }
+.agent-message.plan { display: block; margin: 7px 0 10px; }
 .agent-message-bubble { max-width: min(86%, 320px); padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.62; }
 .agent-message.user .agent-message-bubble { max-width: min(78%, 290px); padding: 10px 12px; border-radius: 15px 15px 5px 15px; background: var(--primary-bg); color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); }
-.agent-markdown p { margin: 0 0 8px; }
+.agent-markdown { line-height: 1.52; }
+.agent-markdown p { margin: .28em 0; }
 .agent-markdown p:last-child { margin-bottom: 0; }
-.agent-markdown h1, .agent-markdown h2, .agent-markdown h3 { margin: 12px 0 7px; color: var(--text); line-height: 1.35; }
+.agent-markdown h1, .agent-markdown h2, .agent-markdown h3 { margin: 9px 0 4px; color: var(--text); line-height: 1.3; }
 .agent-markdown h1:first-child, .agent-markdown h2:first-child, .agent-markdown h3:first-child { margin-top: 0; }
 .agent-markdown h1 { font-size: 17px; }
 .agent-markdown h2 { font-size: 15px; }
 .agent-markdown h3 { font-size: 14px; }
-.agent-markdown ul, .agent-markdown ol { margin: 6px 0 9px; padding-left: 20px; }
-.agent-markdown li { margin: 3px 0; }
+.agent-markdown ul, .agent-markdown ol { margin: .25em 0 .45em; padding-left: 19px; }
+.agent-markdown li { margin: 0; }
+.agent-markdown li > p { margin: .12em 0; }
 .agent-markdown strong { color: var(--text); font-weight: 700; }
 .agent-markdown code { padding: 2px 5px; border-radius: 5px; background: rgba(91,106,191,.1); color: var(--primary); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agent-markdown pre { margin: 9px 0; padding: 11px 12px; overflow-x: auto; border: 1px solid rgba(91,106,191,.12); border-radius: 10px; background: #f5f6fb; }
@@ -473,6 +521,22 @@ onMounted(loadAccessInfo)
 .agent-markdown table { display: block; max-width: 100%; margin: 9px 0; overflow-x: auto; border-collapse: collapse; font-size: 12px; }
 .agent-markdown th, .agent-markdown td { padding: 6px 8px; border: 1px solid var(--border); text-align: left; white-space: nowrap; }
 .agent-markdown th { background: var(--primary-bg); color: var(--text); font-weight: 650; }
+.agent-plan-card { max-width: min(92%, 350px); padding: 9px 11px; border: 1px solid rgba(91,106,191,.14); border-radius: 12px; background: rgba(248,249,253,.9); color: var(--text-secondary); box-shadow: 0 2px 8px rgba(40,48,85,.04); }
+.agent-plan-card summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 11px; }
+.agent-plan-card summary::-webkit-details-marker { display: none; }
+.agent-plan-mark { color: var(--primary); font-size: 13px; }
+.agent-plan-title { color: var(--text); font-weight: 700; }
+.agent-plan-goal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-plan-steps { display: grid; gap: 5px; margin-top: 8px; padding-left: 2px; }
+.agent-plan-step { display: grid; grid-template-columns: 7px minmax(0,1fr) auto; align-items: center; gap: 7px; font-size: 11px; }
+.agent-plan-step-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); }
+.agent-plan-step.running .agent-plan-step-dot { background: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.12); }
+.agent-plan-step.completed .agent-plan-step-dot { background: var(--success); }
+.agent-plan-step.error .agent-plan-step-dot { background: var(--danger, #c83b32); }
+.agent-plan-step-label { color: var(--text); }
+.agent-plan-step-status { color: var(--text-tertiary); font-size: 10px; }
+.agent-plan-step.completed .agent-plan-step-status { color: var(--success); }
+.agent-plan-step.error .agent-plan-step-status { color: var(--danger, #c83b32); }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
 .agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-bounce 1s infinite ease-in-out; }
 .agent-thinking span:nth-child(2) { animation-delay: .12s; }

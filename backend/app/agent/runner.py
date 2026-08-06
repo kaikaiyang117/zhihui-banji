@@ -116,11 +116,14 @@ class AgentRunner:
         if direct_tool:
             _apply_direct_tool(messages, text, channel, actor_id)
         else:
-            planned_answer = await self._run_planned_stream(
+            planned_result = await self._run_planned_stream(
                 messages, text, registry, channel, actor_id
             )
-            if planned_answer is not None:
+            if planned_result is not None:
+                planned_answer, plan_events = planned_result
                 self.session_store.save(session_id, messages)
+                for event in plan_events:
+                    yield event
                 yield {'type': 'delta', 'content': planned_answer}
                 return
         failure_counts: dict[str, int] = {}
@@ -255,7 +258,7 @@ class AgentRunner:
         registry,
         channel: str,
         actor_id: str,
-    ) -> str | None:
+    ) -> tuple[str, list[dict[str, Any]]] | None:
         plan = build_rule_plan(text, registry)
         if plan is None and _should_attempt_model_plan(text):
             try:
@@ -266,19 +269,21 @@ class AgentRunner:
                 return None
         if plan is None:
             return None
-        executed, _results = self._execute_plan(plan, channel, actor_id)
+        plan_events = [_plan_started_event(plan)]
+        executed, _results = self._execute_plan(plan, channel, actor_id, plan_events)
         if _has_retry_exhausted(executed):
-            return _tool_failure_message()
+            return _tool_failure_message(), plan_events
         if _should_replan(executed):
             try:
                 plan = await AgentPlanner(self.model_client).create_stream(
                     text, registry, _recent_context(messages) + '\n' + _plan_failure_context(executed)
                 )
-                executed, _results = self._execute_plan(plan, channel, actor_id)
+                plan_events.append(_plan_started_event(plan, status='replanned'))
+                executed, _results = self._execute_plan(plan, channel, actor_id, plan_events)
             except PlanningError:
                 pass
             if _has_retry_exhausted(executed):
-                return _tool_failure_message()
+                return _tool_failure_message(), plan_events
         response = None
         content_parts: list[str] = []
         async for event in self.model_client.iter_complete(
@@ -292,20 +297,28 @@ class AgentRunner:
             raise RuntimeError('模型流式响应缺少最终结果')
         if response.tool_calls:
             return None
-        return response.content.strip() or ''.join(content_parts).strip() or _fallback_plan_answer(executed)
+        return (
+            response.content.strip() or ''.join(content_parts).strip() or _fallback_plan_answer(executed),
+            plan_events,
+        )
 
     def _execute_plan(
         self,
         plan: AgentPlan,
         channel: str,
         actor_id: str,
+        events: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         failure_counts: dict[str, int] = {}
         results: dict[str, Any] = {}
         executed: list[dict[str, Any]] = []
         for step in plan.steps:
             if not _condition_matches(step, results):
+                if events is not None:
+                    events.append(_plan_step_event(step, 'skipped', '条件未满足'))
                 continue
+            if events is not None:
+                events.append(_plan_step_event(step, 'running'))
             try:
                 arguments = _resolve_references(step.arguments, results)
                 raw_arguments = json.dumps(arguments, ensure_ascii=False)
@@ -322,6 +335,13 @@ class AgentRunner:
                 'arguments': arguments,
                 'result': result,
             })
+            if events is not None:
+                error = result.get('error') or {}
+                events.append(_plan_step_event(
+                    step,
+                    'error' if error else 'completed',
+                    error.get('message', '') if error else '',
+                ))
         return executed, results
 
 
@@ -429,6 +449,44 @@ def _plan_tool_messages(executed: list[dict[str, Any]]) -> list[dict[str, Any]]:
         'content': json.dumps(item['result'], ensure_ascii=False),
     } for item in executed)
     return messages
+
+
+def _plan_started_event(plan: AgentPlan, status: str = 'started') -> dict[str, Any]:
+    return {
+        'type': 'plan',
+        'status': status,
+        'goal': plan.goal,
+        'steps': [
+            {'id': step.id, 'label': _plan_step_label(step), 'status': 'pending'}
+            for step in plan.steps
+        ],
+    }
+
+
+def _plan_step_event(step: PlanStep, status: str, message: str = '') -> dict[str, Any]:
+    event = {
+        'type': 'plan_step',
+        'id': step.id,
+        'label': _plan_step_label(step),
+        'status': status,
+    }
+    if message:
+        event['message'] = message
+    return event
+
+
+def _plan_step_label(step: PlanStep) -> str:
+    labels = {
+        'students_search': '搜索学生',
+        'student_get_profile': '查询学生档案',
+        'student_get_timeline': '整理学生时间线',
+        'attendance_summary': '查询考勤记录',
+        'scores_summary': '查询成绩记录',
+        'tasks_list': '查询待办任务',
+        'communications_list': '查询家校沟通',
+        'class_student_count': '统计班级人数',
+    }
+    return labels.get(step.tool, step.tool)
 
 
 def _has_retry_exhausted(executed: list[dict[str, Any]]) -> bool:
