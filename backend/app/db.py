@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 _conn: sqlite3.Connection | None = None
 _lock = threading.Lock()
@@ -83,7 +83,29 @@ def _migration_2(conn: sqlite3.Connection):
     ''')
 
 
-MIGRATIONS = {2: _migration_2}
+def _migration_3(conn: sqlite3.Connection):
+    """为 Agent 保存配置和工具调用审计。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS agent_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT NOT NULL DEFAULT 'local',
+            actor_id TEXT NOT NULL DEFAULT '',
+            tool_name TEXT NOT NULL,
+            arguments TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL,
+            result_summary TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+    ''')
+
+
+MIGRATIONS = {2: _migration_2, 3: _migration_3}
 
 
 def init_schema(conn: sqlite3.Connection, existing_database: bool = True):

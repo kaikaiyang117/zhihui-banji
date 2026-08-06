@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .config import APP_VERSION, STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system
+from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system, agent
 
 app = FastAPI(title='美美大王工作台', version=APP_VERSION)
 
@@ -26,7 +26,8 @@ async def local_access_guard(request: Request, call_next):
     return await call_next(request)
 
 for r in (sheets.router, students.router, seating.router,
-          stats.router, knowledge.router, export.router, p0.router, p1.router, system.router):
+          stats.router, knowledge.router, export.router, p0.router, p1.router, system.router,
+          agent.router):
     app.include_router(r)
 
 
