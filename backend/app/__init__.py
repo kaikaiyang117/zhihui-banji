@@ -10,10 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from . import db
-from .config import STATIC_DIR
+from .config import APP_VERSION, STATIC_DIR
 from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system
 
-app = FastAPI(title='美美大王工作台', version='2.2')
+app = FastAPI(title='美美大王工作台', version=APP_VERSION)
 
 
 @app.middleware('http')
@@ -34,6 +34,9 @@ for r in (sheets.router, students.router, seating.router,
 def startup():
     db.get_conn()
     p0.migrate_legacy_core_rows()
+    os.makedirs(db.DATA_DIR, exist_ok=True)
+    with open(os.path.join(db.DATA_DIR, '.workbench-ready'), 'w', encoding='utf-8') as marker:
+        marker.write(str(os.getpid()))
 
 
 @app.on_event('shutdown')
@@ -54,3 +57,11 @@ def index():
     if _os.path.isfile(idx):
         return FileResponse(idx)
     return {'msg': '后端已就绪，请先构建前端 (frontend → npm run build)'}
+
+
+@app.get('/favicon.svg', include_in_schema=False)
+def favicon():
+    icon = _os.path.join(_STATIC, 'favicon.svg')
+    if _os.path.isfile(icon):
+        return FileResponse(icon, media_type='image/svg+xml')
+    return JSONResponse({'detail': 'favicon not found'}, status_code=404)

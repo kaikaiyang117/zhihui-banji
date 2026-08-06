@@ -208,11 +208,26 @@ npm run build
 
 ### 环境要求
 - Windows
-- Python 3.12+（`pip install -r backend/requirements.txt`）
-- Node.js（仅首次构建前端时需要，运行时不需要）
+- Python 3.11+
+- Node.js 20+（仅首次构建前端时需要，运行时不需要）
 - Obsidian（知识库功能可选）
 
 ### 首次安装
+
+macOS/Linux：
+
+```bash
+./scripts/setup-dev.sh
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\setup-dev.ps1
+```
+
+这两个脚本会检查 Python/Node.js 版本，创建项目 `.venv`，安装后端依赖和前端依赖。也可以按下面步骤手动安装：
+
 ```bash
 # 1. 后端依赖
 cd backend
@@ -237,15 +252,24 @@ python run.py
 双击 启动工作台.bat
 ```
 
-### 局域网访问
+安装包启动后默认允许同一局域网中的手机和平板访问。进入工作台后点击右上角“手机访问”，使用手机或平板扫描二维码即可打开。
 
-电脑作为本地数据主机时，可使用以下命令让同一局域网的手机和平板访问：
+### 局域网访问（开发模式）
+
+电脑作为本地数据主机时，也可以使用以下命令启动局域网模式：
 
 ```bash
 python backend/run.py --lan
 ```
 
-默认模式只监听本机；局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 `packaging/README.md`。
+程序会自动生成二维码入口并在端口冲突时切换端口。局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 `packaging/README.md`。
+
+发布前还会运行浏览器 UI 冒烟测试，检查工作台页面、二维码入口和更新入口能够加载：
+
+```bash
+npx playwright install chromium
+bash scripts/smoke-ui.sh
+```
 
 ### 数据备份
 - 备份 `data/workbench.db`（一个文件 = 全部数据）

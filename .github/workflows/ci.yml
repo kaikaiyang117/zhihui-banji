@@ -46,3 +46,9 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Install Chromium for UI smoke test
+        run: npx --yes playwright install --with-deps chromium
+
+      - name: Run browser UI smoke test
+        run: bash scripts/smoke-ui.sh

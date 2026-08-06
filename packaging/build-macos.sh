@@ -25,6 +25,8 @@ if [ ! -d "dist/MeimeiWorkbench.app" ]; then
   exit 1
 fi
 
+./packaging/sign-macos.sh "dist/MeimeiWorkbench.app"
+
 mkdir -p artifacts
 hdiutil create \
   -volname "美美大王工作台" \
@@ -32,5 +34,18 @@ hdiutil create \
   -ov \
   -format UDZO \
   "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+
+if [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
+  : "${APPLE_ID:?发布版本必须配置 APPLE_ID}"
+  : "${APPLE_TEAM_ID:?发布版本必须配置 APPLE_TEAM_ID}"
+  : "${APPLE_APP_PASSWORD:?发布版本必须配置 APPLE_APP_PASSWORD}"
+  xcrun notarytool submit "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg" \
+    --apple-id "$APPLE_ID" \
+    --team-id "$APPLE_TEAM_ID" \
+    --password "$APPLE_APP_PASSWORD" \
+    --wait
+  xcrun stapler staple "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+  xcrun stapler validate "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+fi
 
 echo "macOS 安装包已生成：$PROJECT_ROOT/artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
