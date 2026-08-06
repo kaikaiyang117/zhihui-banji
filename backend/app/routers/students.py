@@ -8,7 +8,12 @@ from pydantic import BaseModel
 
 from .. import db
 from ..config import STUDENT_COLUMNS
-from ..import_service import build_template, import_students
+from ..import_service import (
+    build_template,
+    commit_student_import,
+    import_students,
+    preview_students,
+)
 from ..export_service import export_students
 
 router = APIRouter(prefix='/api/students')
@@ -33,6 +38,16 @@ class StudentBody(BaseModel):
     监护人2姓名: str = ''
     监护人2电话: str = ''
     监护人2关系: str = ''
+
+
+class StudentImportRow(BaseModel):
+    row: int = 0
+    fields: dict[str, str] = {}
+
+
+class StudentImportCommitBody(BaseModel):
+    filename: str = ''
+    rows: list[StudentImportRow] = []
 
 
 def _xlsx_response(buf, fname: str):
@@ -109,6 +124,18 @@ async def upload_import(file: UploadFile = File(...)):
     data = await file.read()
     result = import_students(data, file.filename or '')
     return result
+
+
+@router.post('/import/preview')
+async def preview_import(file: UploadFile = File(...)):
+    data = await file.read()
+    return preview_students(data, file.filename or '')
+
+
+@router.post('/import/commit')
+def commit_import(body: StudentImportCommitBody):
+    rows = [{'row': item.row, 'fields': item.fields} for item in body.rows]
+    return commit_student_import(rows, body.filename)
 
 
 @router.get('/export')

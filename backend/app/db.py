@@ -2,10 +2,15 @@
 """SQLite 数据层（WAL 模式，启动时建表）"""
 import json
 import os
+import re
 import sqlite3
 import threading
+from datetime import datetime
 
 from .config import DATA_DIR, DB_PATH
+
+BASE_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 _conn: sqlite3.Connection | None = None
 _lock = threading.Lock()
@@ -16,13 +21,14 @@ def get_conn() -> sqlite3.Connection:
     if _conn is None:
         with _lock:
             if _conn is None:
+                existing_database = os.path.isfile(DB_PATH)
                 os.makedirs(DATA_DIR, exist_ok=True)
                 _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
                 _conn.row_factory = sqlite3.Row
                 _conn.execute('PRAGMA journal_mode=WAL')
                 _conn.execute('PRAGMA busy_timeout=5000')
                 _conn.execute('PRAGMA foreign_keys=ON')
-                init_schema(_conn)
+                init_schema(_conn, existing_database=existing_database)
     return _conn
 
 
@@ -33,7 +39,80 @@ def close():
         _conn = None
 
 
-def init_schema(conn: sqlite3.Connection):
+def backup_dir() -> str:
+    """返回当前数据目录下的备份目录。测试会临时替换 DATA_DIR，因此不能缓存路径。"""
+    return os.path.join(DATA_DIR, 'backups')
+
+
+def _backup_connection(conn: sqlite3.Connection, label: str) -> str:
+    os.makedirs(backup_dir(), exist_ok=True)
+    safe_label = re.sub(r'[^A-Za-z0-9_-]+', '-', label).strip('-') or 'backup'
+    filename = f'workbench-{safe_label}-{datetime.now().strftime("%Y%m%d-%H%M%S-%f")}.db'
+    path = os.path.join(backup_dir(), filename)
+    target = sqlite3.connect(path)
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+    return filename
+
+
+def create_backup(label: str = 'manual') -> str:
+    """以 SQLite backup API 创建一致性备份，返回备份文件名。"""
+    return _backup_connection(get_conn(), label)
+
+
+def schema_version(conn: sqlite3.Connection | None = None) -> int:
+    conn = conn or get_conn()
+    row = conn.execute('SELECT MAX(version) AS version FROM schema_migrations').fetchone()
+    return int(row['version'] or 0)
+
+
+def _migration_2(conn: sqlite3.Connection):
+    """记录导入批次，便于后续追踪数据变更来源。"""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS student_import_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL DEFAULT '',
+            imported INTEGER NOT NULL DEFAULT 0,
+            updated INTEGER NOT NULL DEFAULT 0,
+            skipped INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    ''')
+
+
+MIGRATIONS = {2: _migration_2}
+
+
+def init_schema(conn: sqlite3.Connection, existing_database: bool = True):
+    migration_table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+    ).fetchone() is not None
+    if not migration_table_exists and existing_database and MIGRATIONS:
+        _backup_connection(conn, f'pre-migrate-v{min(MIGRATIONS)}')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    ''')
+    marker = conn.execute('SELECT MAX(version) AS version FROM schema_migrations').fetchone()
+    if marker['version'] is None:
+        conn.execute(
+            'INSERT INTO schema_migrations(version) VALUES(?)',
+            (BASE_SCHEMA_VERSION,))
+        # SQLite backup API 不能在当前连接存在未提交写事务时可靠完成。
+        conn.commit()
+    current = schema_version(conn)
+    if current > CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f'数据库版本 {current} 高于当前程序支持的版本 {CURRENT_SCHEMA_VERSION}')
+    pending = [version for version in sorted(MIGRATIONS) if version > current]
+    if pending and existing_database and migration_table_exists:
+        _backup_connection(conn, f'pre-migrate-v{pending[0]}')
+
     conn.executescript('''
     -- 学生信息（结构化，学号唯一，导入合并去重的依据）
     CREATE TABLE IF NOT EXISTS students (
@@ -223,6 +302,10 @@ def init_schema(conn: sqlite3.Connection):
         UNIQUE(duty_date, area, student_id)
     );
     ''')
+
+    for version in pending:
+        MIGRATIONS[version](conn)
+        conn.execute('INSERT INTO schema_migrations(version) VALUES(?)', (version,))
     conn.commit()
 
 

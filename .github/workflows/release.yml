@@ -105,12 +105,54 @@ jobs:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
         run: .\packaging\build-windows.ps1
 
+      - name: Sign Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $installer = (Get-ChildItem artifacts\*.exe | Select-Object -First 1).FullName
+          .\packaging\sign-windows.ps1 -InstallerPath $installer
+
+      - name: Smoke test Windows package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          $expected = $env:EXPECTED_VERSION -replace '^v', ''
+          $actual = & .\dist\MeimeiWorkbench\MeimeiWorkbench.exe --version
+          if ($actual -notmatch [regex]::Escape($expected)) {
+            throw "版本号不一致：期望 $expected，实际 $actual"
+          }
+
       - name: Build macOS disk image
         if: matrix.platform == 'macos'
         shell: bash
         env:
-          APP_VERSION: ${{ github.ref_name }}
+          APP_VERSION: ${{ inputs.version || github.ref_name }}
+          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+          REQUIRE_NOTARIZATION: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: ./packaging/build-macos.sh "${{ matrix.arch }}"
+
+      - name: Smoke test macOS package
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          expected="${EXPECTED_VERSION#v}"
+          actual="$(./dist/MeimeiWorkbench.app/Contents/MacOS/MeimeiWorkbench --version)"
+          echo "$actual"
+          grep -F "${expected}" <<< "$actual"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -137,6 +179,13 @@ jobs:
       - name: Create checksums
         working-directory: release-assets
         run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create update manifest
+        working-directory: release-assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: python "$GITHUB_WORKSPACE/packaging/create-update-manifest.py"
 
       - name: Create GitHub Release
         env:

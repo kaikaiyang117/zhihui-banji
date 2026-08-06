@@ -6,6 +6,7 @@ echo 凯凯小兵为你值守
 echo ================================
 echo Starting...
 cd /d "%~dp0backend"
-start "" http://localhost:5000
-python run.py %*
+set "PYTHON=%~dp0.venv\Scripts\python.exe"
+if not exist "%PYTHON%" set "PYTHON=python"
+"%PYTHON%" run.py --open-browser %*
 pause

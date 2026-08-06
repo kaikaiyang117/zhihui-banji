@@ -1,9 +1,11 @@
 <script setup>
-import { computed, h, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
 import { get } from './api'
+import UpdateDialog from './components/UpdateDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,6 +15,11 @@ const searchText = ref('')
 const searchResults = ref([])
 const searchOpen = ref(false)
 const searching = ref(false)
+const accessInfo = ref(null)
+const accessQr = ref('')
+const accessOpen = ref(false)
+const accessCopied = ref(false)
+const updateOpen = ref(false)
 
 function itemTo(item) {
   return activeTab.value === 'teacher' ? '/' + item.page : '/p/' + item.page
@@ -47,6 +54,32 @@ function renderIcon(name) {
   if (!comp) return null
   return h(comp, { size: 18, 'stroke-width': 2 })
 }
+
+async function loadAccessInfo() {
+  try {
+    const info = await get('/api/system/access-info')
+    accessInfo.value = info
+    if (info.enabled && info.url) {
+      accessQr.value = await QRCode.toDataURL(info.url, {
+        width: 240,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#1d1d1f', light: '#ffffff' },
+      })
+    }
+  } catch {
+    // 本机模式或旧版本服务没有访问信息时，不显示局域网入口。
+  }
+}
+
+async function copyAccessUrl() {
+  if (!accessInfo.value?.url) return
+  await navigator.clipboard?.writeText(accessInfo.value.url)
+  accessCopied.value = true
+  window.setTimeout(() => { accessCopied.value = false }, 1800)
+}
+
+onMounted(loadAccessInfo)
 </script>
 
 <template>
@@ -58,8 +91,8 @@ function renderIcon(name) {
         <span>{{ tab.title }}</span>
       </router-link>
       <div class="global-search">
-        <input v-model="searchText" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
-        <button v-if="searchText" class="search-clear" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
+        <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
+        <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
         <div v-if="searchOpen" class="search-popover">
           <div v-if="searching" class="search-empty">搜索中…</div>
           <div v-else-if="!searchResults.length" class="search-empty">没有找到匹配记录</div>
@@ -69,14 +102,47 @@ function renderIcon(name) {
           </button>
         </div>
       </div>
+      <button v-if="accessInfo?.enabled" class="access-button" type="button" aria-label="显示手机访问二维码" @click="accessOpen = true">
+        <component :is="renderIcon('Wifi')" :size="16" />
+        <span>手机访问</span>
+      </button>
+      <button class="update-button" type="button" aria-label="检查软件更新" @click="updateOpen = true">
+        <component :is="renderIcon('Download')" :size="16" />
+        <span>更新</span>
+      </button>
     </header>
+    <UpdateDialog :open="updateOpen" @close="updateOpen = false" />
+    <div v-if="accessOpen" class="access-scrim" @click.self="accessOpen = false">
+      <section class="access-dialog" role="dialog" aria-modal="true" aria-labelledby="access-title">
+        <div class="access-dialog-head">
+          <div>
+            <div id="access-title" class="access-title">手机 / 平板访问</div>
+            <div class="access-subtitle">连接同一 Wi-Fi 后，用相机扫描二维码</div>
+          </div>
+          <button class="icon-button" type="button" aria-label="关闭二维码" @click="accessOpen = false">
+            <component :is="renderIcon('X')" :size="18" />
+          </button>
+        </div>
+        <div class="access-qr-frame">
+          <img v-if="accessQr" :src="accessQr" alt="局域网访问二维码" class="access-qr" />
+          <div v-else class="access-qr-loading">二维码生成中…</div>
+        </div>
+        <div class="access-url-label">访问地址</div>
+        <div class="access-url">{{ accessInfo?.url }}</div>
+        <button class="btn btn-outline access-copy" type="button" @click="copyAccessUrl">
+          <component :is="renderIcon(accessCopied ? 'Check' : 'Copy')" :size="15" />
+          {{ accessCopied ? '已复制地址' : '复制访问地址' }}
+        </button>
+        <div class="access-warning">二维码包含本次启动生成的访问密钥，请只分享给可信设备。</div>
+      </section>
+    </div>
     <div class="app-body">
       <aside class="sidebar">
         <div class="sidebar-header">
           <h2>{{ activeNav.title }}</h2>
           <div class="sub">{{ activeNav.school }}</div>
         </div>
-        <nav class="sidebar-nav">
+        <nav class="sidebar-nav" aria-label="功能导航">
           <div v-for="group in activeNav.groups" :key="group.title" class="nav-group">
             <div class="nav-group-title">{{ group.title }}</div>
             <router-link v-for="item in group.items" :key="item.page"
@@ -134,12 +200,106 @@ function renderIcon(name) {
 .search-kind { flex: 0 0 auto; padding: 3px 6px; border-radius: 6px; background: var(--primary-bg); color: var(--primary); font-size: 11px; }
 .search-empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); font-size: 13px; }
 
-@media (max-width: 760px) { .global-search { width: 42vw; } .global-search input { font-size: 12px; } }
+.access-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 7px 0 7px 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(52,199,89,.24);
+  border-radius: 999px;
+  background: var(--success-bg);
+  color: #248a3d;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+  touch-action: manipulation;
+}
+.access-button:active { transform: scale(.97); }
+.update-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 7px 0 7px 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.68);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  touch-action: manipulation;
+}
+.update-button:hover { color: var(--primary); background: var(--primary-bg); }
+.update-button:active { transform: scale(.97); }
+
+.access-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(20, 24, 38, .28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.access-dialog {
+  width: min(360px, 100%);
+  padding: 22px;
+  border: 1px solid rgba(255,255,255,.72);
+  border-radius: 24px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 24px 70px rgba(21, 28, 58, .22);
+  animation: access-dialog-in 250ms cubic-bezier(.16, 1, .3, 1);
+}
+.access-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.access-title { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+.access-subtitle { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
+.icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--bg); color: var(--text-secondary); cursor: pointer; touch-action: manipulation; }
+.icon-button:active { transform: scale(.94); }
+.access-qr-frame { display: grid; place-items: center; min-height: 244px; margin: 20px auto 16px; padding: 10px; border-radius: 18px; background: #fff; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
+.access-qr { display: block; width: 240px; height: 240px; image-rendering: pixelated; }
+.access-qr-loading { color: var(--text-secondary); font-size: 13px; }
+.access-url-label { margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; }
+.access-url { padding: 10px 12px; border-radius: 10px; background: var(--bg); color: var(--text); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; user-select: text; }
+.access-copy { width: 100%; justify-content: center; margin-top: 12px; }
+.access-warning { margin-top: 12px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; text-align: center; }
+@keyframes access-dialog-in { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 760px) {
+  .global-search { width: 42vw; }
+  .global-search input { font-size: 12px; }
+}
+
+@media (max-width: 640px) {
+  .top-tabs { height: auto; min-height: 52px; flex-wrap: wrap; gap: 2px; }
+  .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
+  .global-search input { min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
+  .search-popover { position: fixed; top: 96px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
+  .access-button { margin-left: auto; padding: 0 10px; }
+  .access-button span { display: none; }
+  .update-button { margin-left: 6px; padding: 0 10px; }
+  .update-button span { display: none; }
+  .access-scrim { align-items: end; padding: 0; }
+  .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .page-enter-active,
   .page-leave-active {
     transition: none !important;
   }
+  .access-dialog { animation: none; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .access-scrim { background: rgba(20, 24, 38, .42); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .access-dialog { background: #fff; }
 }
 </style>

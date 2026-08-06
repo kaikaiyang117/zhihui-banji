@@ -59,11 +59,13 @@ onMounted(load)
       <div v-if="loading" class="loading">加载中...</div>
       <div v-else-if="!grid.length" class="empty-state">座位表还是空的</div>
       <div v-else>
-        <div class="seating-grid" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
-          <div v-for="(row, ri) in grid" :key="ri" style="display:contents">
-            <div v-for="(v, ci) in row" :key="ci" :class="cellClass(v)" @click="startEdit(ri, ci)">
-              <input v-if="editing && editingCell === `${ri}-${ci}`" v-model="grid[ri][ci]" class="seat-input" autofocus @keyup.enter="saveCell(ri, ci)" @blur="saveCell(ri, ci)">
-              <span v-else>{{ v }}</span>
+        <div class="seating-scroll">
+          <div class="seating-grid" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
+            <div v-for="(row, ri) in grid" :key="ri" style="display:contents">
+              <div v-for="(v, ci) in row" :key="ci" :class="cellClass(v)" @click="startEdit(ri, ci)">
+                <input v-if="editing && editingCell === `${ri}-${ci}`" v-model="grid[ri][ci]" class="seat-input" autofocus @keyup.enter="saveCell(ri, ci)" @blur="saveCell(ri, ci)">
+                <span v-else>{{ v }}</span>
+              </div>
             </div>
           </div>
         </div>

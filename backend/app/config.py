@@ -6,6 +6,7 @@
 """
 import os
 import sys
+import json
 
 
 APP_NAME = 'MeimeiWorkbench'
@@ -31,6 +32,21 @@ def _default_data_dir() -> str:
 
 
 RESOURCE_ROOT = getattr(sys, '_MEIPASS', ROOT_DIR)
+
+
+def _load_app_version() -> str:
+    configured = os.environ.get('WORKBENCH_VERSION')
+    if configured:
+        return configured.lstrip('v')
+    version_file = os.path.join(RESOURCE_ROOT, 'backend', 'static', 'app-version.json')
+    try:
+        with open(version_file, encoding='utf-8') as f:
+            return str(json.load(f).get('version', '0.0.0-dev')).lstrip('v')
+    except (OSError, ValueError, TypeError):
+        return '0.0.0-dev'
+
+
+APP_VERSION = _load_app_version()
 DATA_DIR = _default_data_dir()
 DB_PATH = os.path.join(DATA_DIR, 'workbench.db')
 _default_kb_dir = os.path.join(DATA_DIR, '知识库') if IS_FROZEN else os.path.join(ROOT_DIR, '知识库')
@@ -40,9 +56,17 @@ LEGACY_BZR = os.path.join(RESOURCE_ROOT, '班主任工作台', '班主任工作�
 LEGACY_HEALTH = os.path.join(RESOURCE_ROOT, '健康管理', '健康追踪表.xlsx')
 STATIC_DIR = os.path.join(RESOURCE_ROOT, 'backend', 'static') if IS_FROZEN else os.path.join(BASE_DIR, 'static')
 
-# 学生信息默认只在本机提供；确需局域网访问时显式设置 WORKBENCH_HOST。
-HOST = os.environ.get('WORKBENCH_HOST', '127.0.0.1')
+# 桌面工作台默认允许可信局域网访问，访问令牌由启动入口生成。
+HOST = os.environ.get('WORKBENCH_HOST', '0.0.0.0')
 PORT = int(os.environ.get('WORKBENCH_PORT', '5000'))
+UPDATE_API_URL = os.environ.get(
+    'WORKBENCH_UPDATE_URL',
+    'https://api.github.com/repos/aitia0718/workbench/releases/latest',
+)
+UPDATE_MANIFEST_URL = os.environ.get(
+    'WORKBENCH_UPDATE_MANIFEST_URL',
+    'https://github.com/aitia0718/workbench/releases/latest/download/update-manifest.json',
+)
 
 # 工作表 → 模块归属（前端分组）
 SHEET_META = {

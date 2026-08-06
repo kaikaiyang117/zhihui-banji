@@ -43,29 +43,36 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-如果暂时只想验证流水线，也可以在 GitHub Actions 页面手动运行 `Build desktop releases`；正式发布前仍需补充 Windows/macOS 签名、公证和自动更新。
+如果暂时只想验证流水线，也可以在 GitHub Actions 页面手动运行 `Build desktop releases`。正式发布前需要在 GitHub Actions Secrets 配置：
+
+- Windows：`WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD`
+- macOS：`APPLE_CERTIFICATE_P12_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`
+
+带 `v*` 标签的正式发布会强制要求签名和 macOS 公证；手动运行流水线时没有凭证也可以生成测试包，但不会作为正式版本发布。
 
 ## 启动模式
 
-默认只允许本机访问：
+桌面安装包双击后默认开启局域网访问：
 
 ```bash
 MeimeiWorkbench
 ```
 
-允许同一局域网的手机和平板访问：
+程序会自动生成一次性访问令牌并打开本机浏览器；进入工作台后点击右上角“手机访问”，手机或平板连接同一 Wi-Fi 后扫描二维码即可访问：
 
 ```bash
 MeimeiWorkbench --lan
 ```
 
-也可以覆盖端口：
+`--lan` 仍保留用于手动排查。默认端口为 5000，若被其他程序占用，程序会自动选择后续可用端口。二维码只包含本次启动的访问令牌，请仅分享给可信设备。
+
+也可以手动覆盖端口：
 
 ```bash
 MeimeiWorkbench --lan --port 5000
 ```
 
-局域网模式启动时会生成一次性访问令牌，并打印带令牌的访问地址；前端会将令牌保存在当前浏览器中。该模式仍只适合可信网络，不要把端口映射到公网。后续还可以补充固定 PIN、设备管理和退出配对。
+局域网模式启动时会生成一次性访问令牌，并打印带令牌的访问地址；前端会将令牌保存在当前浏览器中。该模式仍只适合可信网络，不要把端口映射到公网。
 
 ## 用户数据位置
 
@@ -90,7 +97,8 @@ WORKBENCH_KB_DIR=/path/to/知识库 MeimeiWorkbench
 
 ## 当前打包边界
 
-- 当前是可验证的 `onedir` 打包配置，签名、公证和自动更新暂未加入。
-- Windows 使用 Inno Setup 生成安装程序；macOS 使用 `hdiutil` 生成 DMG。当前仍不包含签名、公证和自动更新。
+- 当前是可验证的 `onedir` 打包配置；应用内检查更新、下载、SHA-256 校验和启动安装器已经加入。
+- Windows 使用 Inno Setup 生成安装程序；macOS 使用 `hdiutil` 生成 DMG。正式发布会强制签名、公证，并生成 `update-manifest.json` 作为 GitHub API 限流时的更新检查兜底。
+- 更新前会创建数据库备份；macOS 使用独立更新助手替换 App，并在新程序无法启动时恢复旧 App。
 - Windows 构建保留控制台窗口，便于查看启动地址和局域网提示；macOS 应用会自动打开浏览器。
 - 现有项目中的 `data/workbench.db` 不会自动复制到打包后的用户目录；首次发布需要提供一次数据导入/迁移步骤。
