@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/backend"
 
-PORT="${WORKBENCH_PORT:-8080}"
+PORT="${WORKBENCH_PORT:-5000}"
 HOST="${WORKBENCH_HOST:-127.0.0.1}"
 
 echo "========================================"
@@ -19,9 +19,4 @@ echo ""
 echo "  按 Ctrl+C 停止"
 echo "========================================"
 
-python3 -c "
-import sys, os
-sys.path.insert(0, '.')
-import uvicorn
-uvicorn.run('app.__init__:app', host='${HOST}', port=${PORT}, reload=False)
-"
+WORKBENCH_HOST="$HOST" WORKBENCH_PORT="$PORT" python3 run.py "$@"

@@ -168,7 +168,8 @@ export const NAV = [
     groups: [
       { title: '概览', items: [
         { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },
-        { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' }
+        { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' },
+        { page: 'class-tasks', icon: 'ClipboardList', label: '班级任务' }
       ] },
       { title: '学生管理', items: [
         { page: 'students', icon: 'Users', label: '学生信息' },
@@ -185,6 +186,7 @@ export const NAV = [
       ] },
       { title: '班级事务', items: [
         { page: 'seating', icon: 'LayoutGrid', label: '座位表' },
+        { page: 'duty', icon: 'CheckCircle', label: '值日安排' },
         { page: 'parent-comm', icon: 'Phone', label: '家校沟通' },
         { page: 'meetings', icon: 'Presentation', label: '班会记录' },
         { page: 'fund', icon: 'DollarSign', label: '班费管理' }

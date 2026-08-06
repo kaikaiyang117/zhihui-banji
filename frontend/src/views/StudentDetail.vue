@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, CalendarCheck, ClipboardList, MessageCircle, Plus, Tag, UserRound } from 'lucide-vue-next'
+import { ArrowLeft, CalendarCheck, ClipboardList, MessageCircle, Plus, Tag, UserRound, TrendingUp, Star } from 'lucide-vue-next'
 import { get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 
@@ -65,6 +65,8 @@ onMounted(load)
       <div class="overview-card"><div class="oc-icon orange"><ClipboardList :size="20" /></div><div><div class="oc-label">待办事项</div><div class="oc-value">{{ data.tasks.filter(t => !['已完成','已取消'].includes(t.status)).length }}</div></div></div>
       <div class="overview-card"><div class="oc-icon green"><MessageCircle :size="20" /></div><div><div class="oc-label">家校沟通</div><div class="oc-value">{{ data.communications.length }}</div></div></div>
       <div class="overview-card"><div class="oc-icon red"><Tag :size="20" /></div><div><div class="oc-label">关注事项</div><div class="oc-value">{{ data.focus.filter(f => f.status !== '已结束').length }}</div></div></div>
+      <div class="overview-card"><div class="oc-icon blue"><TrendingUp :size="20" /></div><div><div class="oc-label">成绩考试</div><div class="oc-value">{{ data.score_summary.exams.length }}</div></div></div>
+      <div class="overview-card"><div class="oc-icon orange"><Star :size="20" /></div><div><div class="oc-label">行为积分</div><div class="oc-value">{{ data.points_summary.total }}</div></div></div>
     </div>
 
     <div class="student-detail-grid">
@@ -100,6 +102,21 @@ onMounted(load)
             <span class="tag" :class="item.status === '已结束' ? 'tag-green' : 'tag-orange'">{{ item.status }}</span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="student-detail-grid">
+      <div class="card">
+        <div class="card-title"><TrendingUp :size="16" /> 成绩趋势</div>
+        <div v-if="!data.score_summary.exams.length" class="empty-state compact-empty">暂无结构化成绩记录</div>
+        <div v-for="exam in data.score_summary.exams" :key="`${exam.exam_name}-${exam.exam_date}`" class="score-summary-row">
+          <div><strong>{{ exam.exam_name }}</strong><span>{{ exam.exam_date || '日期未填' }}</span></div><strong>{{ exam.total }} 分</strong>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><Star :size="16" /> 行为积分</div>
+        <div class="points-total">{{ data.points_summary.total }}<small>累计积分</small></div>
+        <div class="weekly-points"><span v-for="(point, index) in data.points_summary.weekly" :key="index"><i :style="{ height: `${Math.max(4, Math.min(60, Number(point) || 0))}px` }"></i><small>W{{ index + 1 }}</small></span></div>
       </div>
     </div>
 

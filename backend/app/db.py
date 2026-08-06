@@ -158,6 +158,70 @@ def init_schema(conn: sqlite3.Connection):
         created_at TEXT DEFAULT (datetime('now','localtime')),
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
+
+    -- P1：结构化成绩记录（支持长表与宽表 Excel 导入）
+    CREATE TABLE IF NOT EXISTS exam_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        exam_name TEXT NOT NULL,
+        exam_date TEXT DEFAULT '',
+        subject TEXT NOT NULL,
+        score REAL,
+        rank INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(student_id, exam_name, subject)
+    );
+
+    -- P1：考勤规则，命中后生成待办提醒
+    CREATE TABLE IF NOT EXISTS attendance_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        metric TEXT NOT NULL,
+        threshold INTEGER NOT NULL DEFAULT 1,
+        period_days INTEGER NOT NULL DEFAULT 7,
+        priority TEXT NOT NULL DEFAULT '重要',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    -- P1：班级任务与学生材料收集项
+    CREATE TABLE IF NOT EXISTS class_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        task_type TEXT NOT NULL DEFAULT '材料收集',
+        start_at TEXT DEFAULT '',
+        due_at TEXT DEFAULT '',
+        material_name TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT '进行中',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS class_task_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL REFERENCES class_tasks(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT '未提交',
+        note TEXT DEFAULT '',
+        submitted_at TEXT DEFAULT '',
+        UNIQUE(task_id, student_id)
+    );
+
+    -- P1：值日安排
+    CREATE TABLE IF NOT EXISTS duty_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        duty_date TEXT NOT NULL,
+        area TEXT NOT NULL,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT '待完成',
+        note TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(duty_date, area, student_id)
+    );
     ''')
     conn.commit()
 

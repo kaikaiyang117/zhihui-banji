@@ -199,6 +199,27 @@ def student_detail(student_id: int):
             })
     attendance.sort(key=lambda x: str(x['date']), reverse=True)
 
+    score_rows = _rows(
+        'SELECT exam_name, exam_date, subject, score, rank FROM exam_records '
+        'WHERE student_id=? ORDER BY exam_date, exam_name, subject', (student_id,))
+    score_exams = {}
+    for row in score_rows:
+        key = (row['exam_name'], row['exam_date'])
+        exam = score_exams.setdefault(key, {'exam_name': row['exam_name'], 'exam_date': row['exam_date'], 'subjects': {}, 'total': 0})
+        exam['subjects'][row['subject']] = row['score']
+        if row['score'] is not None:
+            exam['total'] += row['score']
+    score_summary = {'exams': list(score_exams.values()), 'subjects': sorted({row['subject'] for row in score_rows})}
+
+    points_summary = {'total': 0, 'weekly': [], 'updated_at': ''}
+    for row in db.get_rows('日常行为积分'):
+        data = row['data']
+        if len(data) > 0 and str(data[0] or '').strip() == xh:
+            weekly = [data[i] if i < len(data) and isinstance(data[i], (int, float)) else 0 for i in range(2, 10)]
+            points_summary = {'total': data[10] if len(data) > 10 and isinstance(data[10], (int, float)) else sum(weekly),
+                              'weekly': weekly, 'updated_at': row.get('updated_at', '')}
+            break
+
     timeline = []
     for row in events:
         timeline.append({'kind': 'event', 'id': row['id'], 'at': row['occurred_at'],
@@ -220,6 +241,7 @@ def student_detail(student_id: int):
 
     return {'student': student, 'events': events, 'tasks': tasks, 'focus': focus,
             'communications': communications, 'attendance': attendance,
+            'score_summary': score_summary, 'points_summary': points_summary,
             'timeline': timeline}
 
 

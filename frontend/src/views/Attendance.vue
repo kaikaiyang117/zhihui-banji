@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { CheckCircle, Clock, FileEdit, XCircle, ClipboardList, Download, Save, UserRound } from 'lucide-vue-next'
-import { get, post } from '../api'
+import { get, post, put } from '../api'
 
 const students = ref([])
 const existingRows = ref([])
@@ -13,6 +13,10 @@ const selectedDate = ref(localDate())
 const records = ref({})
 const dateFrom = ref('')
 const dateTo = ref('')
+const rules = ref([])
+const evaluatingRules = ref(false)
+const ruleMessage = ref('')
+const newRule = ref({ name: '一周迟到提醒', metric: '迟到次数', threshold: 2, period_days: 7, priority: '重要' })
 
 function localDate() {
   const d = new Date()
@@ -27,14 +31,36 @@ function defaultRecord(student) {
 async function load() {
   loading.value = true
   try {
-    const [studentData, sheet, summary] = await Promise.all([
-      get('/api/students'), get('/api/sheet/考勤管理'), get('/api/stats/attendance')
+    const [studentData, sheet, summary, ruleData] = await Promise.all([
+      get('/api/students'), get('/api/sheet/考勤管理'), get('/api/stats/attendance'), get('/api/attendance/rules')
     ])
     students.value = studentData.students || []
     existingRows.value = sheet.rows || []
     stats.value = summary
+    rules.value = ruleData.rules || []
     loadDateRecords()
   } finally { loading.value = false }
+}
+
+async function addRule() {
+  try {
+    await post('/api/attendance/rules', newRule.value)
+    ruleMessage.value = '规则已保存'
+    rules.value = (await get('/api/attendance/rules')).rules || []
+  } catch (e) { ruleMessage.value = `保存失败：${e.message}` }
+}
+
+async function toggleRule(rule) {
+  await put(`/api/attendance/rules/${rule.id}`, { enabled: !rule.enabled })
+  rule.enabled = !rule.enabled
+}
+
+async function evaluateRules() {
+  evaluatingRules.value = true
+  try {
+    const result = await post('/api/attendance/rules/evaluate', {})
+    ruleMessage.value = result.count ? `已生成 ${result.count} 条考勤跟进待办` : '本次没有命中新的提醒'
+  } catch (e) { ruleMessage.value = `检查失败：${e.message}` } finally { evaluatingRules.value = false }
 }
 
 function loadDateRecords() {
@@ -104,6 +130,19 @@ onMounted(load)
       <div class="attendance-summary-item orange"><Clock :size="17" /><span>迟到</span><strong>{{ dailyCounts['迟到'] }}</strong></div>
       <div class="attendance-summary-item blue"><FileEdit :size="17" /><span>请假</span><strong>{{ dailyCounts['请假'] }}</strong></div>
       <div class="attendance-summary-item red"><XCircle :size="17" /><span>缺勤</span><strong>{{ dailyCounts['缺勤'] }}</strong></div>
+    </div>
+
+    <div class="card attendance-rules-card">
+      <div class="card-title"><Clock :size="16" /> 考勤规则提醒 <span class="count">命中后自动进入待办</span><button class="btn btn-outline rule-evaluate" :disabled="evaluatingRules" @click="evaluateRules">{{ evaluatingRules ? '检查中…' : '立即检查' }}</button></div>
+      <div class="rule-create-row">
+        <input class="form-input" v-model="newRule.name" placeholder="规则名称">
+        <select class="form-select" v-model="newRule.metric"><option>迟到次数</option><option>请假次数</option><option>缺勤次数</option><option>连续缺勤天数</option></select>
+        <input class="form-input rule-number" type="number" min="1" v-model.number="newRule.threshold"><span>次 /</span><input class="form-input rule-number" type="number" min="1" v-model.number="newRule.period_days"><span>天</span>
+        <button class="btn btn-primary" @click="addRule">新增规则</button>
+      </div>
+      <div v-if="ruleMessage" class="hint">{{ ruleMessage }}</div>
+      <div v-if="!rules.length" class="empty-state compact-empty">还没有启用提醒规则</div>
+      <div v-for="rule in rules" :key="rule.id" class="rule-row"><div><strong>{{ rule.name }}</strong><span>{{ rule.metric }} ≥ {{ rule.threshold }} · 最近 {{ rule.period_days }} 天 · {{ rule.priority }}</span></div><button class="tag" :class="rule.enabled ? 'tag-green' : ''" @click="toggleRule(rule)">{{ rule.enabled ? '已启用' : '已停用' }}</button></div>
     </div>
 
     <div class="card">

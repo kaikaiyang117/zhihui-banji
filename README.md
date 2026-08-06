@@ -83,7 +83,9 @@
 │           ├── knowledge.py        # /api/knowledge (Obsidian 笔记)
 │           ├── export.py           # /api/export/* (工作表导出+汇总报表)
 │           ├── p0.py               # 学生详情/事件/待办/关注/沟通/批量考勤
+│           ├── p1.py               # 搜索/成绩/考勤规则/班级任务/值日
 │           └── system.py           # 本地备份与恢复
+├── packaging/                      # 桌面打包配置与构建脚本
 ├── frontend/                       # 前端（Vue 3 + Vite）
 │   ├── package.json
 │   ├── vite.config.js              # 构建到 ../backend/static
@@ -234,6 +236,16 @@ python run.py
 ```bat
 双击 启动工作台.bat
 ```
+
+### 局域网访问
+
+电脑作为本地数据主机时，可使用以下命令让同一局域网的手机和平板访问：
+
+```bash
+python backend/run.py --lan
+```
+
+默认模式只监听本机；局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 `packaging/README.md`。
 
 ### 数据备份
 - 备份 `data/workbench.db`（一个文件 = 全部数据）

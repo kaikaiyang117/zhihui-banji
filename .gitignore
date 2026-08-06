@@ -14,6 +14,11 @@ data/
 # Node
 frontend/node_modules/
 
+# 桌面打包临时产物
+/build/
+/dist/
+/artifacts/
+
 # 运行与缓存
 *.log
 *.err

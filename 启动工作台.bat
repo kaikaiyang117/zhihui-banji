@@ -7,5 +7,5 @@ echo ================================
 echo Starting...
 cd /d "%~dp0backend"
 start "" http://localhost:5000
-python run.py
+python run.py %*
 pause
