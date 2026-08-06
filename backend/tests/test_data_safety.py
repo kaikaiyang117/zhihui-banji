@@ -41,6 +41,12 @@ class DataSafetyTest(unittest.TestCase):
         self.assertIsNotNone(conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_audit'"
         ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions'"
+        ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='wechat_message_receipts'"
+        ).fetchone())
 
     def test_legacy_database_migrates_and_creates_pre_migration_backup(self):
         legacy_path = os.path.join(self.temp.name, 'legacy.db')

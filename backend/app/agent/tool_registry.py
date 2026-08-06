@@ -33,6 +33,17 @@ class ToolDefinition:
             'read_only': self.read_only,
         }
 
+    def model_schema(self) -> dict[str, Any]:
+        """转换为常见 OpenAI-compatible tool calling 格式。"""
+        return {
+            'type': 'function',
+            'function': {
+                'name': self.name,
+                'description': self.description,
+                'parameters': self.parameters,
+            },
+        }
+
 
 class ToolRegistry:
     def __init__(self, tools: list[ToolDefinition] | None = None):
@@ -47,6 +58,9 @@ class ToolRegistry:
 
     def list(self) -> list[dict[str, Any]]:
         return [self._tools[name].public_schema() for name in sorted(self._tools)]
+
+    def model_tools(self) -> list[dict[str, Any]]:
+        return [self._tools[name].model_schema() for name in sorted(self._tools)]
 
     def execute(self, name: str, arguments: dict[str, Any] | None = None) -> dict:
         tool = self._tools.get(name)

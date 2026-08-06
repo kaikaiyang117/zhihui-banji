@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .config import APP_VERSION, STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system, agent
+from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system, agent, wechat
 
 app = FastAPI(title='美美大王工作台', version=APP_VERSION)
 
@@ -27,21 +27,28 @@ async def local_access_guard(request: Request, call_next):
 
 for r in (sheets.router, students.router, seating.router,
           stats.router, knowledge.router, export.router, p0.router, p1.router, system.router,
-          agent.router):
+          agent.router, wechat.router):
     app.include_router(r)
 
 
 @app.on_event('startup')
-def startup():
+async def startup():
     db.get_conn()
     p0.migrate_legacy_core_rows()
     os.makedirs(db.DATA_DIR, exist_ok=True)
     with open(os.path.join(db.DATA_DIR, '.workbench-ready'), 'w', encoding='utf-8') as marker:
         marker.write(str(os.getpid()))
+    if os.environ.get('MEIMEI_WECHAT_ENABLED', '').lower() in {'1', 'true', 'yes'}:
+        try:
+            await wechat_service.start_loop()
+        except Exception:
+            # 未配置凭证时仍允许工作台正常启动，用户可从接口完成扫码。
+            pass
 
 
 @app.on_event('shutdown')
-def shutdown():
+async def shutdown():
+    await wechat_service.stop()
     db.close()
 
 

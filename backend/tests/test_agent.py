@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import os
 import sys
 import tempfile
@@ -8,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
 from app.agent.agent_service import invoke_tool, list_audits, list_tools
+from app.agent.model_client import ModelResponse, ToolCall
+from app.agent.runner import AgentRunner
 from app.agent.tool_registry import ToolError
 
 
@@ -57,6 +60,25 @@ class AgentFoundationTest(unittest.TestCase):
         audit = list_audits(1)[0]
         self.assertEqual(audit['status'], 'error')
         self.assertEqual(audit['channel'], 'wechat')
+
+    def test_runner_uses_tool_then_saves_session(self):
+        class FakeModel:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, _messages, _tools):
+                self.calls += 1
+                if self.calls == 1:
+                    return ModelResponse('', [ToolCall(
+                        id='call-1', name='students_search', arguments='{"keyword":"张"}'
+                    )])
+                return ModelResponse('找到了张三。', [])
+
+        runner = AgentRunner(model_client=FakeModel())
+        answer = asyncio.run(runner.chat('test-session', '帮我找张三'))
+        self.assertEqual(answer, '找到了张三。')
+        self.assertEqual(len(db.load_agent_session('test-session')), 5)
+        self.assertEqual(list_audits(1)[0]['tool_name'], 'students_search')
 
 
 if __name__ == '__main__':

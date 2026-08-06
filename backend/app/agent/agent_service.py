@@ -17,6 +17,10 @@ def list_tools() -> list[dict[str, Any]]:
     return get_registry().list()
 
 
+def model_tools() -> list[dict[str, Any]]:
+    return get_registry().model_tools()
+
+
 def invoke_tool(
     name: str,
     arguments: dict[str, Any] | None = None,

@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 _conn: sqlite3.Connection | None = None
 _lock = threading.Lock()
@@ -105,7 +105,25 @@ def _migration_3(conn: sqlite3.Connection):
     ''')
 
 
-MIGRATIONS = {2: _migration_2, 3: _migration_3}
+def _migration_4(conn: sqlite3.Connection):
+    """为 Agent 会话和微信消息去重保存本地状态。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            session_id TEXT PRIMARY KEY,
+            messages TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS wechat_message_receipts (
+            message_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'processing',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+    ''')
+
+
+MIGRATIONS = {2: _migration_2, 3: _migration_3, 4: _migration_4}
 
 
 def init_schema(conn: sqlite3.Connection, existing_database: bool = True):
@@ -396,3 +414,82 @@ def replace_row(sheet: str, row_no: int, data: list):
     get_conn().commit()
     if cur.rowcount == 0:
         raise KeyError(f'行 {row_no} 不存在')
+
+
+# ---------- Agent / 微信状态 ----------
+
+def get_agent_setting(key: str, default: str = '') -> str:
+    row = get_conn().execute(
+        'SELECT value FROM agent_settings WHERE key=?', (key,)
+    ).fetchone()
+    return str(row['value']) if row else default
+
+
+def set_agent_setting(key: str, value: str):
+    get_conn().execute(
+        "INSERT INTO agent_settings(key, value, updated_at) VALUES(?,?,datetime('now','localtime')) "
+        'ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at',
+        (key, str(value)),
+    )
+    get_conn().commit()
+
+
+def load_agent_session(session_id: str) -> list[dict]:
+    row = get_conn().execute(
+        'SELECT messages FROM agent_sessions WHERE session_id=?', (session_id,)
+    ).fetchone()
+    if not row:
+        return []
+    try:
+        value = json.loads(row['messages'])
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
+def save_agent_session(session_id: str, messages: list[dict]):
+    get_conn().execute(
+        "INSERT INTO agent_sessions(session_id, messages, updated_at) VALUES(?,?,datetime('now','localtime')) "
+        'ON CONFLICT(session_id) DO UPDATE SET messages=excluded.messages, updated_at=excluded.updated_at',
+        (session_id, json.dumps(messages, ensure_ascii=False)),
+    )
+    get_conn().commit()
+
+
+def delete_agent_session(session_id: str):
+    get_conn().execute('DELETE FROM agent_sessions WHERE session_id=?', (session_id,))
+    get_conn().commit()
+
+
+def claim_wechat_message(message_id: str) -> bool:
+    if not message_id:
+        return True
+    conn = get_conn()
+    existing = conn.execute(
+        'SELECT status FROM wechat_message_receipts WHERE message_id=?', (message_id,)
+    ).fetchone()
+    if existing and existing['status'] == 'processed':
+        return False
+    if existing:
+        conn.execute(
+            "UPDATE wechat_message_receipts SET status='processing', updated_at=datetime('now','localtime') "
+            'WHERE message_id=?',
+            (message_id,),
+        )
+        conn.commit()
+        return True
+    cur = conn.execute(
+        'INSERT INTO wechat_message_receipts(message_id) VALUES(?)', (message_id,)
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def mark_wechat_message(message_id: str, status: str):
+    if not message_id:
+        return
+    get_conn().execute(
+        "UPDATE wechat_message_receipts SET status=?, updated_at=datetime('now','localtime') WHERE message_id=?",
+        (status, message_id),
+    )
+    get_conn().commit()
