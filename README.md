@@ -57,6 +57,10 @@
 ```
 美美大王工作台/
 ├── 启动工作台.bat
+├── 启动工作台.command
+├── docs/                           # 用户手册与维护文档
+│   ├── 用户手册.md
+│   └── 移动端适配-TODO.md
 ├── backend/                        # 后端
 │   ├── run.py                      # uvicorn 入口
 │   ├── requirements.txt            # fastapi, uvicorn, python-multipart, openpyxl
@@ -68,7 +72,6 @@
 │       ├── __init__.py             # FastAPI 应用入口
 │       ├── config.py               # 路径、工作表元数据
 │       ├── db.py                   # SQLite 连接与通用表 CRUD
-│       ├── schemas.py              # Pydantic 模型
 │       ├── derived.py              # 派生计算列（成绩总分/积分排名/班费余额等）
 │       ├── export_service.py       # xlsx 导出（含座位表特例）
 │       ├── import_service.py       # 学生 Excel 导入（模板生成 + 解析 + 按学号合并）
@@ -78,7 +81,11 @@
 │           ├── seating.py          # /api/seating
 │           ├── stats.py            # /api/stats/* (仪表盘/考勤/成绩/积分)
 │           ├── knowledge.py        # /api/knowledge (Obsidian 笔记)
-│           └── export.py           # /api/export/* (工作表导出+汇总报表)
+│           ├── export.py           # /api/export/* (工作表导出+汇总报表)
+│           ├── p0.py               # 学生详情/事件/待办/关注/沟通/批量考勤
+│           ├── p1.py               # 搜索/成绩/考勤规则/班级任务/值日
+│           └── system.py           # 本地备份与恢复
+├── packaging/                      # 桌面打包配置与构建脚本
 ├── frontend/                       # 前端（Vue 3 + Vite）
 │   ├── package.json
 │   ├── vite.config.js              # 构建到 ../backend/static
@@ -90,16 +97,16 @@
 │       ├── sheets.js               # 导航配置 + 各表字段定义
 │       ├── style.css
 │       ├── components/             # DataTable, AddModal, SheetPage
-│       └── views/                  # 17 个页面
-│           ├── Dashboard.vue  Students.vue  Scores.vue  Points.vue
-│           ├── Attendance.vue  Seating.vue  Health.vue  Knowledge.vue
-│           └── + 10 个 SheetPage 薄封装
+│       └── views/                  # 页面
+│           ├── Dashboard.vue  StudentDetail.vue  Students.vue
+│           ├── Events.vue  Tasks.vue  Attendance.vue  ParentComm.vue
+│           ├── Special.vue  Scores.vue  Points.vue  Seating.vue
+│           └── + 个人工作台与通用工作表页面
 ├── data/
 │   └── workbench.db                # SQLite 数据库（WAL 模式）
 ├── 班主任工作台/                   # 旧 Excel（保留作归档）
-├── 健康管理/                       # 旧 Excel + 健康提醒工具
-├── 知识库/                         # Obsidian Vault（Markdown）
-└── 教学工具/ 考研备考/             # 预留扩展目录
+├── 健康管理/                       # 健康文档与健康提醒工具
+└── 知识库/                         # Obsidian Vault（Markdown）
 ```
 
 ---
@@ -170,6 +177,31 @@ Uvicorn :: FastAPI
 | GET | `/api/stats/*` | 仪表盘/考勤统计/成绩统计/积分统计 |
 | GET/POST | `/api/knowledge/*` | 知识库笔记 |
 
+### P0 学生管理闭环
+
+- `/api/students/{id}/detail`：学生全景页与成长时间线
+- `/api/events`：学生事件记录，支持自动创建跟进事项
+- `/api/tasks`：待办、截止日期、优先级和完成状态
+- `/api/focus`：关注事项生命周期
+- `/api/communications`：结构化家校沟通与回访
+- `/api/attendance/daily`：按日期批量保存全班考勤
+- `/api/system/backup`、`/api/system/restore`：本地数据库备份与恢复
+
+## 开发测试
+
+后端 P0 工作流使用隔离 SQLite 测试数据，不会修改 `data/workbench.db`：
+
+```bash
+python -m unittest discover -s backend/tests -p 'test_*.py' -v
+```
+
+前端构建：
+
+```bash
+cd frontend
+npm run build
+```
+
 ---
 
 ## 5. 快速开始
@@ -204,6 +236,16 @@ python run.py
 ```bat
 双击 启动工作台.bat
 ```
+
+### 局域网访问
+
+电脑作为本地数据主机时，可使用以下命令让同一局域网的手机和平板访问：
+
+```bash
+python backend/run.py --lan
+```
+
+默认模式只监听本机；局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 `packaging/README.md`。
 
 ### 数据备份
 - 备份 `data/workbench.db`（一个文件 = 全部数据）

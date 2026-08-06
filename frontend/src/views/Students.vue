@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { get, del, put } from '../api'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { get, del } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { Plus, Upload, FileDown, Download } from 'lucide-vue-next'
@@ -12,6 +13,7 @@ const showModal = ref(false)
 const editId = ref(null)
 const editData = ref(null)
 const keyword = ref('')
+const router = useRouter()
 
 async function load() {
   loading.value = true
@@ -27,6 +29,11 @@ function startAdd() {
   editId.value = null
   editData.value = null
   showModal.value = true
+}
+
+function openStudent(row) {
+  const student = students.value.find(item => item.id === row.row_no)
+  if (student) router.push(`/student/${student.id}`)
 }
 
 function startEdit(rowNo, data) {
@@ -87,7 +94,8 @@ onMounted(load)
         :col-widths="[64, 68, 46, 80, 54, 148, 76, 116, 60, 76, 116, 60, 56, 76, 76, 100]"
         :show-edit="true"
         @delete="rowNo => removeStudent(rowNo)"
-        @edit="(rowNo, data) => startEdit(rowNo, data)" />
+        @edit="(rowNo, data) => startEdit(rowNo, data)"
+        @row-click="openStudent" />
     </div>
 
     <AddModal v-if="showImport" title="导入学生信息" mode="import" @close="showImport = false" @success="showImport = false; load()" />

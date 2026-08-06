@@ -5,25 +5,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/backend"
 
-PORT="${WORKBENCH_PORT:-8080}"
-HOST="${WORKBENCH_HOST:-0.0.0.0}"
-
-LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "未检测到")
+PORT="${WORKBENCH_PORT:-5000}"
+HOST="${WORKBENCH_HOST:-127.0.0.1}"
 
 echo "========================================"
 echo "  美美大王工作台 v2.3"
 echo ""
 echo "  本机访问: http://localhost:${PORT}"
-if [ "$LOCAL_IP" != "未检测到" ]; then
-  echo "  局域网访问: http://${LOCAL_IP}:${PORT}"
+if [ "$HOST" != "127.0.0.1" ]; then
+  echo "  当前监听地址: ${HOST}"
 fi
 echo ""
 echo "  按 Ctrl+C 停止"
 echo "========================================"
 
-python3 -c "
-import sys, os
-sys.path.insert(0, '.')
-import uvicorn
-uvicorn.run('app.__init__:app', host='${HOST}', port=${PORT}, reload=False)
-"
+WORKBENCH_HOST="$HOST" WORKBENCH_PORT="$PORT" python3 run.py "$@"

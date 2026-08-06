@@ -1,117 +1,107 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { Download, BarChart3, BookOpen } from 'lucide-vue-next'
-import { get } from '../api'
+import { computed, ref } from 'vue'
+import { onMounted } from 'vue'
+import { FileUp, TrendingUp, Users } from 'lucide-vue-next'
+import { get, upload } from '../api'
 
-const stats = ref(null)
+const summary = ref({ exams: [], subjects: [], records: [] })
+const legacy = ref(null)
 const loading = ref(true)
-const chartEl = ref(null)
-let chart = null
+const importing = ref(false)
+const message = ref('')
+const fileInput = ref(null)
+
+const latestExam = computed(() => summary.value.exams[summary.value.exams.length - 1])
+const trendRows = computed(() => {
+  const byStudent = new Map()
+  for (const row of summary.value.records) {
+    if (!byStudent.has(row.student_id)) byStudent.set(row.student_id, { student_id: row.student_id, name: row.姓名, exams: {} })
+    const item = byStudent.get(row.student_id)
+    item.exams[row.exam_name] ||= { total: 0, count: 0 }
+    if (row.score !== null && row.score !== undefined) { item.exams[row.exam_name].total += row.score; item.exams[row.exam_name].count += 1 }
+  }
+  return [...byStudent.values()].map(row => {
+    for (const exam of Object.values(row.exams)) exam.total = exam.count ? Math.round(exam.total * 10) / 10 : null
+    return row
+  })
+})
 
 async function load() {
   loading.value = true
   try {
-    stats.value = await get('/api/stats/scores')
-  } finally {
-    loading.value = false
-  }
-  await new Promise(r => setTimeout(r, 100))
-  renderChart()
+    const [data, old] = await Promise.all([get('/api/exams/summary'), get('/api/stats/scores')])
+    summary.value = data
+    legacy.value = old
+  } finally { loading.value = false }
 }
 
-function renderChart() {
-  const dom = chartEl.value
-  if (!dom || !stats.value?.students?.length) return
-  chart = echarts.init(dom)
-  const names = stats.value.students.map(s => s.name)
-  chart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['月考1总分', '期中总分'], bottom: 0 },
-    grid: { left: '3%', right: '4%', bottom: '12%', containLabel: true },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 30, fontSize: 10 } },
-    yAxis: { type: 'value', name: '分数' },
-    series: [
-      { name: '月考1总分', type: 'bar', data: stats.value.students.map(s => s.yuekao1_total || 0), itemStyle: { color: '#5b6abf' } },
-      { name: '期中总分', type: 'bar', data: stats.value.students.map(s => s.qizhong_total || 0), itemStyle: { color: '#7b93ff' } }
-    ]
-  })
-  window.addEventListener('resize', () => chart && chart.resize())
-}
+function pickFile() { fileInput.value?.click() }
 
-function exportReport(exam) {
-  const a = document.createElement('a')
-  a.href = `/api/export/report/scores?exam=${exam}`
-  a.click()
+async function importFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importing.value = true
+  message.value = ''
+  try {
+    const result = await upload('/api/exams/import', file)
+    message.value = `已导入 ${result.imported} 条，更新 ${result.updated} 条${result.errors?.length ? `，${result.errors.length} 行未匹配` : ''}`
+    await load()
+  } catch (e) { message.value = `导入失败：${e.message}` } finally { importing.value = false }
 }
 
 onMounted(load)
-onBeforeUnmount(() => {
-  if (chart) chart.dispose()
-  window.removeEventListener('resize', () => chart && chart.resize())
-})
 </script>
 
 <template>
   <div>
     <div class="page-title-bar">
-      <div class="page-title">成绩跟踪</div>
+      <div><div class="page-title">成绩跟踪</div><div class="page-subtitle">按考试记录成绩，观察学生个人变化</div></div>
       <div class="toolbar" style="margin-bottom:0">
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/成绩跟踪"><Download :size="14" :stroke-width="2" /> 导出明细</a>
-        <button class="btn btn-outline" @click="exportReport('月考1')"><BarChart3 :size="14" :stroke-width="2" /> 月考1汇总</button>
-        <button class="btn btn-outline" @click="exportReport('期中')"><BarChart3 :size="14" :stroke-width="2" /> 期中汇总</button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xlsm" hidden @change="importFile">
+        <button class="btn btn-primary" :disabled="importing" @click="pickFile"><FileUp :size="14" /> {{ importing ? '导入中…' : '导入成绩 Excel' }}</button>
       </div>
     </div>
 
-    <div v-if="stats?.avg_scores" class="card">
-      <div class="card-title">班级成绩概览</div>
-      <div class="overview-cards">
-        <div v-for="subj in stats.subjects" :key="subj" class="overview-card" style="flex:1">
-          <div class="oc-icon blue"><BookOpen :size="20" :stroke-width="2" /></div>
-          <div>
-            <div class="oc-label">{{ subj }}</div>
-            <div style="font-size:12px;color:#666">月考:{{ stats.avg_scores.yuekao1[subj] ?? '-' }} / 期中:{{ stats.avg_scores.qizhong[subj] ?? '-' }}</div>
-          </div>
-        </div>
+    <div v-if="message" class="inline-message">{{ message }}</div>
+
+    <div v-if="summary.exams.length" class="overview-cards">
+      <div v-for="exam in summary.exams" :key="`${exam.exam_name}-${exam.exam_date}`" class="overview-card">
+        <div class="oc-icon blue"><TrendingUp :size="20" /></div>
+        <div><div class="oc-label">{{ exam.exam_name }}</div><strong>{{ exam.exam_date || '日期未填' }}</strong><div class="hint">{{ Object.keys(exam.subjects).length }} 个科目 · {{ exam.total }} 分</div></div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">成绩分布图</div>
-      <div v-if="loading" class="loading">加载中...</div>
-      <div v-else ref="chartEl" class="chart-box"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">学生成绩明细</div>
-      <div v-if="!stats?.students?.length" class="empty-state">还没有成绩数据</div>
-      <div v-else class="table-wrap" style="max-height:450px">
+    <div v-if="summary.exams.length" class="card">
+      <div class="card-title"><TrendingUp :size="16" /> 学生成绩趋势</div>
+      <div class="table-wrap">
         <table class="data-table">
-          <thead>
-            <tr>
-              <th>#</th><th>姓名</th>
-              <th v-for="s in stats.subjects" :key="s" style="font-weight:400">{{ s }}</th>
-              <th>月考总分</th><th>期中总分</th><th>进退步</th>
-            </tr>
-          </thead>
+          <thead><tr><th>学生</th><th v-for="exam in summary.exams" :key="exam.exam_name">{{ exam.exam_name }}</th><th>变化</th></tr></thead>
           <tbody>
-            <tr v-for="(s, i) in stats.students" :key="i">
-              <td class="idx">{{ i + 1 }}</td>
-              <td>{{ s.name }}</td>
-              <td v-for="(v, j) in s.yuekao1" :key="j">{{ v ?? '-' }}</td>
-              <td><strong>{{ s.yuekao1_total ?? '-' }}</strong></td>
-              <td><strong>{{ s.qizhong_total ?? '-' }}</strong></td>
-              <td>
-                <span v-if="s.change !== null && s.change !== undefined"
-                  class="tag" :class="s.change > 0 ? 'tag-green' : s.change < 0 ? 'tag-red' : ''">
-                  {{ s.change > 0 ? '↑' : s.change < 0 ? '↓' : '→' }}{{ Math.abs(s.change) }}
-                </span>
-                <span v-else>-</span>
-              </td>
+            <tr v-for="row in trendRows" :key="row.student_id">
+              <td><router-link :to="`/student/${row.student_id}`" class="table-link">{{ row.name }}</router-link></td>
+              <td v-for="exam in summary.exams" :key="exam.exam_name">{{ row.exams[exam.exam_name]?.total ?? '—' }}</td>
+              <td>{{ latestExam && row.exams[latestExam.exam_name] ? '已记录' : '—' }}</td>
             </tr>
           </tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><Users :size="16" /> 成绩明细 <span class="count">{{ summary.records.length }} 条</span></div>
+      <div v-if="loading" class="loading">加载中…</div>
+      <div v-else-if="!summary.records.length" class="empty-state">还没有结构化成绩。可以导入包含“学号、考试名称、考试日期、语文、数学…”的 Excel。</div>
+      <div v-else class="table-wrap" style="max-height:450px">
+        <table class="data-table"><thead><tr><th>考试</th><th>学生</th><th>科目</th><th>分数</th><th>排名</th></tr></thead>
+          <tbody><tr v-for="row in summary.records" :key="row.id"><td>{{ row.exam_name }}<small class="table-sub">{{ row.exam_date }}</small></td><td><router-link :to="`/student/${row.student_id}`" class="table-link">{{ row.姓名 }}</router-link></td><td>{{ row.subject }}</td><td><strong>{{ row.score ?? '—' }}</strong></td><td>{{ row.rank ?? '—' }}</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div v-if="!summary.records.length && legacy?.students?.length" class="card muted-card">
+      <div class="card-title">历史成绩表仍可查看</div>
+      <div class="hint">当前数据库中的旧版成绩数据有 {{ legacy.students.length }} 名学生；新导入的数据会按考试和科目形成可追踪趋势。</div>
     </div>
   </div>
 </template>
