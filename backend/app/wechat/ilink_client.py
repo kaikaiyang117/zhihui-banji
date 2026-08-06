@@ -23,6 +23,10 @@ class ILinkError(Exception):
     """iLink 请求或协议错误。"""
 
 
+class ILinkSessionExpiredError(ILinkError):
+    """iLink 会话已过期，需要重新扫码登录。"""
+
+
 @dataclass(frozen=True)
 class ILinkConfig:
     base_url: str = 'https://ilinkai.weixin.qq.com'
@@ -134,7 +138,11 @@ class ILinkClient:
             except ValueError as exc:
                 raise ILinkError('iLink 返回了无效 JSON') from exc
             if isinstance(data, dict) and data.get('ret') not in (None, 0):
-                raise ILinkError(f"iLink 错误 {data.get('errcode', data.get('ret'))}: {data.get('errmsg', '')}")
+                code = data.get('errcode', data.get('ret'))
+                message = f"iLink 错误 {code}: {data.get('errmsg', '')}"
+                if str(code) == '-14':
+                    raise ILinkSessionExpiredError('微信 iLink 会话已过期，请重新扫码登录')
+                raise ILinkError(message)
             return data
         except httpx.HTTPError as exc:
             raise ILinkError(f'iLink 网络请求失败：{exc}') from exc

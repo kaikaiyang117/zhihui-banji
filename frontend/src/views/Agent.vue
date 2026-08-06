@@ -338,6 +338,10 @@ onBeforeUnmount(() => {
                 <strong>{{ wechat?.running ? '消息循环运行中' : '微信未运行' }}</strong>
                 <span v-if="wechat?.configured" class="status-ok">已完成授权</span>
               </div>
+              <div v-if="wechat?.needs_relogin" class="wechat-relogin-warning">
+                <CircleAlert :size="15" /> 微信会话已过期，请重新扫码连接。
+              </div>
+              <div class="wechat-metrics">已处理 {{ wechat?.processed || 0 }} 条微信消息</div>
               <div v-if="wechatQr && wechat?.login?.status !== 'confirmed'" class="wechat-qr-wrap">
                 <img :src="wechatQr" alt="微信登录二维码" class="wechat-qr" />
                 <div class="wechat-qr-tip">{{ loginStatusText(wechat.login.status) }}</div>
@@ -414,6 +418,8 @@ onBeforeUnmount(() => {
 .wechat-connection-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,0.9fr); gap:24px; }
 .wechat-login-panel, .wechat-policy-panel { min-width:0; }
 .wechat-status-line { display:flex; align-items:center; gap:8px; min-height:24px; }
+.wechat-metrics { color:var(--text-secondary); font-size:12px; margin-top:6px; }
+.wechat-relogin-warning { display:flex; align-items:center; gap:7px; margin-top:14px; padding:9px 11px; border-radius:9px; color:#9a5a00; background:var(--warning-bg); font-size:12px; }
 .status-dot { width:8px; height:8px; border-radius:50%; background:var(--text-tertiary); }
 .status-dot.is-on { background:var(--success); box-shadow:0 0 0 4px var(--success-bg); }
 .wechat-qr-wrap { display:flex; flex-direction:column; align-items:center; gap:10px; margin:18px 0; }

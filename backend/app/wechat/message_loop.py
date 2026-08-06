@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from .. import db
-from .ilink_client import ILinkClient, ILinkError
+from .ilink_client import ILinkClient, ILinkError, ILinkSessionExpiredError
 from .message_parser import parse_text_messages
 from .models import IncomingText
 
@@ -22,6 +22,7 @@ class MessageLoop:
         self.stop_event = asyncio.Event()
         self.last_error = ''
         self.processed = 0
+        self.session_expired = False
 
     async def run(self):
         delay = 1.0
@@ -29,6 +30,10 @@ class MessageLoop:
             try:
                 await self.poll_once()
                 delay = 1.0
+            except ILinkSessionExpiredError as exc:
+                self.last_error = str(exc)
+                self.session_expired = True
+                break
             except ILinkError as exc:
                 self.last_error = str(exc)
                 await _sleep_or_stop(self.stop_event, delay)

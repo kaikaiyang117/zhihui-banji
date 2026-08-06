@@ -69,12 +69,14 @@ class WeChatService:
     def status(self) -> dict[str, Any]:
         credentials = self.credentials.load()
         policy = public_config()
+        session_expired = bool(self.loop and self.loop.session_expired)
         return {
             'configured': bool(credentials),
             'running': bool(self.loop_task and not self.loop_task.done()),
             'login': self.auth.status(),
             'last_error': self.loop.last_error if self.loop else self.last_error,
             'processed': self.loop.processed if self.loop else 0,
+            'needs_relogin': session_expired,
             'account_id': credentials.account_id if credentials else '',
             'policy': policy,
             'recent_senders': list(self.recent_senders),
@@ -96,6 +98,7 @@ class WeChatService:
                 f'你尚未获得美美工作台的使用授权。请管理员将此用户 ID 加入白名单：{message.from_user_id}',
             )
             return
+        typing_ticket = await self._start_typing(message)
         runner = AgentRunner()
         try:
             answer = await runner.chat(
@@ -106,7 +109,27 @@ class WeChatService:
             )
         except ModelError as exc:
             answer = f'美美助手暂时无法回答：{exc}'
+        finally:
+            await self._stop_typing(message, typing_ticket)
         await self.client.send_message(message.from_user_id, message.context_token, answer)
+
+    async def _start_typing(self, message: IncomingText) -> str:
+        try:
+            config = await self.client.get_config(message.from_user_id, message.context_token)
+            ticket = str(config.get('typing_ticket') or '')
+            if ticket:
+                await self.client.send_typing(message.from_user_id, ticket, 1)
+            return ticket
+        except ILinkError:
+            return ''
+
+    async def _stop_typing(self, message: IncomingText, ticket: str):
+        if not ticket:
+            return
+        try:
+            await self.client.send_typing(message.from_user_id, ticket, 2)
+        except ILinkError:
+            pass
 
     def _remember_sender(self, user_id: str):
         if not user_id:

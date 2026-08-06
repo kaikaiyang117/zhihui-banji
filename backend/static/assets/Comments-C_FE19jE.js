@@ -1,1 +1,0 @@
-import{_ as t}from"./SheetPage-DP_GUO3e.js";import{j as e,q as r}from"./index-VhPdarYk.js";import"./DataTable-CU5rtMH2.js";import"./AddModal-C7Bb57Sp.js";const p={__name:"Comments",setup(a){return(o,m)=>(r(),e(t,{title:"评语管理","sheet-name":"评语管理","add-button":"添加评语",searchable:!0}))}};export{p as default};

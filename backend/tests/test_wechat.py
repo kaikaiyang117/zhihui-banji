@@ -6,13 +6,14 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
-from app.wechat.ilink_client import ILinkClient, ILinkConfig
+from app.wechat.ilink_client import ILinkClient, ILinkConfig, ILinkSessionExpiredError
 from app.wechat.message_loop import MessageLoop
 from app.wechat.message_parser import parse_text_messages
 from app.wechat.config import load_config, save_config
@@ -121,3 +122,40 @@ class WeChatProtocolTest(unittest.TestCase):
         self.assertEqual(service.recent_senders, ['wx-unknown'])
         self.assertEqual(sent[0][0:2], ('wx-unknown', 'ctx-2'))
         self.assertIn('wx-unknown', sent[0][2])
+
+    def test_allowed_message_toggles_typing_around_agent_reply(self):
+        save_config([], True)
+        events = []
+
+        class FakeClient:
+            async def get_config(self, user_id, context_token):
+                events.append(('get_config', user_id, context_token))
+                return {'typing_ticket': 'ticket-1'}
+
+            async def send_typing(self, user_id, ticket, status):
+                events.append(('typing', user_id, ticket, status))
+
+            async def send_message(self, user_id, context_token, text):
+                events.append(('message', user_id, context_token, text))
+
+        class FakeRunner:
+            async def chat(self, *_args, **_kwargs):
+                return '答复'
+
+        service = WeChatService()
+        service.client = FakeClient()
+        with patch('app.wechat.service.AgentRunner', return_value=FakeRunner()):
+            asyncio.run(service._handle_message(IncomingText('m-3', 'wx-user', 'bot', 'ctx-3', '你好')))
+
+        self.assertEqual([item[3] for item in events if item[0] == 'typing'], [1, 2])
+        self.assertEqual(events[-1][0], 'message')
+
+    def test_message_loop_stops_when_session_expires(self):
+        class FakeClient:
+            async def get_updates(self, _cursor):
+                raise ILinkSessionExpiredError('微信 iLink 会话已过期，请重新扫码登录')
+
+        loop = MessageLoop(FakeClient(), lambda _message: None)
+        asyncio.run(loop.run())
+        self.assertTrue(loop.session_expired)
+        self.assertIn('重新扫码', loop.last_error)
