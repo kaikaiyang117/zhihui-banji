@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageCircle, RefreshCw, Send, UserRound } from 'lucide-vue-next'
+import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
@@ -230,7 +230,6 @@ onMounted(loadAccessInfo)
       <section v-else class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title">
         <header class="agent-chat-head">
           <div class="agent-chat-identity">
-            <div class="agent-chat-avatar"><MessageCircle :size="18" :stroke-width="2.2" /></div>
             <div>
               <div id="agent-chat-title" class="agent-chat-title">凯凯小兵</div>
               <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>美美工作台 Agent 助手</div>
@@ -247,7 +246,6 @@ onMounted(loadAccessInfo)
         </header>
         <div ref="agentBody" class="agent-chat-body" aria-live="polite">
           <div v-if="!agentMessages.length" class="agent-chat-welcome">
-            <div class="agent-welcome-icon"><MessageCircle :size="20" /></div>
             <div class="agent-welcome-title">你好，我是凯凯小兵</div>
             <span>我可以帮你查询和整理工作台里的学生数据。</span>
             <div class="agent-suggestion-list">
@@ -258,12 +256,9 @@ onMounted(loadAccessInfo)
             </div>
           </div>
           <div v-for="(message, index) in agentMessages" :key="`${message.role}-${index}`" class="agent-message" :class="message.role">
-            <div v-if="message.role === 'assistant'" class="agent-message-avatar assistant-avatar" aria-hidden="true"><MessageCircle :size="14" :stroke-width="2.2" /></div>
             <div class="agent-message-bubble">{{ message.content }}</div>
-            <div v-if="message.role === 'user'" class="agent-message-avatar user-avatar" aria-hidden="true"><UserRound :size="14" :stroke-width="2.2" /></div>
           </div>
           <div v-if="agentSending" class="agent-message assistant">
-            <div class="agent-message-avatar assistant-avatar" aria-hidden="true"><MessageCircle :size="14" :stroke-width="2.2" /></div>
             <div class="agent-message-bubble agent-thinking"><span></span><span></span><span></span></div>
           </div>
           <div v-if="agentError" class="agent-chat-error">{{ agentError }}</div>
@@ -425,8 +420,6 @@ onMounted(loadAccessInfo)
 .agent-chat-panel { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); height: min(640px, calc(100vh - 40px)); overflow: hidden; border: 1px solid rgba(255,255,255,.78); border-radius: 22px; background: rgba(255,255,255,.97); box-shadow: 0 24px 70px rgba(33, 43, 86, .24); animation: agent-panel-in 220ms cubic-bezier(.16, 1, .3, 1); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .agent-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, rgba(91,106,191,.11), rgba(255,255,255,.66)); }
 .agent-chat-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.agent-chat-avatar, .agent-welcome-icon { display: grid; place-items: center; flex: 0 0 auto; border-radius: 13px; background: var(--primary); color: #fff; }
-.agent-chat-avatar { width: 34px; height: 34px; }
 .agent-chat-title { color: var(--text); font-size: 14px; font-weight: 700; }
 .agent-chat-subtitle { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
 .agent-status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #43b866; box-shadow: 0 0 0 3px rgba(67,184,102,.12); }
@@ -438,16 +431,12 @@ onMounted(loadAccessInfo)
 .agent-chat-welcome { display: grid; justify-items: center; gap: 8px; margin: 58px 8px 30px; color: var(--text-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
 .agent-chat-welcome span { max-width: 260px; }
 .agent-welcome-title { color: var(--text); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
-.agent-welcome-icon { width: 42px; height: 42px; margin-bottom: 4px; border-radius: 15px; background: var(--primary-bg); color: var(--primary); }
 .agent-suggestion-list { display: grid; width: min(300px, 100%); gap: 7px; margin-top: 13px; }
 .agent-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.78); color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast); }
 .agent-suggestion:hover { border-color: rgba(91,106,191,.36); background: var(--primary-bg); color: var(--primary); }
 .agent-suggestion:active { transform: scale(.98); }
 .agent-message { display: flex; align-items: flex-end; gap: 7px; margin: 9px 0; }
 .agent-message.user { justify-content: flex-end; }
-.agent-message-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 26px; margin-bottom: 2px; border-radius: 9px; }
-.assistant-avatar { background: var(--primary); color: #fff; }
-.user-avatar { background: var(--primary-bg); color: var(--primary); }
 .agent-message-bubble { max-width: min(86%, 320px); padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.62; }
 .agent-message.user .agent-message-bubble { max-width: min(78%, 290px); padding: 10px 12px; border-radius: 15px 15px 5px 15px; background: var(--primary-bg); color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
