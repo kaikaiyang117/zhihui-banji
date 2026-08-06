@@ -109,6 +109,117 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(len(db.load_agent_session('test-session')), 5)
         self.assertEqual(list_audits(1)[0]['tool_name'], 'students_search')
 
+    def test_planner_resolves_student_number_before_profile(self):
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('已找到张三的详细信息。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'planned-profile-session', '查看学生 A001 的详细信息',
+            channel='web', actor_id='web-user'
+        ))
+        self.assertEqual(answer, '已找到张三的详细信息。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual([call['function']['name'] for call in tool_calls], [
+            'students_search', 'student_get_profile'
+        ])
+        profile_args = json.loads(tool_calls[1]['function']['arguments'])
+        self.assertEqual(profile_args, {'student_id': 1})
+        self.assertEqual([audit['tool_name'] for audit in list_audits(2)], [
+            'student_get_profile', 'students_search'
+        ])
+
+    def test_planner_skips_dependent_step_when_student_is_ambiguous(self):
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('请提供更具体的学号或姓名。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'planned-ambiguous-session', '查看学生 A 的详细信息',
+            channel='web', actor_id='web-user'
+        ))
+        self.assertEqual(answer, '请提供更具体的学号或姓名。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]['function']['name'], 'students_search')
+
+    def test_model_can_propose_a_structured_plan(self):
+        class FakeModel:
+            def __init__(self):
+                self.calls = 0
+                self.final_messages = None
+
+            async def complete(self, messages, _tools):
+                self.calls += 1
+                if self.calls == 1:
+                    return ModelResponse(json.dumps({
+                        'goal': '查询张三的学生信息',
+                        'steps': [{
+                            'id': 'search',
+                            'tool': 'students_search',
+                            'arguments': {'keyword': '张三'},
+                        }],
+                    }, ensure_ascii=False), [])
+                self.final_messages = messages
+                return ModelResponse('已完成学生查询。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'model-plan-session', '请分析一下学生数据',
+            channel='web', actor_id='web-user'
+        ))
+        self.assertEqual(answer, '已完成学生查询。')
+        self.assertEqual(model.calls, 2)
+        self.assertEqual(model.final_messages[-2]['role'], 'assistant')
+        self.assertEqual(model.final_messages[-2]['tool_calls'][0]['function']['name'], 'students_search')
+
+    def test_planner_replans_once_after_invalid_arguments(self):
+        class FakeModel:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, _messages, _tools):
+                self.calls += 1
+                if self.calls == 1:
+                    plan = {
+                        'goal': '查询学生',
+                        'steps': [{
+                            'id': 'bad_search',
+                            'tool': 'students_search',
+                            'arguments': {'unsupported': True},
+                        }],
+                    }
+                    return ModelResponse(json.dumps(plan), [])
+                if self.calls == 2:
+                    plan = {
+                        'goal': '查询学生',
+                        'steps': [{
+                            'id': 'good_search',
+                            'tool': 'students_search',
+                            'arguments': {'keyword': '张三'},
+                        }],
+                    }
+                    return ModelResponse(json.dumps(plan, ensure_ascii=False), [])
+                return ModelResponse('已修正计划并完成查询。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'replan-session', '请分析一下学生数据',
+            channel='web', actor_id='web-user'
+        ))
+        self.assertEqual(answer, '已修正计划并完成查询。')
+        self.assertEqual(model.calls, 3)
+
     def test_runner_returns_structured_tool_error_and_can_recover(self):
         class FakeModel:
             def __init__(self):
@@ -126,7 +237,7 @@ class AgentFoundationTest(unittest.TestCase):
 
         model = FakeModel()
         answer = asyncio.run(AgentRunner(model_client=model).chat(
-            'error-recover-session', '查询一个学生的信息'
+            'error-recover-session', '帮我处理一个不存在的操作'
         ))
         self.assertEqual(answer, '这个工具不可用，我已经停止继续调用。')
         tool_message = next(
@@ -149,7 +260,7 @@ class AgentFoundationTest(unittest.TestCase):
 
         model = FakeModel()
         answer = asyncio.run(AgentRunner(model_client=model, max_turns=5).chat(
-            'repeated-error-session', '查询一个学生的信息'
+            'repeated-error-session', '帮我处理一个不存在的操作'
         ))
         self.assertIn('连续失败', answer)
         self.assertEqual(model.calls, 2)
