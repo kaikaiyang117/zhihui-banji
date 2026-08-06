@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import base64
 import secrets
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from .models import ILinkCredentials
+
+
+ILINK_APP_ID = 'bot'
+ILINK_APP_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 6)
+ILINK_CHANNEL_VERSION = '2.4.6'
+ILINK_BOT_AGENT = 'MeimeiWorkbench/1.0.0'
 
 
 class ILinkError(Exception):
@@ -53,7 +60,11 @@ class ILinkClient:
     async def send_message(self, to_user_id: str, context_token: str, text: str) -> dict[str, Any]:
         return await self._request('POST', 'sendmessage', {
             'msg': {
+                'from_user_id': '',
                 'to_user_id': to_user_id,
+                'client_id': f'meimei-workbench-{uuid.uuid4().hex}',
+                'message_type': 2,
+                'message_state': 2,
                 'context_token': context_token,
                 'item_list': [{'type': 1, 'text_item': {'text': text}}],
             }
@@ -85,7 +96,12 @@ class ILinkClient:
         params: dict[str, Any] | None = None,
         auth: bool = True,
     ) -> dict[str, Any]:
-        headers = {'Content-Type': 'application/json'}
+        headers = {
+            'Content-Type': 'application/json',
+            'iLink-App-Id': ILINK_APP_ID,
+            'iLink-App-ClientVersion': ILINK_APP_CLIENT_VERSION,
+        }
+        request_body = body
         if auth:
             if not self.credentials or not self.credentials.bot_token:
                 raise ILinkError('微信尚未完成扫码授权')
@@ -94,15 +110,25 @@ class ILinkClient:
                 'Authorization': f'Bearer {self.credentials.bot_token}',
                 'X-WECHAT-UIN': _random_uin(),
             })
+            if body is not None:
+                request_body = {
+                    **body,
+                    'base_info': {
+                        'channel_version': ILINK_CHANNEL_VERSION,
+                        'bot_agent': ILINK_BOT_AGENT,
+                    },
+                }
         url = f'{self.config.base_url.rstrip("/")}/ilink/bot/{endpoint}'
         client = self._http_client
         owns_client = client is None
         if owns_client:
             client = httpx.AsyncClient(timeout=self.config.timeout_seconds)
         try:
-            response = await client.request(method, url, headers=headers, params=params, json=body)
+            response = await client.request(method, url, headers=headers, params=params, json=request_body)
             if response.status_code >= 400:
                 raise ILinkError(f'iLink 返回 HTTP {response.status_code}: {response.text[:300]}')
+            if not response.content.strip():
+                return {}
             try:
                 data = response.json()
             except ValueError as exc:
