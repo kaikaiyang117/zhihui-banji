@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
 import { del, get, post } from './api'
+import { renderAgentMarkdown } from './markdown'
 import UpdateDialog from './components/UpdateDialog.vue'
 
 const route = useRoute()
@@ -256,7 +257,8 @@ onMounted(loadAccessInfo)
             </div>
           </div>
           <div v-for="(message, index) in agentMessages" :key="`${message.role}-${index}`" class="agent-message" :class="message.role">
-            <div class="agent-message-bubble">{{ message.content }}</div>
+            <div v-if="message.role === 'assistant'" class="agent-message-bubble agent-markdown" v-html="renderAgentMarkdown(message.content)"></div>
+            <div v-else class="agent-message-bubble">{{ message.content }}</div>
           </div>
           <div v-if="agentSending" class="agent-message assistant">
             <div class="agent-message-bubble agent-thinking"><span></span><span></span><span></span></div>
@@ -439,6 +441,25 @@ onMounted(loadAccessInfo)
 .agent-message.user { justify-content: flex-end; }
 .agent-message-bubble { max-width: min(86%, 320px); padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.62; }
 .agent-message.user .agent-message-bubble { max-width: min(78%, 290px); padding: 10px 12px; border-radius: 15px 15px 5px 15px; background: var(--primary-bg); color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); }
+.agent-markdown p { margin: 0 0 8px; }
+.agent-markdown p:last-child { margin-bottom: 0; }
+.agent-markdown h1, .agent-markdown h2, .agent-markdown h3 { margin: 12px 0 7px; color: var(--text); line-height: 1.35; }
+.agent-markdown h1:first-child, .agent-markdown h2:first-child, .agent-markdown h3:first-child { margin-top: 0; }
+.agent-markdown h1 { font-size: 17px; }
+.agent-markdown h2 { font-size: 15px; }
+.agent-markdown h3 { font-size: 14px; }
+.agent-markdown ul, .agent-markdown ol { margin: 6px 0 9px; padding-left: 20px; }
+.agent-markdown li { margin: 3px 0; }
+.agent-markdown strong { color: var(--text); font-weight: 700; }
+.agent-markdown code { padding: 2px 5px; border-radius: 5px; background: rgba(91,106,191,.1); color: var(--primary); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-markdown pre { margin: 9px 0; padding: 11px 12px; overflow-x: auto; border: 1px solid rgba(91,106,191,.12); border-radius: 10px; background: #f5f6fb; }
+.agent-markdown pre code { padding: 0; background: transparent; color: var(--text); font-size: 11px; white-space: pre; }
+.agent-markdown blockquote { margin: 9px 0; padding: 2px 0 2px 11px; border-left: 3px solid rgba(91,106,191,.4); color: var(--text-secondary); }
+.agent-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.agent-markdown hr { margin: 12px 0; border: 0; border-top: 1px solid var(--border); }
+.agent-markdown table { display: block; max-width: 100%; margin: 9px 0; overflow-x: auto; border-collapse: collapse; font-size: 12px; }
+.agent-markdown th, .agent-markdown td { padding: 6px 8px; border: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.agent-markdown th { background: var(--primary-bg); color: var(--text); font-weight: 650; }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
 .agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-bounce 1s infinite ease-in-out; }
 .agent-thinking span:nth-child(2) { animation-delay: .12s; }
