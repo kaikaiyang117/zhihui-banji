@@ -34,7 +34,7 @@ def invoke_tool(
     if definition and definition.sensitive and channel == 'wechat':
         message = '微信渠道默认不提供敏感档案字段，请在工作台网页端查看。'
         _record_audit(channel, actor_id, name, arguments, 'denied', message)
-        raise ToolError(message)
+        raise ToolError(message, code='permission_denied')
     try:
         result = registry.execute(name, arguments)
     except ToolError as exc:
@@ -42,6 +42,10 @@ def invoke_tool(
         raise
     _record_audit(channel, actor_id, name, arguments, 'success', _summary(result))
     return result
+
+
+def record_tool_failure(channel: str, actor_id: str, name: str, arguments: dict, status: str, message: str):
+    _record_audit(channel, actor_id, name, arguments, status, message)
 
 
 def list_audits(limit: int = 50) -> list[dict]:

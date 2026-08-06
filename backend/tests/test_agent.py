@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import json
 import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -106,6 +108,81 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(answer, '找到了张三。')
         self.assertEqual(len(db.load_agent_session('test-session')), 5)
         self.assertEqual(list_audits(1)[0]['tool_name'], 'students_search')
+
+    def test_runner_returns_structured_tool_error_and_can_recover(self):
+        class FakeModel:
+            def __init__(self):
+                self.calls = 0
+                self.snapshots = []
+
+            async def complete(self, messages, _tools):
+                self.calls += 1
+                self.snapshots.append([dict(message) for message in messages])
+                if self.calls == 1:
+                    return ModelResponse('', [ToolCall(
+                        id='bad-call-1', name='student_delete', arguments='{}'
+                    )])
+                return ModelResponse('这个工具不可用，我已经停止继续调用。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'error-recover-session', '查询一个学生的信息'
+        ))
+        self.assertEqual(answer, '这个工具不可用，我已经停止继续调用。')
+        tool_message = next(
+            message for message in model.snapshots[1] if message['role'] == 'tool'
+        )
+        error = json.loads(tool_message['content'])['error']
+        self.assertEqual(error['code'], 'unknown_tool')
+        self.assertTrue(error['retryable'])
+
+    def test_runner_stops_repeated_failed_tool_calls(self):
+        class FakeModel:
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, _messages, _tools):
+                self.calls += 1
+                return ModelResponse('', [ToolCall(
+                    id=f'bad-call-{self.calls}', name='student_delete', arguments='{}'
+                )])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model, max_turns=5).chat(
+            'repeated-error-session', '查询一个学生的信息'
+        ))
+        self.assertIn('连续失败', answer)
+        self.assertEqual(model.calls, 2)
+        audits = list_audits(2)
+        self.assertEqual(audits[0]['status'], 'retry_exhausted')
+        self.assertEqual(audits[1]['status'], 'error')
+
+    def test_invalid_tool_json_is_structured_and_audited(self):
+        result = AgentRunner._call_tool(
+            'students_search', '{not-json', 'web', 'web-user'
+        )
+        self.assertEqual(result['error']['code'], 'invalid_arguments')
+        self.assertTrue(result['error']['retryable'])
+        self.assertEqual(list_audits(1)[0]['status'], 'error')
+
+    def test_execution_error_is_retried_once(self):
+        calls = 0
+
+        def flaky_invoke(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ToolError(
+                    '临时失败', code='execution_error', retryable=True, auto_retry=True
+                )
+            return {'student_count': 2}
+
+        with patch('app.agent.runner.invoke_tool', side_effect=flaky_invoke):
+            result = AgentRunner._execute_tool_with_retry(
+                'class_student_count', '{}', 'web', 'web-user', {}
+            )
+        self.assertEqual(result, {'student_count': 2})
+        self.assertEqual(calls, 2)
 
     def test_runner_routes_class_count_without_model_guessing(self):
         class FakeModel:

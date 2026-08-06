@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
 
-from .agent_service import invoke_tool
+from .agent_service import invoke_tool, record_tool_failure
 from .model_client import ModelResponse, OpenAICompatibleClient
 from .prompt import system_prompt
 from .session_store import SessionStore
@@ -43,6 +43,7 @@ class AgentRunner:
         messages.append({'role': 'user', 'content': text})
         tools = build_registry().model_tools()
         _apply_direct_tool(messages, text, channel, actor_id)
+        failure_counts: dict[str, int] = {}
 
         for _ in range(self.max_turns):
             response = await self.model_client.complete(messages, tools)
@@ -56,13 +57,23 @@ class AgentRunner:
                 return answer
 
             messages.append(_assistant_tool_message(response))
+            halt_message = ''
             for call in response.tool_calls:
-                result = self._call_tool(call.name, call.arguments, channel, actor_id)
+                result = self._execute_tool_with_retry(
+                    call.name, call.arguments, channel, actor_id, failure_counts
+                )
                 messages.append({
                     'role': 'tool',
                     'tool_call_id': call.id,
                     'content': json.dumps(result, ensure_ascii=False),
                 })
+                if result.get('error', {}).get('code') == 'retry_exhausted':
+                    halt_message = _tool_failure_message()
+                    break
+            if halt_message:
+                messages.append({'role': 'assistant', 'content': halt_message})
+                self.session_store.save(session_id, messages)
+                return halt_message
 
         self.session_store.save(session_id, messages)
         return '这次查询步骤太多，请缩小问题范围后重试。'
@@ -89,6 +100,7 @@ class AgentRunner:
         messages.append({'role': 'user', 'content': text})
         tools = build_registry().model_tools()
         _apply_direct_tool(messages, text, channel, actor_id)
+        failure_counts: dict[str, int] = {}
 
         for _ in range(self.max_turns):
             response = None
@@ -105,13 +117,24 @@ class AgentRunner:
                 self.session_store.save(session_id, messages)
                 return
             messages.append(_assistant_tool_message(response))
+            halt_message = ''
             for call in response.tool_calls:
-                result = self._call_tool(call.name, call.arguments, channel, actor_id)
+                result = self._execute_tool_with_retry(
+                    call.name, call.arguments, channel, actor_id, failure_counts
+                )
                 messages.append({
                     'role': 'tool',
                     'tool_call_id': call.id,
                     'content': json.dumps(result, ensure_ascii=False),
                 })
+                if result.get('error', {}).get('code') == 'retry_exhausted':
+                    halt_message = _tool_failure_message()
+                    break
+            if halt_message:
+                messages.append({'role': 'assistant', 'content': halt_message})
+                self.session_store.save(session_id, messages)
+                yield {'type': 'delta', 'content': halt_message}
+                return
 
         answer = '这次查询步骤太多，请缩小问题范围后重试。'
         messages.append({'role': 'assistant', 'content': answer})
@@ -123,13 +146,46 @@ class AgentRunner:
         try:
             arguments = json.loads(raw_arguments or '{}')
         except (TypeError, ValueError):
-            return {'error': '工具参数不是有效 JSON'}
+            message = '工具参数不是有效 JSON'
+            record_tool_failure(channel, actor_id, name, {}, 'error', message)
+            return _tool_error('invalid_arguments', message, retryable=True)
         if not isinstance(arguments, dict):
-            return {'error': '工具参数必须是对象'}
+            message = '工具参数必须是对象'
+            record_tool_failure(channel, actor_id, name, {}, 'error', message)
+            return _tool_error('invalid_arguments', message, retryable=True)
         try:
             return invoke_tool(name, arguments, channel=channel, actor_id=actor_id)
         except ToolError as exc:
-            return {'error': str(exc)}
+            return _tool_error(exc.code, str(exc), retryable=exc.retryable, auto_retry=exc.auto_retry)
+
+    @classmethod
+    def _execute_tool_with_retry(
+        cls,
+        name: str,
+        raw_arguments: str,
+        channel: str,
+        actor_id: str,
+        failure_counts: dict[str, int],
+    ) -> dict[str, Any]:
+        key = f'{name}:{raw_arguments}'
+        if failure_counts.get(key, 0) >= 1:
+            message = '同一个工具调用已经失败并自动重试过一次，停止继续重复调用。'
+            record_tool_failure(channel, actor_id, name, {}, 'retry_exhausted', message)
+            return _tool_error('retry_exhausted', message, retryable=False)
+
+        result = cls._call_tool(name, raw_arguments, channel, actor_id)
+        error = result.get('error')
+        if not error:
+            return result
+        failure_counts[key] = 1
+        if not error.get('auto_retry'):
+            return result
+
+        retry_result = cls._call_tool(name, raw_arguments, channel, actor_id)
+        if not retry_result.get('error'):
+            return retry_result
+        retry_result['error']['retry_attempts'] = 1
+        return retry_result
 
 
 def _infer_direct_tool(text: str) -> tuple[str, str, str] | None:
@@ -172,6 +228,21 @@ def _apply_direct_tool(messages: list[dict[str, Any]], text: str, channel: str, 
         'tool_call_id': tool_call_id,
         'content': json.dumps(result, ensure_ascii=False),
     })
+
+
+def _tool_error(code: str, message: str, *, retryable: bool, auto_retry: bool = False) -> dict[str, Any]:
+    return {
+        'error': {
+            'code': code,
+            'message': message,
+            'retryable': retryable,
+            'auto_retry': auto_retry,
+        },
+    }
+
+
+def _tool_failure_message() -> str:
+    return '凯凯小兵尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。'
 
 
 def _assistant_tool_message(response: ModelResponse) -> dict[str, Any]:

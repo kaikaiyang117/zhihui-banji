@@ -21,6 +21,12 @@ from ..services.agent_read import (
 class ToolError(Exception):
     """工具不存在或参数不符合工具边界。"""
 
+    def __init__(self, message: str, *, code: str = 'tool_error', retryable: bool = False, auto_retry: bool = False):
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.auto_retry = auto_retry
+
 
 @dataclass(frozen=True)
 class ToolDefinition:
@@ -75,26 +81,41 @@ class ToolRegistry:
     def execute(self, name: str, arguments: dict[str, Any] | None = None) -> dict:
         tool = self._tools.get(name)
         if not tool:
-            raise ToolError(f'工具不存在：{name}')
+            raise ToolError(f'工具不存在：{name}', code='unknown_tool', retryable=True)
         arguments = arguments or {}
         if not isinstance(arguments, dict):
-            raise ToolError('工具参数必须是对象')
+            raise ToolError('工具参数必须是对象', code='invalid_arguments', retryable=True)
 
         signature = inspect.signature(tool.handler)
         accepted = set(signature.parameters)
         unknown = sorted(set(arguments) - accepted)
         if unknown:
-            raise ToolError(f'工具参数不支持：{", ".join(unknown)}')
+            raise ToolError(
+                f'工具参数不支持：{", ".join(unknown)}',
+                code='invalid_arguments',
+                retryable=True,
+            )
         missing = [
             key for key, parameter in signature.parameters.items()
             if parameter.default is inspect.Parameter.empty and key not in arguments
         ]
         if missing:
-            raise ToolError(f'缺少工具参数：{", ".join(missing)}')
+            raise ToolError(
+                f'缺少工具参数：{", ".join(missing)}',
+                code='invalid_arguments',
+                retryable=True,
+            )
         try:
             return tool.handler(**arguments)
         except (TypeError, ValueError) as exc:
-            raise ToolError(str(exc)) from exc
+            raise ToolError(str(exc), code='invalid_arguments', retryable=True) from exc
+        except Exception as exc:
+            raise ToolError(
+                f'工具执行失败：{exc}',
+                code='execution_error',
+                retryable=True,
+                auto_retry=True,
+            ) from exc
 
 
 def build_registry() -> ToolRegistry:
