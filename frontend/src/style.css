@@ -103,7 +103,7 @@ body {
 .tab-icon { flex-shrink: 0; color: currentColor; }
 
 /* ── Sidebar ── */
-.app-body { display: flex; flex: 1; overflow: hidden; }
+.app-body { display: flex; flex: 1; min-width: 0; overflow: hidden; }
 
 .sidebar {
   width: var(--sidebar-width);
@@ -197,6 +197,7 @@ body {
 /* ── Main ── */
 .main {
   flex: 1;
+  min-width: 0;
   padding: 24px 32px;
   max-width: 1200px;
   overflow-y: auto;
@@ -349,7 +350,7 @@ body {
   background: rgba(0,0,0,0.02);
 }
 
-.table-wrap { overflow: auto; border-radius: var(--radius-sm); }
+.table-wrap { position: relative; overflow: auto; border-radius: var(--radius-sm); overscroll-behavior-x: contain; }
 
 .table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
 .table-wrap::-webkit-scrollbar-thumb {
@@ -378,6 +379,7 @@ body {
   text-decoration: none;
   white-space: nowrap;
   user-select: none;
+  touch-action: manipulation;
 }
 
 .btn:active { transform: scale(0.97); }
@@ -446,6 +448,7 @@ body {
   color: var(--text);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   letter-spacing: -0.01em;
+  min-height: 36px;
 }
 
 .search-box input { width: 200px; }
@@ -559,6 +562,7 @@ body {
 .empty-state { text-align: center; padding: 48px; color: var(--text-tertiary); font-size: 14px; }
 
 /* ── Seating ── */
+.seating-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .seating-grid { display: grid; gap: 6px; width: 100%; max-width: 1120px; }
 
 .seat-cell {
@@ -817,29 +821,59 @@ body {
   .attendance-summary, .compact-overview { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* 平板：保留侧栏结构，但收窄为图标导航，给内容留出更多横向空间 */
+@media (min-width: 641px) and (max-width: 900px) {
+  .sidebar { width: 64px; }
+  .sidebar-header { padding: 16px 8px; text-align: center; }
+  .sidebar-header h2 { font-size: 0; }
+  .sidebar-header h2::before { content: '美'; font-size: 18px; color: #fff; }
+  .sidebar-header .sub, .nav-group-title, .sidebar-footer, .nav-item span { display: none; }
+  .nav-item { justify-content: center; padding: 12px 8px; margin: 2px 6px; min-height: 44px; }
+  .main { max-width: none; padding: 20px; }
+  .overview-cards { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-grid, .student-detail-grid, .two-col { grid-template-columns: 1fr; }
+  .page-title { font-size: 24px; }
+  .card { padding: 18px; }
+}
+
 @media (max-width: 640px) {
-  .top-tabs { padding: 0 8px; overflow-x: auto; }
-  .top-tab { flex: 0 0 auto; padding: 0 12px; font-size: 12px; }
+  .top-tabs { padding: 6px 10px; overflow: visible; }
+  .top-tab { flex: 1 1 0; justify-content: center; min-height: 38px; padding: 0 8px; font-size: 12px; border-bottom: 0; border-radius: 9px; }
+  .top-tab.active { background: var(--primary-bg); }
   .app-body { overflow: visible; }
   .sidebar { position: fixed; z-index: 300; left: 0; right: 0; bottom: 0; width: 100%; height: calc(62px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid rgba(255,255,255,.12); }
   .sidebar-header, .sidebar-footer, .nav-group-title { display: none; }
-  .sidebar-nav { display: flex; align-items: stretch; overflow-x: auto; padding: 3px 5px calc(3px + env(safe-area-inset-bottom)); }
+  .sidebar-nav { display: flex; align-items: stretch; overflow-x: auto; padding: 3px 5px calc(3px + env(safe-area-inset-bottom)); scrollbar-width: none; }
+  .sidebar-nav::-webkit-scrollbar { display: none; }
   .nav-group { display: contents; }
-  .nav-item { flex: 0 0 70px; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 3px; margin: 0 2px; font-size: 10px; border-radius: 8px; }
+  .nav-item { flex: 0 0 70px; flex-direction: column; justify-content: center; gap: 2px; min-height: 54px; padding: 6px 3px; margin: 0 2px; font-size: 10px; border-radius: 8px; }
   .nav-item-icon { width: 17px; height: 17px; }
   .main { max-width: none; padding: 16px 12px 84px; }
   .page-title-bar { align-items: flex-start; margin-bottom: 17px; }
+  .page-title-bar > .toolbar { width: 100%; }
   .page-title { font-size: 22px; }
   .page-subtitle { font-size: 12px; }
   .overview-cards { gap: 8px; }.overview-card { min-width: 0; padding: 13px 12px; gap: 9px; }.oc-value { font-size: 22px; }.oc-icon { width: 36px; height: 36px; }
   .card { padding: 16px 14px; border-radius: 14px; }
-  .toolbar { width: 100%; }.toolbar .btn { min-height: 38px; }
-  .form-row, .profile-grid { grid-template-columns: 1fr; }.modal { width: calc(100% - 24px); padding: 22px 18px 17px; max-height: 86vh; }
+  .toolbar { width: 100%; }.toolbar .btn { min-height: 44px; }
+  .search-box { width: 100%; }.search-box input { width: 100%; }
+  .form-row, .profile-grid { grid-template-columns: 1fr; }
+  .form-input, .form-select, .search-box input, .report-bar input[type=date] { min-height: 44px; font-size: 16px; }
+  .modal-overlay { align-items: flex-end; }
+  .modal { width: 100%; padding: 22px 18px calc(17px + env(safe-area-inset-bottom)); max-height: 92vh; border-radius: 20px 20px 0 0; }
+  .modal-actions { position: sticky; bottom: 0; padding-top: 10px; background: var(--bg-elevated); }
   .communication-row { gap: 8px; flex-wrap: wrap; }.communication-date { width: 92px; }.communication-status { margin-left: 100px; }
   .attendance-hero { align-items: stretch; gap: 10px; }.attendance-actions { width: 100%; }.attendance-actions .btn { flex: 1; justify-content: center; }.attendance-message { width: 100%; margin-left: 0; }
   .attendance-row { flex-wrap: wrap; }.attendance-student { flex: 1; min-width: 95px; }.attendance-status { width: 105px; }.attendance-note, .attendance-time { max-width: none; flex: 1; min-width: 130px; }
   .student-hero-actions .soft-action { flex: 1; justify-content: center; }
   .timeline-head { flex-direction: column; gap: 2px; }.timeline-head span { white-space: normal; }
+  .data-table { min-width: 720px; }
+  .table-wrap::after { content: ''; position: absolute; z-index: 2; top: 0; right: 0; bottom: 0; width: 18px; pointer-events: none; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.9)); }
+  .data-table th, .data-table td { padding: 11px 10px; }
+  .chart-box { height: 250px; }
+  .seating-grid { min-width: 420px; }
+  .seat-cell { min-width: 32px; font-size: 12px; }
+  .seat-input { min-height: 36px; font-size: 16px; }
 }
 
 /* ── Reduced Motion ── */

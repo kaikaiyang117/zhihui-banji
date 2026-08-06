@@ -58,8 +58,8 @@ function renderIcon(name) {
         <span>{{ tab.title }}</span>
       </router-link>
       <div class="global-search">
-        <input v-model="searchText" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
-        <button v-if="searchText" class="search-clear" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
+        <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
+        <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
         <div v-if="searchOpen" class="search-popover">
           <div v-if="searching" class="search-empty">搜索中…</div>
           <div v-else-if="!searchResults.length" class="search-empty">没有找到匹配记录</div>
@@ -76,7 +76,7 @@ function renderIcon(name) {
           <h2>{{ activeNav.title }}</h2>
           <div class="sub">{{ activeNav.school }}</div>
         </div>
-        <nav class="sidebar-nav">
+        <nav class="sidebar-nav" aria-label="功能导航">
           <div v-for="group in activeNav.groups" :key="group.title" class="nav-group">
             <div class="nav-group-title">{{ group.title }}</div>
             <router-link v-for="item in group.items" :key="item.page"
@@ -134,7 +134,17 @@ function renderIcon(name) {
 .search-kind { flex: 0 0 auto; padding: 3px 6px; border-radius: 6px; background: var(--primary-bg); color: var(--primary); font-size: 11px; }
 .search-empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); font-size: 13px; }
 
-@media (max-width: 760px) { .global-search { width: 42vw; } .global-search input { font-size: 12px; } }
+@media (max-width: 760px) {
+  .global-search { width: 42vw; }
+  .global-search input { font-size: 12px; }
+}
+
+@media (max-width: 640px) {
+  .top-tabs { height: auto; min-height: 52px; flex-wrap: wrap; gap: 2px; }
+  .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
+  .global-search input { min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
+  .search-popover { position: fixed; top: 96px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .page-enter-active,
