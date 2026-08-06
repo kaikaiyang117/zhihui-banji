@@ -17,9 +17,38 @@ echo ""
 echo "  按 Ctrl+C 停止"
 echo "========================================"
 
-PYTHON_BIN="${WORKBENCH_PYTHON:-$SCRIPT_DIR/.venv/bin/python}"
-if [ ! -x "$PYTHON_BIN" ]; then
-  PYTHON_BIN="${WORKBENCH_PYTHON:-python3}"
+python_is_supported() {
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+if [ -n "${WORKBENCH_PYTHON:-}" ]; then
+  PYTHON_BIN="$WORKBENCH_PYTHON"
+elif [ -x "$SCRIPT_DIR/.venv/bin/python" ] && python_is_supported "$SCRIPT_DIR/.venv/bin/python"; then
+  PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
+else
+  PYTHON_BIN=""
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && python_is_supported "$candidate"; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [ -z "$PYTHON_BIN" ] || ! python_is_supported "$PYTHON_BIN"; then
+  echo "错误：需要 Python 3.11 或更高版本。"
+  echo "请安装 Python 3.11+，或设置 WORKBENCH_PYTHON 指向对应解释器。"
+  exit 1
+fi
+
+# 已完成微信扫码授权时，启动工作台后自动恢复 iLink 消息循环。
+# 首次运行没有凭证，不会发起登录，也不会阻止工作台启动。
+export MEIMEI_WECHAT_ENABLED="${MEIMEI_WECHAT_ENABLED:-true}"
+
+if [ "$MEIMEI_WECHAT_ENABLED" = "true" ]; then
+  echo "  已开启微信消息循环自动恢复"
+else
+  echo "  微信消息循环自动恢复：已关闭"
 fi
 
 WORKBENCH_HOST="$HOST" WORKBENCH_PORT="$PORT" "$PYTHON_BIN" run.py --open-browser "$@"

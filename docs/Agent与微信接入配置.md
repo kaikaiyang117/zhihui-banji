@@ -14,6 +14,8 @@ pip install -r backend/requirements.txt
 
 启动工作台后打开左侧“Agent 设置”，在“模型连接”中选择 DeepSeek，填写 API Key，保存并点击“测试模型”。Key 会保存到本机 `data/agent-model.json`，不会通过接口返回，也不会进入 Git。
 
+macOS 双击 `启动工作台.command` 启动时，会自动尝试恢复已经保存的微信授权和消息循环；首次运行没有微信凭证时会正常启动，之后可在页面中扫码连接。
+
 也可以在启动后通过环境变量配置：
 
 ```bash
