@@ -43,6 +43,25 @@ class AgentRunner:
         messages.append({'role': 'user', 'content': text})
         tools = build_registry().model_tools()
 
+        direct_tool = _infer_direct_tool(text)
+        if direct_tool:
+            tool_name, tool_arguments, tool_call_id = direct_tool
+            messages.append({
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [{
+                    'id': tool_call_id,
+                    'type': 'function',
+                    'function': {'name': tool_name, 'arguments': tool_arguments},
+                }],
+            })
+            result = self._call_tool(tool_name, tool_arguments, channel, actor_id)
+            messages.append({
+                'role': 'tool',
+                'tool_call_id': tool_call_id,
+                'content': json.dumps(result, ensure_ascii=False),
+            })
+
         for _ in range(self.max_turns):
             response = await self.model_client.complete(messages, tools)
             if not response.tool_calls:
@@ -78,6 +97,18 @@ class AgentRunner:
             return invoke_tool(name, arguments, channel=channel, actor_id=actor_id)
         except ToolError as exc:
             return {'error': str(exc)}
+
+
+def _infer_direct_tool(text: str) -> tuple[str, str, str] | None:
+    """为高频、明确的班级人数问题提供确定性工具路由。"""
+    class_terms = ('班级', '我们班', '本班', '班里', '班上')
+    student_terms = ('学生', '同学', '人数', '总数', '人')
+    count_terms = ('多少', '几', '人数', '总数', '总共', '共有')
+    if (any(term in text for term in class_terms)
+            and any(term in text for term in student_terms)
+            and any(term in text for term in count_terms)):
+        return 'class_student_count', '{}', 'direct-class-student-count'
+    return None
 
 
 def _assistant_tool_message(response: ModelResponse) -> dict[str, Any]:

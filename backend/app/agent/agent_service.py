@@ -68,6 +68,8 @@ def _record_audit(channel, actor_id, name, arguments, status, result_summary):
 
 
 def _summary(result: dict) -> str:
+    if 'student_count' in result:
+        return f"班级共有 {result['student_count']} 名学生"
     if 'students' in result:
         return f"返回 {len(result['students'])} 名学生"
     if 'timeline' in result:

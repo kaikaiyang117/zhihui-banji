@@ -37,9 +37,14 @@ class AgentFoundationTest(unittest.TestCase):
         tools = list_tools()
         self.assertEqual(
             [tool['name'] for tool in tools],
-            ['student_get_profile', 'student_get_timeline', 'students_search'],
+            ['class_student_count', 'student_get_profile', 'student_get_timeline', 'students_search'],
         )
         self.assertTrue(all(tool['read_only'] for tool in tools))
+
+    def test_class_student_count(self):
+        result = invoke_tool('class_student_count')
+        self.assertEqual(result, {'student_count': 2})
+        self.assertEqual(list_audits(1)[0]['result_summary'], '班级共有 2 名学生')
 
     def test_search_and_profile_are_audited(self):
         result = invoke_tool('students_search', {'keyword': '张'})
@@ -79,6 +84,20 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(answer, '找到了张三。')
         self.assertEqual(len(db.load_agent_session('test-session')), 5)
         self.assertEqual(list_audits(1)[0]['tool_name'], 'students_search')
+
+    def test_runner_routes_class_count_without_model_guessing(self):
+        class FakeModel:
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('当前班级共有 2 名学生。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'class-count-session', '我们班级有多少个学生？', channel='web', actor_id='web-user'
+        ))
+        self.assertEqual(answer, '当前班级共有 2 名学生。')
+        self.assertEqual(list_audits(1)[0]['tool_name'], 'class_student_count')
+        self.assertEqual(model.messages[-2]['role'], 'tool')
 
 
 if __name__ == '__main__':

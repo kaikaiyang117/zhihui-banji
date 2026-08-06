@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..services.agent_read import (
+    get_class_student_count,
     get_student_profile,
     get_student_timeline,
     search_students,
@@ -89,6 +90,16 @@ class ToolRegistry:
 
 def build_registry() -> ToolRegistry:
     return ToolRegistry([
+        ToolDefinition(
+            name='class_student_count',
+            description='查询当前工作台班级的学生总人数。用户问班级有多少人、多少名学生、学生总数时必须使用此工具。',
+            parameters={
+                'type': 'object',
+                'properties': {},
+                'additionalProperties': False,
+            },
+            handler=get_class_student_count,
+        ),
         ToolDefinition(
             name='students_search',
             description='按姓名或学号搜索学生，只返回基础班级信息。',

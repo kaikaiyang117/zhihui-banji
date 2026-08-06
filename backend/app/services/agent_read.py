@@ -10,6 +10,12 @@ from typing import Optional
 from .. import db
 
 
+def get_class_student_count() -> dict:
+    """返回当前工作台学生表中的班级人数。"""
+    row = db.get_conn().execute('SELECT COUNT(*) AS count FROM students').fetchone()
+    return {'student_count': int(row['count'] if row else 0)}
+
+
 def search_students(keyword: str = '', limit: int = 20) -> dict:
     keyword = str(keyword or '').strip()
     limit = max(1, min(int(limit), 100))
