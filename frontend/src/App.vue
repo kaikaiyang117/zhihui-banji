@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
+import { MessageCircle, RefreshCw, Send, UserRound } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
@@ -231,9 +231,12 @@ onMounted(loadAccessInfo)
             <span>我可以帮你查询和整理工作台里的学生数据。</span>
           </div>
           <div v-for="(message, index) in agentMessages" :key="`${message.role}-${index}`" class="agent-message" :class="message.role">
+            <div v-if="message.role === 'assistant'" class="agent-message-avatar assistant-avatar" aria-hidden="true"><MessageCircle :size="14" :stroke-width="2.2" /></div>
             <div class="agent-message-bubble">{{ message.content }}</div>
+            <div v-if="message.role === 'user'" class="agent-message-avatar user-avatar" aria-hidden="true"><UserRound :size="14" :stroke-width="2.2" /></div>
           </div>
           <div v-if="agentSending" class="agent-message assistant">
+            <div class="agent-message-avatar assistant-avatar" aria-hidden="true"><MessageCircle :size="14" :stroke-width="2.2" /></div>
             <div class="agent-message-bubble agent-thinking"><span></span><span></span><span></span></div>
           </div>
           <div v-if="agentError" class="agent-chat-error">{{ agentError }}</div>
@@ -403,9 +406,12 @@ onMounted(loadAccessInfo)
 .agent-chat-welcome strong { color: var(--text); font-size: 15px; }
 .agent-chat-welcome span { max-width: 240px; }
 .agent-welcome-icon { width: 42px; height: 42px; margin-bottom: 4px; border-radius: 15px; background: var(--primary-bg); color: var(--primary); }
-.agent-message { display: flex; margin: 8px 0; }
+.agent-message { display: flex; align-items: flex-end; gap: 7px; margin: 9px 0; }
 .agent-message.user { justify-content: flex-end; }
-.agent-message-bubble { max-width: 82%; padding: 10px 12px; border-radius: 15px 15px 15px 5px; background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
+.agent-message-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 26px; margin-bottom: 2px; border-radius: 9px; }
+.assistant-avatar { background: var(--primary); color: #fff; }
+.user-avatar { background: var(--primary-bg); color: var(--primary); }
+.agent-message-bubble { max-width: min(82%, 300px); padding: 10px 12px; border-radius: 15px 15px 15px 5px; background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
 .agent-message.user .agent-message-bubble { border-radius: 15px 15px 5px 15px; background: var(--primary); color: #fff; box-shadow: 0 5px 13px rgba(72, 88, 170, .18); }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
 .agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-bounce 1s infinite ease-in-out; }
