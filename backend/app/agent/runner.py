@@ -35,8 +35,11 @@ class AgentRunner:
         if not text:
             return '请输入要查询的内容。'
         messages = self.session_store.load(session_id)
+        system_message = {'role': 'system', 'content': system_prompt()}
         if not messages or messages[0].get('role') != 'system':
             messages.insert(0, {'role': 'system', 'content': system_prompt()})
+        else:
+            messages[0] = system_message
         messages.append({'role': 'user', 'content': text})
         tools = build_registry().model_tools()
 

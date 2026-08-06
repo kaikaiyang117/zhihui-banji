@@ -159,3 +159,19 @@ class WeChatProtocolTest(unittest.TestCase):
         asyncio.run(loop.run())
         self.assertTrue(loop.session_expired)
         self.assertIn('重新扫码', loop.last_error)
+
+    def test_new_session_command_clears_only_current_wechat_context(self):
+        save_config([], True)
+        db.save_agent_session('wechat:wx-user', [{'role': 'system', 'content': 'old'}])
+        sent = []
+
+        class FakeClient:
+            async def send_message(self, user_id, context_token, text):
+                sent.append((user_id, context_token, text))
+
+        service = WeChatService()
+        service.client = FakeClient()
+        asyncio.run(service._handle_message(IncomingText('m-4', 'wx-user', 'bot', 'ctx-4', '/新会话')))
+
+        self.assertEqual(db.load_agent_session('wechat:wx-user'), [])
+        self.assertIn('凯凯小兵', sent[0][2])

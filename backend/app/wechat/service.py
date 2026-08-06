@@ -7,6 +7,7 @@ from typing import Any
 
 from ..agent.model_client import ModelError
 from ..agent.runner import AgentRunner
+from ..agent.session_store import SessionStore
 from .auth_service import AuthService
 from .config import public_config, save_config
 from .credential_store import CredentialStore
@@ -98,6 +99,15 @@ class WeChatService:
                 f'你尚未获得美美工作台的使用授权。请管理员将此用户 ID 加入白名单：{message.from_user_id}',
             )
             return
+        command = message.text.strip()
+        if command in {'/新会话', '/清空会话'}:
+            SessionStore().clear(f'wechat:{message.from_user_id}')
+            await self.client.send_message(
+                message.from_user_id,
+                message.context_token,
+                '已清空当前对话上下文，凯凯小兵准备开始新的对话。',
+            )
+            return
         typing_ticket = await self._start_typing(message)
         runner = AgentRunner()
         try:
@@ -108,7 +118,7 @@ class WeChatService:
                 actor_id=message.from_user_id,
             )
         except ModelError as exc:
-            answer = f'美美助手暂时无法回答：{exc}'
+            answer = f'凯凯小兵暂时无法回答：{exc}'
         finally:
             await self._stop_typing(message, typing_ticket)
         await self.client.send_message(message.from_user_id, message.context_token, answer)
