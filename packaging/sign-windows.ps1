@@ -10,7 +10,7 @@ $CertificatePassword = $env:WINDOWS_CERTIFICATE_PASSWORD
 
 if ([string]::IsNullOrWhiteSpace($CertificateBase64)) {
   if ($RequireSigning) { throw '发布版本必须配置 WINDOWS_CERTIFICATE_BASE64。' }
-  Write-Host '未配置 Windows 代码签名证书，跳过签名（非正式发布模式）。'
+  Write-Warning '未配置 Windows 代码签名证书，跳过签名（将生成未签名安装包）。'
   exit 0
 }
 if ([string]::IsNullOrWhiteSpace($CertificatePassword)) {

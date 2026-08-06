@@ -12,7 +12,7 @@ if [ -z "$CERTIFICATE_BASE64" ]; then
     echo '发布版本必须配置 APPLE_CERTIFICATE_P12_BASE64。' >&2
     exit 1
   fi
-  echo '未配置 macOS 代码签名证书，跳过签名（非正式发布模式）。'
+  echo '未配置 macOS 代码签名证书，跳过签名（将生成未签名安装包）。'
   exit 0
 fi
 if [ -z "$CERTIFICATE_PASSWORD" ] || [ -z "$SIGNING_IDENTITY" ]; then

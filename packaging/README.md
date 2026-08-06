@@ -48,7 +48,7 @@ git push origin v0.3.0
 - Windows：`WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD`
 - macOS：`APPLE_CERTIFICATE_P12_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`
 
-带 `v*` 标签的正式发布会强制要求签名和 macOS 公证；手动运行流水线时没有凭证也可以生成测试包，但不会作为正式版本发布。
+带 `v*` 标签的发布会在 Secrets 完整时自动执行签名和 macOS 公证；没有凭证时仍会完成构建并发布未签名安装包，Release 说明会明确标注安全状态。未签名包仅建议在可信环境中测试使用。配置凭证后，无需修改流水线即可恢复签名发布。
 
 ## 启动模式
 
@@ -98,7 +98,7 @@ WORKBENCH_KB_DIR=/path/to/知识库 MeimeiWorkbench
 ## 当前打包边界
 
 - 当前是可验证的 `onedir` 打包配置；应用内检查更新、下载、SHA-256 校验和启动安装器已经加入。
-- Windows 使用 Inno Setup 生成安装程序；macOS 使用 `hdiutil` 生成 DMG。正式发布会强制签名、公证，并生成 `update-manifest.json` 作为 GitHub API 限流时的更新检查兜底。
+- Windows 使用 Inno Setup 生成安装程序；macOS 使用 `hdiutil` 生成 DMG。配置 Secrets 后自动签名、公证，并生成 `update-manifest.json` 作为 GitHub API 限流时的更新检查兜底。
 - 更新前会创建数据库备份；macOS 使用独立更新助手替换 App，并在新程序无法启动时恢复旧 App。
 - Windows 构建保留控制台窗口，便于查看启动地址和局域网提示；macOS 应用会自动打开浏览器。
 - 现有项目中的 `data/workbench.db` 不会自动复制到打包后的用户目录；首次发布需要提供一次数据导入/迁移步骤。

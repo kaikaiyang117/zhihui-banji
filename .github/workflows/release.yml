@@ -105,11 +105,26 @@ jobs:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
         run: .\packaging\build-windows.ps1
 
+      - name: Configure Windows signing
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -and
+              -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            "REQUIRE_SIGNING=1" >> $env:GITHUB_ENV
+            Write-Host 'Windows 代码签名已启用。'
+          } else {
+            "REQUIRE_SIGNING=0" >> $env:GITHUB_ENV
+            Write-Warning '未配置 Windows 签名证书，将生成未签名安装包。'
+          }
+
       - name: Sign Windows installer
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
-          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
@@ -128,13 +143,37 @@ jobs:
             throw "版本号不一致：期望 $expected，实际 $actual"
           }
 
+      - name: Configure macOS signing and notarization
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE_P12_BASE64" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            echo 'REQUIRE_SIGNING=1' >> "$GITHUB_ENV"
+            echo 'macOS 代码签名已启用。'
+          else
+            echo 'REQUIRE_SIGNING=0' >> "$GITHUB_ENV"
+            echo '::warning::未配置完整 macOS 签名证书，将生成未签名安装包。'
+          fi
+          if [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_PASSWORD" ]]; then
+            echo 'REQUIRE_NOTARIZATION=1' >> "$GITHUB_ENV"
+            echo 'macOS 公证已启用。'
+          else
+            echo 'REQUIRE_NOTARIZATION=0' >> "$GITHUB_ENV"
+            echo '::warning::未配置完整 macOS 公证凭证，将跳过公证。'
+          fi
+
       - name: Build macOS disk image
         if: matrix.platform == 'macos'
         shell: bash
         env:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
-          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
-          REQUIRE_NOTARIZATION: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -187,6 +226,42 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: python "$GITHUB_WORKSPACE/packaging/create-update-manifest.py"
 
+      - name: Prepare release notes
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [[ -n "$WINDOWS_CERTIFICATE_BASE64" && -n "$WINDOWS_CERTIFICATE_PASSWORD" ]]; then
+            windows_signing='已签名'
+          else
+            windows_signing='未签名（未配置证书）'
+          fi
+          if [[ -n "$APPLE_CERTIFICATE_P12_BASE64" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            macos_signing='已签名'
+          else
+            macos_signing='未签名（未配置证书）'
+          fi
+          if [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_PASSWORD" ]]; then
+            macos_notarization='已公证'
+          else
+            macos_notarization='未公证（未配置凭证）'
+          fi
+          cat > release-notes.md <<EOF
+          本版本安装包已通过自动构建、版本号检查和 SHA-256 校验。
+
+          安全状态：
+          - Windows：${windows_signing}
+          - macOS：${macos_signing}，${macos_notarization}
+
+          未签名安装包仅建议在可信环境中测试使用。配置对应 GitHub Actions Secrets 后，后续标签发布会自动启用签名和 macOS 公证。
+          EOF
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -194,4 +269,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "美美大王工作台 $GITHUB_REF_NAME" \
-            --generate-notes
+            --generate-notes \
+            --notes "$(cat release-notes.md)"
