@@ -2,7 +2,10 @@
 """Agent 基础接口：工具发现、只读调用和审计查看。"""
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..agent.agent_service import invoke_tool, list_audits, list_tools
@@ -117,6 +120,31 @@ async def agent_chat(body: ChatBody):
         return {'ok': True, 'session_id': body.session_id, 'answer': answer}
     except ModelError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@router.post('/chat/stream')
+async def agent_chat_stream(body: ChatBody):
+    async def events():
+        try:
+            runner = AgentRunner(session_store=SessionStore())
+            async for event in runner.chat_stream(
+                body.session_id,
+                body.message,
+                channel=body.channel,
+                actor_id=body.actor_id,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except ModelError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Agent 流式响应失败，请稍后重试。'}, ensure_ascii=False)}\n\n"
+        yield 'data: {"type":"done"}\n\n'
+
+    return StreamingResponse(
+        events(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @router.delete('/sessions/{session_id}')

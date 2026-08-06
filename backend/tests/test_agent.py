@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
 from app.agent.agent_service import invoke_tool, list_audits, list_tools
-from app.agent.model_client import ModelResponse, ToolCall
+from app.agent.model_client import ModelResponse, ModelStreamEvent, ToolCall
 from app.agent.runner import AgentRunner
 from app.agent.tool_registry import ToolError
 
@@ -37,7 +37,16 @@ class AgentFoundationTest(unittest.TestCase):
         tools = list_tools()
         self.assertEqual(
             [tool['name'] for tool in tools],
-            ['class_student_count', 'student_get_profile', 'student_get_timeline', 'students_search'],
+            [
+                'attendance_summary',
+                'class_student_count',
+                'communications_list',
+                'scores_summary',
+                'student_get_profile',
+                'student_get_timeline',
+                'students_search',
+                'tasks_list',
+            ],
         )
         self.assertTrue(all(tool['read_only'] for tool in tools))
 
@@ -45,6 +54,12 @@ class AgentFoundationTest(unittest.TestCase):
         result = invoke_tool('class_student_count')
         self.assertEqual(result, {'student_count': 2})
         self.assertEqual(list_audits(1)[0]['result_summary'], '班级共有 2 名学生')
+
+    def test_common_read_tools_are_callable(self):
+        self.assertIn('summary', invoke_tool('attendance_summary'))
+        self.assertIn('exams', invoke_tool('scores_summary'))
+        self.assertIn('tasks', invoke_tool('tasks_list'))
+        self.assertIn('communications', invoke_tool('communications_list'))
 
     def test_search_and_profile_are_audited(self):
         result = invoke_tool('students_search', {'keyword': '张'})
@@ -65,6 +80,12 @@ class AgentFoundationTest(unittest.TestCase):
         audit = list_audits(1)[0]
         self.assertEqual(audit['status'], 'error')
         self.assertEqual(audit['channel'], 'wechat')
+
+    def test_sensitive_profile_is_denied_on_wechat(self):
+        with self.assertRaises(ToolError):
+            invoke_tool('student_get_profile', {'student_id': 1}, channel='wechat', actor_id='wx-user')
+        audit = list_audits(1)[0]
+        self.assertEqual(audit['status'], 'denied')
 
     def test_runner_uses_tool_then_saves_session(self):
         class FakeModel:
@@ -98,6 +119,22 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(answer, '当前班级共有 2 名学生。')
         self.assertEqual(list_audits(1)[0]['tool_name'], 'class_student_count')
         self.assertEqual(model.messages[-2]['role'], 'tool')
+
+    def test_runner_streams_final_answer(self):
+        class FakeStreamModel:
+            async def iter_complete(self, _messages, _tools):
+                yield ModelStreamEvent(content='班级共有 ')
+                yield ModelStreamEvent(content='2 名学生。')
+                yield ModelStreamEvent(response=ModelResponse('班级共有 2 名学生。', []))
+
+        async def run():
+            chunks = []
+            runner = AgentRunner(model_client=FakeStreamModel())
+            async for event in runner.chat_stream('stream-session', '请告诉我一个结果'):
+                chunks.append(event['content'])
+            return ''.join(chunks)
+
+        self.assertEqual(asyncio.run(run()), '班级共有 2 名学生。')
 
 
 if __name__ == '__main__':

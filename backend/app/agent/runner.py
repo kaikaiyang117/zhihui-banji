@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 from .agent_service import invoke_tool
 from .model_client import ModelResponse, OpenAICompatibleClient
@@ -42,25 +42,7 @@ class AgentRunner:
             messages[0] = system_message
         messages.append({'role': 'user', 'content': text})
         tools = build_registry().model_tools()
-
-        direct_tool = _infer_direct_tool(text)
-        if direct_tool:
-            tool_name, tool_arguments, tool_call_id = direct_tool
-            messages.append({
-                'role': 'assistant',
-                'content': None,
-                'tool_calls': [{
-                    'id': tool_call_id,
-                    'type': 'function',
-                    'function': {'name': tool_name, 'arguments': tool_arguments},
-                }],
-            })
-            result = self._call_tool(tool_name, tool_arguments, channel, actor_id)
-            messages.append({
-                'role': 'tool',
-                'tool_call_id': tool_call_id,
-                'content': json.dumps(result, ensure_ascii=False),
-            })
+        _apply_direct_tool(messages, text, channel, actor_id)
 
         for _ in range(self.max_turns):
             response = await self.model_client.complete(messages, tools)
@@ -85,6 +67,57 @@ class AgentRunner:
         self.session_store.save(session_id, messages)
         return '这次查询步骤太多，请缩小问题范围后重试。'
 
+    async def chat_stream(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        channel: str = 'local',
+        actor_id: str = '',
+    ) -> AsyncIterator[dict[str, str]]:
+        """流式输出最终回答；工具调用轮次仍然由服务端完整执行。"""
+        text = str(text or '').strip()
+        if not text:
+            yield {'type': 'delta', 'content': '请输入要查询的内容。'}
+            return
+        messages = self.session_store.load(session_id)
+        system_message = {'role': 'system', 'content': system_prompt()}
+        if not messages or messages[0].get('role') != 'system':
+            messages.insert(0, system_message)
+        else:
+            messages[0] = system_message
+        messages.append({'role': 'user', 'content': text})
+        tools = build_registry().model_tools()
+        _apply_direct_tool(messages, text, channel, actor_id)
+
+        for _ in range(self.max_turns):
+            response = None
+            async for event in self.model_client.iter_complete(messages, tools):
+                if event.content:
+                    yield {'type': 'delta', 'content': event.content}
+                if event.response:
+                    response = event.response
+            if response is None:
+                raise RuntimeError('模型流式响应缺少最终结果')
+            if not response.tool_calls:
+                answer = response.content.strip() or '模型没有返回可显示的内容。'
+                messages.append({'role': 'assistant', 'content': answer})
+                self.session_store.save(session_id, messages)
+                return
+            messages.append(_assistant_tool_message(response))
+            for call in response.tool_calls:
+                result = self._call_tool(call.name, call.arguments, channel, actor_id)
+                messages.append({
+                    'role': 'tool',
+                    'tool_call_id': call.id,
+                    'content': json.dumps(result, ensure_ascii=False),
+                })
+
+        answer = '这次查询步骤太多，请缩小问题范围后重试。'
+        messages.append({'role': 'assistant', 'content': answer})
+        self.session_store.save(session_id, messages)
+        yield {'type': 'delta', 'content': answer}
+
     @staticmethod
     def _call_tool(name: str, raw_arguments: str, channel: str, actor_id: str) -> dict[str, Any]:
         try:
@@ -100,15 +133,45 @@ class AgentRunner:
 
 
 def _infer_direct_tool(text: str) -> tuple[str, str, str] | None:
-    """为高频、明确的班级人数问题提供确定性工具路由。"""
-    class_terms = ('班级', '我们班', '本班', '班里', '班上')
+    """为高频、明确的班级查询提供确定性工具路由。"""
+    class_terms = ('班级', '我们班', '本班', '班里', '班上', '全班')
     student_terms = ('学生', '同学', '人数', '总数', '人')
     count_terms = ('多少', '几', '人数', '总数', '总共', '共有')
     if (any(term in text for term in class_terms)
             and any(term in text for term in student_terms)
             and any(term in text for term in count_terms)):
         return 'class_student_count', '{}', 'direct-class-student-count'
+    if any(term in text for term in class_terms) and any(term in text for term in ('考勤', '出勤', '迟到', '请假', '缺勤')):
+        return 'attendance_summary', '{}', 'direct-class-attendance-summary'
+    if any(term in text for term in class_terms) and any(term in text for term in ('成绩', '分数', '考试', '排名')):
+        return 'scores_summary', '{}', 'direct-class-scores-summary'
+    if any(term in text for term in ('待办', '逾期', '跟进任务')) and not any(term in text for term in ('创建', '添加', '新建')):
+        return 'tasks_list', '{}', 'direct-tasks-list'
+    if any(term in text for term in ('家校沟通', '家长联系', '家访记录')):
+        return 'communications_list', '{}', 'direct-communications-list'
     return None
+
+
+def _apply_direct_tool(messages: list[dict[str, Any]], text: str, channel: str, actor_id: str):
+    direct_tool = _infer_direct_tool(text)
+    if not direct_tool:
+        return
+    tool_name, tool_arguments, tool_call_id = direct_tool
+    messages.append({
+        'role': 'assistant',
+        'content': None,
+        'tool_calls': [{
+            'id': tool_call_id,
+            'type': 'function',
+            'function': {'name': tool_name, 'arguments': tool_arguments},
+        }],
+    })
+    result = AgentRunner._call_tool(tool_name, tool_arguments, channel, actor_id)
+    messages.append({
+        'role': 'tool',
+        'tool_call_id': tool_call_id,
+        'content': json.dumps(result, ensure_ascii=False),
+    })
 
 
 def _assistant_tool_message(response: ModelResponse) -> dict[str, Any]:

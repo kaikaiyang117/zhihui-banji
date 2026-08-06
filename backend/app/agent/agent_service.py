@@ -30,6 +30,11 @@ def invoke_tool(
 ) -> dict:
     arguments = arguments or {}
     registry = get_registry()
+    definition = registry.get(name)
+    if definition and definition.sensitive and channel == 'wechat':
+        message = '微信渠道默认不提供敏感档案字段，请在工作台网页端查看。'
+        _record_audit(channel, actor_id, name, arguments, 'denied', message)
+        raise ToolError(message)
     try:
         result = registry.execute(name, arguments)
     except ToolError as exc:
@@ -70,6 +75,14 @@ def _record_audit(channel, actor_id, name, arguments, status, result_summary):
 def _summary(result: dict) -> str:
     if 'student_count' in result:
         return f"班级共有 {result['student_count']} 名学生"
+    if 'summary' in result and 'records' in result:
+        return f"返回考勤统计和 {len(result['records'])} 条记录"
+    if 'exams' in result:
+        return f"返回 {len(result['exams'])} 组成绩"
+    if 'tasks' in result:
+        return f"返回 {len(result['tasks'])} 条待办"
+    if 'communications' in result:
+        return f"返回 {len(result['communications'])} 条家校沟通记录"
     if 'students' in result:
         return f"返回 {len(result['students'])} 名学生"
     if 'timeline' in result:

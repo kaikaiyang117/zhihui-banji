@@ -2,9 +2,10 @@
 """OpenAI-compatible模型客户端，不绑定具体模型供应商。"""
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -62,6 +63,12 @@ class ModelResponse:
     reasoning_content: str = ''
 
 
+@dataclass(frozen=True)
+class ModelStreamEvent:
+    content: str = ''
+    response: ModelResponse | None = None
+
+
 class OpenAICompatibleClient:
     def __init__(self, config: ModelConfig | None = None, http_client: httpx.AsyncClient | None = None):
         self.config = config or ModelConfig.from_env()
@@ -112,6 +119,86 @@ class OpenAICompatibleClient:
         finally:
             if owns_client:
                 await client.aclose()
+
+    async def iter_complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[ModelStreamEvent]:
+        """以 OpenAI-compatible SSE 方式流式返回模型文本和最终工具调用。"""
+        if not self.config.configured:
+            raise ModelNotConfigured(
+                '模型尚未配置，请设置 MEIMEI_MODEL_API_KEY 和 MEIMEI_MODEL_NAME'
+            )
+        payload: dict[str, Any] = {
+            'model': self.config.model,
+            'messages': messages,
+            'temperature': 0.2,
+            'thinking': {'type': self.config.thinking},
+            'stream': True,
+        }
+        if tools:
+            payload['tools'] = tools
+            payload['tool_choice'] = 'auto'
+        headers = {
+            'Authorization': f'Bearer {self.config.api_key}',
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+        }
+        client = self._http_client
+        owns_client = client is None
+        if owns_client:
+            client = httpx.AsyncClient(timeout=self.config.timeout_seconds)
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: dict[int, dict[str, str]] = {}
+        try:
+            async with client.stream(
+                'POST',
+                f'{self.config.base_url}/chat/completions',
+                headers=headers,
+                json=payload,
+            ) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise ModelError(f'模型接口返回 HTTP {response.status_code}: {_error_text(response)}')
+                async for line in response.aiter_lines():
+                    if not line.startswith('data:'):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw or raw == '[DONE]':
+                        if raw == '[DONE]':
+                            break
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except ValueError:
+                        continue
+                    delta = ((data.get('choices') or [{}])[0].get('delta') or {})
+                    content = str(delta.get('content') or '')
+                    if content:
+                        content_parts.append(content)
+                        yield ModelStreamEvent(content=content)
+                    reasoning = str(delta.get('reasoning_content') or '')
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                    for item in delta.get('tool_calls') or []:
+                        index = int(item.get('index', len(tool_calls)))
+                        call = tool_calls.setdefault(index, {'id': '', 'name': '', 'arguments': ''})
+                        call['id'] += str(item.get('id') or '')
+                        function = item.get('function') or {}
+                        call['name'] += str(function.get('name') or '')
+                        call['arguments'] += str(function.get('arguments') or '')
+        except httpx.HTTPError as exc:
+            raise ModelError(f'模型网络请求失败：{exc}') from exc
+        finally:
+            if owns_client:
+                await client.aclose()
+        yield ModelStreamEvent(response=ModelResponse(
+            content=''.join(content_parts),
+            tool_calls=[ToolCall(**tool_calls[index]) for index in sorted(tool_calls)],
+            reasoning_content=''.join(reasoning_parts),
+        ))
 
 
 def _parse_response(data: dict[str, Any]) -> ModelResponse:

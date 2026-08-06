@@ -7,9 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..services.agent_read import (
+    get_attendance_summary,
     get_class_student_count,
+    get_communications_list,
+    get_scores_summary,
     get_student_profile,
     get_student_timeline,
+    get_tasks_list,
     search_students,
 )
 
@@ -25,6 +29,7 @@ class ToolDefinition:
     parameters: dict[str, Any]
     handler: Callable[..., dict]
     read_only: bool = True
+    sensitive: bool = False
 
     def public_schema(self) -> dict[str, Any]:
         return {
@@ -32,6 +37,7 @@ class ToolDefinition:
             'description': self.description,
             'parameters': self.parameters,
             'read_only': self.read_only,
+            'sensitive': self.sensitive,
         }
 
     def model_schema(self) -> dict[str, Any]:
@@ -62,6 +68,9 @@ class ToolRegistry:
 
     def model_tools(self) -> list[dict[str, Any]]:
         return [self._tools[name].model_schema() for name in sorted(self._tools)]
+
+    def get(self, name: str) -> ToolDefinition | None:
+        return self._tools.get(name)
 
     def execute(self, name: str, arguments: dict[str, Any] | None = None) -> dict:
         tool = self._tools.get(name)
@@ -101,6 +110,63 @@ def build_registry() -> ToolRegistry:
             handler=get_class_student_count,
         ),
         ToolDefinition(
+            name='attendance_summary',
+            description='查询全班或指定学生的考勤统计。可按日期范围筛选，适合回答出勤、迟到、请假、缺勤问题。',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'student_id': {'type': 'integer', 'minimum': 1},
+                    'date_from': {'type': 'string', 'description': '起始日期 YYYY-MM-DD，可为空'},
+                    'date_to': {'type': 'string', 'description': '结束日期 YYYY-MM-DD，可为空'},
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 30},
+                },
+                'additionalProperties': False,
+            },
+            handler=get_attendance_summary,
+        ),
+        ToolDefinition(
+            name='scores_summary',
+            description='查询全班或指定学生的考试成绩、科目分数和总分。',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'student_id': {'type': 'integer', 'minimum': 1},
+                    'exam_name': {'type': 'string', 'description': '考试名称，可为空'},
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 20},
+                },
+                'additionalProperties': False,
+            },
+            handler=get_scores_summary,
+        ),
+        ToolDefinition(
+            name='tasks_list',
+            description='查询待办、逾期事项和学生跟进任务，默认只返回未完成事项。',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'description': '待处理、处理中、待复查等状态，可为空'},
+                    'student_id': {'type': 'integer', 'minimum': 1},
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 20},
+                },
+                'additionalProperties': False,
+            },
+            handler=get_tasks_list,
+        ),
+        ToolDefinition(
+            name='communications_list',
+            description='查询家校沟通记录和后续跟进信息，只返回沟通摘要，不返回家长电话等敏感字段。',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'description': '沟通状态，可为空'},
+                    'student_id': {'type': 'integer', 'minimum': 1},
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 20},
+                },
+                'additionalProperties': False,
+            },
+            handler=get_communications_list,
+        ),
+        ToolDefinition(
             name='students_search',
             description='按姓名或学号搜索学生，只返回基础班级信息。',
             parameters={
@@ -123,6 +189,7 @@ def build_registry() -> ToolRegistry:
                 'additionalProperties': False,
             },
             handler=get_student_profile,
+            sensitive=True,
         ),
         ToolDefinition(
             name='student_get_timeline',

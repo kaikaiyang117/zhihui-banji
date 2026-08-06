@@ -5,7 +5,7 @@ import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
-import { del, get, post } from './api'
+import { del, get, streamPost } from './api'
 import { renderAgentMarkdown } from './markdown'
 import UpdateDialog from './components/UpdateDialog.vue'
 
@@ -131,15 +131,28 @@ async function sendAgentMessage() {
   agentInput.value = ''
   agentError.value = ''
   agentSending.value = true
+  let assistantIndex = -1
   try {
-    const result = await post('/api/agent/chat', {
+    await streamPost('/api/agent/chat/stream', {
       session_id: agentSessionId,
       message,
       channel: 'web',
       actor_id: 'web-user',
+    }, async (event) => {
+      if (event.type === 'error') throw new Error(event.message || 'Agent 流式响应失败，请稍后重试。')
+      if (event.type !== 'delta' || !event.content) return
+      if (assistantIndex < 0) {
+        agentMessages.value.push({ role: 'assistant', content: '' })
+        assistantIndex = agentMessages.value.length - 1
+      }
+      agentMessages.value[assistantIndex].content += event.content
+      scrollAgentToBottom()
     })
-    appendAgentMessage('assistant', result.answer || '凯凯小兵暂时没有返回内容。')
+    if (assistantIndex < 0) appendAgentMessage('assistant', '凯凯小兵暂时没有返回内容。')
   } catch (error) {
+    if (assistantIndex >= 0 && !agentMessages.value[assistantIndex].content) {
+      agentMessages.value.splice(assistantIndex, 1)
+    }
     agentError.value = error.message || '发送失败，请稍后重试。'
     scrollAgentToBottom()
   } finally {
