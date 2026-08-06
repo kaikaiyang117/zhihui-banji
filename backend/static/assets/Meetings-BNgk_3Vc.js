@@ -1,1 +1,0 @@
-import{_ as e}from"./SheetPage-CD8ift8K.js";import{j as t,q as r}from"./index-DUwkpzM3.js";import"./DataTable-DH4e9TjJ.js";import"./AddModal-CJQQ_Har.js";const p={__name:"Meetings",setup(a){return(o,s)=>(r(),t(e,{title:"班会记录","sheet-name":"班会记录","add-button":"添加记录",searchable:!0}))}};export{p as default};

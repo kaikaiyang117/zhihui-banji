@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Brain, CheckCircle, CircleAlert, MessageCircle, Play, QrCode, RefreshCw, Send, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
+import QRCode from 'qrcode'
 import { get, post, put } from '../api'
 
 const providers = {
@@ -33,6 +34,8 @@ const loginStarting = ref(false)
 const loginPolling = ref(false)
 const loopChanging = ref(false)
 const policySaving = ref(false)
+const wechatQr = ref('')
+const wechatQrSource = ref('')
 let loginTimer = null
 let statusTimer = null
 
@@ -113,6 +116,7 @@ async function loadWechat() {
   try {
     const [current, policy] = await Promise.all([get('/api/wechat/status'), get('/api/wechat/config')])
     wechat.value = current
+    await updateWechatQr(current.login?.qrcode_img_content)
     wechatConfig.allow_all = !!policy.allow_all
     wechatConfig.allow_users = [...(policy.allow_users || [])]
     wechatConfig.source = policy.source || 'local'
@@ -126,7 +130,9 @@ async function loadWechat() {
 
 async function refreshWechat() {
   try {
-    wechat.value = await get('/api/wechat/status')
+    const current = await get('/api/wechat/status')
+    wechat.value = current
+    await updateWechatQr(current.login?.qrcode_img_content)
   } catch (e) {
     error.value = e.message
   }
@@ -149,6 +155,7 @@ async function startWechatLogin() {
   try {
     const result = await post('/api/wechat/login/start', {})
     wechat.value = { ...(wechat.value || {}), login: result }
+    await updateWechatQr(result.qrcode_img_content)
     notice.value = '二维码已生成，请使用微信扫描。'
     startLoginPolling()
   } catch (e) {
@@ -164,6 +171,7 @@ async function pollWechatLogin() {
   try {
     const login = await post('/api/wechat/login/poll', {})
     wechat.value = { ...(wechat.value || {}), login }
+    await updateWechatQr(login.qrcode_img_content)
     if (login.status === 'confirmed' || login.status === 'expired') {
       stopLoginPolling()
       await refreshWechat()
@@ -221,10 +229,29 @@ async function saveWechatPolicy() {
   }
 }
 
-function wechatQrImage(content) {
-  if (!content) return ''
-  if (content.startsWith('data:') || content.startsWith('http')) return content
-  return `data:image/png;base64,${content}`
+async function updateWechatQr(content) {
+  const raw = String(content || '').trim()
+  if (!raw) {
+    wechatQr.value = ''
+    wechatQrSource.value = ''
+    return
+  }
+  if (raw === wechatQrSource.value) return
+  wechatQrSource.value = raw
+  if (raw.startsWith('data:image/')) {
+    wechatQr.value = raw
+    return
+  }
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    wechatQr.value = await QRCode.toDataURL(raw, {
+      width: 440,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#1d1d1f', light: '#ffffff' },
+    })
+    return
+  }
+  wechatQr.value = `data:image/png;base64,${raw.replace(/\s/g, '')}`
 }
 
 function loginStatusText(value) {
@@ -311,8 +338,8 @@ onBeforeUnmount(() => {
                 <strong>{{ wechat?.running ? '消息循环运行中' : '微信未运行' }}</strong>
                 <span v-if="wechat?.configured" class="status-ok">已完成授权</span>
               </div>
-              <div v-if="wechat?.login?.qrcode_img_content && wechat?.login?.status !== 'confirmed'" class="wechat-qr-wrap">
-                <img :src="wechatQrImage(wechat.login.qrcode_img_content)" alt="微信登录二维码" class="wechat-qr" />
+              <div v-if="wechatQr && wechat?.login?.status !== 'confirmed'" class="wechat-qr-wrap">
+                <img :src="wechatQr" alt="微信登录二维码" class="wechat-qr" />
                 <div class="wechat-qr-tip">{{ loginStatusText(wechat.login.status) }}</div>
               </div>
               <div v-else-if="!wechat?.configured" class="wechat-empty-state">
