@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from .model_config import load_local_config
+
 
 class ModelError(Exception):
     """模型调用失败。"""
@@ -23,18 +25,23 @@ class ModelConfig:
     base_url: str
     model: str
     timeout_seconds: float = 45.0
+    thinking: str = 'disabled'
 
     @classmethod
     def from_env(cls) -> 'ModelConfig':
-        api_key = os.environ.get('MEIMEI_MODEL_API_KEY') or os.environ.get('OPENAI_API_KEY', '')
-        base_url = os.environ.get('MEIMEI_MODEL_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
-        model = os.environ.get('MEIMEI_MODEL_NAME', '').strip()
+        local = load_local_config()
+        api_key = os.environ.get('MEIMEI_MODEL_API_KEY') or os.environ.get('OPENAI_API_KEY') or str(local.get('api_key') or '')
+        base_url = (os.environ.get('MEIMEI_MODEL_BASE_URL') or str(local.get('base_url') or 'https://api.openai.com/v1')).rstrip('/')
+        model = (os.environ.get('MEIMEI_MODEL_NAME') or str(local.get('model') or '')).strip()
+        thinking = (os.environ.get('MEIMEI_MODEL_THINKING') or str(local.get('thinking') or 'disabled')).strip().lower()
+        if thinking not in {'disabled', 'enabled'}:
+            thinking = 'disabled'
         timeout_text = os.environ.get('MEIMEI_MODEL_TIMEOUT', '45')
         try:
             timeout = max(5.0, min(float(timeout_text), 180.0))
         except ValueError:
             timeout = 45.0
-        return cls(api_key=api_key, base_url=base_url, model=model, timeout_seconds=timeout)
+        return cls(api_key=api_key, base_url=base_url, model=model, timeout_seconds=timeout, thinking=thinking)
 
     @property
     def configured(self) -> bool:
@@ -52,6 +59,7 @@ class ToolCall:
 class ModelResponse:
     content: str
     tool_calls: list[ToolCall]
+    reasoning_content: str = ''
 
 
 class OpenAICompatibleClient:
@@ -72,6 +80,7 @@ class OpenAICompatibleClient:
             'model': self.config.model,
             'messages': messages,
             'temperature': 0.2,
+            'thinking': {'type': self.config.thinking},
         }
         if tools:
             payload['tools'] = tools
@@ -119,7 +128,12 @@ def _parse_response(data: dict[str, Any]) -> ModelResponse:
             arguments=str(function.get('arguments') or '{}'),
         ))
     content = message.get('content') or ''
-    return ModelResponse(content=str(content), tool_calls=calls)
+    reasoning_content = message.get('reasoning_content') or ''
+    return ModelResponse(
+        content=str(content),
+        tool_calls=calls,
+        reasoning_content=str(reasoning_content),
+    )
 
 
 def _error_text(response: httpx.Response) -> str:

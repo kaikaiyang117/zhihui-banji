@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..agent.agent_service import invoke_tool, list_audits, list_tools
+from ..agent.model_config import load_local_config, public_config, save_local_config
 from ..agent.model_client import ModelError, ModelConfig
 from ..agent.runner import AgentRunner
 from ..agent.session_store import SessionStore
@@ -28,16 +29,25 @@ class ChatBody(BaseModel):
     actor_id: str = ''
 
 
+class ModelConfigBody(BaseModel):
+    api_key: str | None = None
+    base_url: str = Field(min_length=1, max_length=500)
+    model: str = Field(min_length=1, max_length=120)
+    thinking: str = 'disabled'
+    clear_api_key: bool = False
+
+
 @router.get('/status')
 def agent_status():
     config = ModelConfig.from_env()
+    wechat = wechat_service.status()
     return {
         'enabled': True,
         'model': config.model or 'not_configured',
         'model_configured': config.configured,
         'wechat': 'iLink',
-        'wechat_configured': wechat_service.status()['configured'],
-        'wechat_running': wechat_service.status()['running'],
+        'wechat_configured': wechat['configured'],
+        'wechat_running': wechat['running'],
         'tool_count': len(list_tools()),
         'message': 'Agent 工具、模型客户端和微信接入接口已就绪，是否启用取决于本地配置。',
     }
@@ -46,6 +56,39 @@ def agent_status():
 @router.get('/tools')
 def agent_tools():
     return {'tools': list_tools()}
+
+
+@router.get('/config')
+def agent_config():
+    local = load_local_config()
+    effective = ModelConfig.from_env()
+    data = public_config({
+        'api_key': effective.api_key,
+        'base_url': effective.base_url,
+        'model': effective.model,
+        'thinking': effective.thinking,
+    })
+    data['storage'] = 'local'
+    data['local_override_active'] = bool(local)
+    return data
+
+
+@router.put('/config')
+def update_agent_config(body: ModelConfigBody):
+    if body.thinking not in {'disabled', 'enabled'}:
+        raise HTTPException(400, 'thinking 只能是 disabled 或 enabled')
+    values = load_local_config()
+    if body.clear_api_key:
+        values.pop('api_key', None)
+    elif body.api_key:
+        values['api_key'] = body.api_key.strip()
+    values.update({
+        'base_url': body.base_url.rstrip('/'),
+        'model': body.model.strip(),
+        'thinking': body.thinking,
+    })
+    save_local_config(values)
+    return {'ok': True, **public_config(values), 'storage': 'local'}
 
 
 @router.post('/tools/{tool_name}')

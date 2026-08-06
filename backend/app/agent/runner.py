@@ -44,7 +44,10 @@ class AgentRunner:
             response = await self.model_client.complete(messages, tools)
             if not response.tool_calls:
                 answer = response.content.strip() or '模型没有返回可显示的内容。'
-                messages.append({'role': 'assistant', 'content': answer})
+                assistant_message = {'role': 'assistant', 'content': answer}
+                if response.reasoning_content:
+                    assistant_message['reasoning_content'] = response.reasoning_content
+                messages.append(assistant_message)
                 self.session_store.save(session_id, messages)
                 return answer
 
@@ -86,4 +89,5 @@ def _assistant_tool_message(response: ModelResponse) -> dict[str, Any]:
             }
             for call in response.tool_calls
         ],
+        **({'reasoning_content': response.reasoning_content} if response.reasoning_content else {}),
     }

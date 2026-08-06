@@ -7,6 +7,7 @@ __pycache__/
 *.xlsx
 *.xls
 data/
+data/agent-model.json
 
 # Obsidian 知识库笔记（个人隐私，不入库）
 知识库/
