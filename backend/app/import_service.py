@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import re
+from datetime import date, datetime
 
 from openpyxl import Workbook, load_workbook
 
@@ -21,6 +22,16 @@ NORMALIZE = {
 
 def _norm(s: str) -> str:
     return re.sub(r'\s+', '', str(s or '')).strip()
+
+
+def _cell_text(value) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
 def build_template() -> io.BytesIO:
@@ -43,17 +54,20 @@ def build_template() -> io.BytesIO:
     return buf
 
 
-def import_students(file_bytes: bytes, filename: str = '') -> dict:
-    """解析上传的 Excel，按学号合并导入。
-    返回 {imported, updated, skipped, errors:[{row,msg}]}
-    """
+def _empty_summary() -> dict:
+    return {'imported': 0, 'updated': 0, 'skipped': 0, 'valid': 0}
+
+
+def preview_students(file_bytes: bytes, filename: str = '') -> dict:
+    """只解析和校验学生 Excel，不修改数据库，返回待确认的有效行。"""
     conn = get_conn()
-    result = {'imported': 0, 'updated': 0, 'skipped': 0, 'errors': []}
+    result = {'filename': filename, 'rows': [], 'errors': [], 'summary': _empty_summary()}
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
     except Exception as e:
-        return {'imported': 0, 'updated': 0, 'skipped': 0,
-                'errors': [{'row': 0, 'msg': f'文件无法解析: {e}'}]}
+        result['errors'] = [{'row': 0, 'msg': f'文件无法解析: {e}'}]
+        result['summary']['skipped'] = 1
+        return result
 
     ws = wb.active if wb.active is not None else wb.worksheets[0]
 
@@ -76,18 +90,17 @@ def import_students(file_bytes: bytes, filename: str = '') -> dict:
             break
 
     if header_row <= 0:
-        return {'imported': 0, 'updated': 0, 'skipped': 0,
-                'errors': [{'row': 1, 'msg': '未找到表头，需包含「学号」「姓名」列（列名不能带多余空格/换行）'}]}
+        result['errors'] = [{'row': 1, 'msg': '未找到表头，需包含「学号」「姓名」列（列名不能带多余空格/换行）'}]
+        result['summary']['skipped'] = 1
+        return result
 
     def get_val(r, key):
         c = col_map.get(key)
         if not c:
-            return None
-        v = ws.cell(row=r, column=c).value
-        if isinstance(v, float) and v.is_integer():
-            return str(int(v))
-        return v
+            return ''
+        return _cell_text(ws.cell(row=r, column=c).value)
 
+    seen = set()
     for r in range(header_row + 1, ws.max_row + 1):
         xh = _norm(get_val(r, '学号'))
         name = _norm(get_val(r, '姓名'))
@@ -95,26 +108,93 @@ def import_students(file_bytes: bytes, filename: str = '') -> dict:
             continue  # 跳过空行
         if not xh:
             result['errors'].append({'row': r, 'msg': f'姓名「{name}」缺少学号，已跳过'})
-            result['skipped'] += 1
+            result['summary']['skipped'] += 1
+            continue
+        if not name:
+            result['errors'].append({'row': r, 'msg': f'学号「{xh}」缺少姓名，已跳过'})
+            result['summary']['skipped'] += 1
+            continue
+        if xh in seen:
+            result['errors'].append({'row': r, 'msg': f'学号「{xh}」在文件中重复，已跳过'})
+            result['summary']['skipped'] += 1
             continue
         fields = {k: get_val(r, k) for k in STUDENT_COLUMNS}
         fields['学号'] = xh
         fields['姓名'] = name
-        vals = tuple(fields.values())
-        cols = ','.join(f'[{k}]' for k in STUDENT_COLUMNS)
-        placeholders = ','.join('?' for _ in STUDENT_COLUMNS)
         existing = conn.execute('SELECT id FROM students WHERE 学号=?', (xh,)).fetchone()
-        if existing:
-            upd = ','.join(f'[{k}]=?' for k in STUDENT_COLUMNS)
-            conn.execute(
-                f'UPDATE students SET {upd}, updated_at=datetime(\'now\',\'localtime\') WHERE 学号=?',
-                (*vals, xh))
-            result['updated'] += 1
-        else:
-            conn.execute(
-                f'INSERT INTO students({cols}) VALUES({placeholders})', vals)
-            result['imported'] += 1
+        action = '更新' if existing else '新增'
+        result['rows'].append({
+            'row': r,
+            'action': action,
+            'student_id': existing['id'] if existing else None,
+            'fields': fields,
+        })
+        result['summary']["updated" if existing else "imported"] += 1
+        seen.add(xh)
 
-    conn.commit()
+    result['summary']['valid'] = len(result['rows'])
     wb.close()
+    return result
+
+
+def commit_student_import(rows: list[dict], filename: str = '') -> dict:
+    """提交预览后的有效行，提交前再次校验学号和文件内重复。"""
+    conn = get_conn()
+    result = {'imported': 0, 'updated': 0, 'skipped': 0, 'errors': []}
+    valid = []
+    seen = set()
+    for item in rows or []:
+        fields = item.get('fields', {}) if isinstance(item, dict) else {}
+        xh = _norm(fields.get('学号', ''))
+        name = _norm(fields.get('姓名', ''))
+        row_no = item.get('row', 0) if isinstance(item, dict) else 0
+        if not xh or not name:
+            result['errors'].append({'row': row_no, 'msg': '学号和姓名不能为空，已跳过'})
+            result['skipped'] += 1
+            continue
+        if xh in seen:
+            result['errors'].append({'row': row_no, 'msg': f'学号「{xh}」重复，已跳过'})
+            result['skipped'] += 1
+            continue
+        normalized = {key: _cell_text(fields.get(key, '')) for key in STUDENT_COLUMNS}
+        normalized['学号'] = xh
+        normalized['姓名'] = name
+        valid.append((row_no, normalized))
+        seen.add(xh)
+
+    try:
+        for _, fields in valid:
+            vals = tuple(fields.values())
+            cols = ','.join(f'[{k}]' for k in STUDENT_COLUMNS)
+            placeholders = ','.join('?' for _ in STUDENT_COLUMNS)
+            existing = conn.execute('SELECT id FROM students WHERE 学号=?', (fields['学号'],)).fetchone()
+            if existing:
+                updates = ','.join(f'[{k}]=?' for k in STUDENT_COLUMNS)
+                conn.execute(
+                    f'UPDATE students SET {updates}, updated_at=datetime(\'now\',\'localtime\') WHERE 学号=?',
+                    (*vals, fields['学号']))
+                result['updated'] += 1
+            else:
+                conn.execute(
+                    f'INSERT INTO students({cols}) VALUES({placeholders})', vals)
+                result['imported'] += 1
+        conn.execute(
+            '''INSERT INTO student_import_runs
+               (filename, imported, updated, skipped, error_count)
+               VALUES(?,?,?,?,?)''',
+            (filename or '', result['imported'], result['updated'],
+             result['skipped'], len(result['errors'])))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return result
+
+
+def import_students(file_bytes: bytes, filename: str = '') -> dict:
+    """兼容旧接口：解析并立即提交，不再作为前端默认流程。"""
+    preview = preview_students(file_bytes, filename)
+    result = commit_student_import(preview['rows'], filename)
+    result['skipped'] += preview['summary']['skipped']
+    result['errors'] = preview['errors'] + result['errors']
     return result

@@ -98,16 +98,37 @@ async function submit() {
   }
 }
 
-async function doImport() {
+async function previewImport() {
   const f = fileInput.value?.files?.[0]
   if (!f) { errorMsg.value = '请先选择 Excel 文件'; return }
   submitting.value = true
   errorMsg.value = ''
   try {
-    const res = await upload('/api/students/import', f)
+    const res = await upload('/api/students/import/preview', f)
     importResult.value = res
-    if (res.errors?.length) errorMsg.value = `导入完成，但有 ${res.errors.length} 条错误`
-    else errorMsg.value = ''
+    if (res.errors?.length) errorMsg.value = `检查完成，有 ${res.errors.length} 条数据需要修正`
+  } catch (e) {
+    errorMsg.value = e.message
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function commitImport() {
+  if (!importResult.value?.rows?.length) return
+  submitting.value = true
+  errorMsg.value = ''
+  try {
+    const res = await post('/api/students/import/commit', {
+      filename: importResult.value.filename || fileName.value,
+      rows: importResult.value.rows,
+    })
+    if (res.errors?.length) {
+      errorMsg.value = `已导入，但有 ${res.errors.length} 条数据未提交`
+      importResult.value = { ...importResult.value, commitResult: res }
+    } else {
+      emit('success')
+    }
   } catch (e) {
     errorMsg.value = e.message
   } finally {
@@ -138,15 +159,30 @@ function downloadTemplate() {
           <div v-if="fileName" class="hint">已选择：{{ fileName }}</div>
         </div>
         <div v-if="importResult" class="import-result">
-          <div class="hint strong">导入结果：新增 {{ importResult.imported }} 人 / 更新 {{ importResult.updated }} 人 / 跳过 {{ importResult.skipped }} 人</div>
+          <div class="hint strong">检查结果：新增 {{ importResult.summary?.imported || 0 }} 人 / 更新 {{ importResult.summary?.updated || 0 }} 人 / 可导入 {{ importResult.summary?.valid || 0 }} 人 / 跳过 {{ importResult.summary?.skipped || 0 }} 人</div>
+          <div v-if="importResult.rows?.length" class="import-preview">
+            <div class="hint">以下为前 {{ Math.min(importResult.rows.length, 8) }} 条待导入记录，确认后才会写入数据库：</div>
+            <div class="import-preview-list">
+              <span v-for="item in importResult.rows.slice(0, 8)" :key="item.row" class="import-preview-item">
+                {{ item.fields['学号'] }} {{ item.fields['姓名'] }} · {{ item.action }}
+              </span>
+            </div>
+          </div>
           <ul v-if="importResult.errors?.length" class="error-list">
             <li v-for="(err, i) in importResult.errors" :key="i">第 {{ err.row }} 行：{{ err.msg }}</li>
           </ul>
+          <ul v-if="importResult.commitResult?.errors?.length" class="error-list">
+            <li v-for="(err, i) in importResult.commitResult.errors" :key="`commit-${i}`">第 {{ err.row }} 行：{{ err.msg }}</li>
+          </ul>
+          <div v-if="errorMsg" class="error-text">{{ errorMsg }}</div>
         </div>
         <div class="modal-actions">
           <button class="btn btn-outline" @click="$emit('close')">关闭</button>
-          <button class="btn btn-primary" :disabled="submitting" @click="doImport">
-            {{ submitting ? '导入中...' : '⬆️ 开始导入' }}
+          <button v-if="!importResult" class="btn btn-primary" :disabled="submitting" @click="previewImport">
+            {{ submitting ? '检查中...' : '检查文件' }}
+          </button>
+          <button v-else class="btn btn-primary" :disabled="submitting || !importResult.rows?.length" @click="commitImport">
+            {{ submitting ? '导入中...' : `确认导入 ${importResult.rows?.length || 0} 条` }}
           </button>
         </div>
       </template>

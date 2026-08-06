@@ -689,6 +689,9 @@ body {
   white-space: nowrap;
 }
 .import-result { margin-top: 12px; padding: 12px; background: var(--success-bg); border-radius: var(--radius-sm); font-size: 13px; }
+.import-preview { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(39, 103, 72, .16); }
+.import-preview-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; color: var(--text-secondary); font-size: 12px; }
+.import-preview-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── P0 workflow ── */
 .page-subtitle { margin-top: 5px; color: var(--text-secondary); font-size: 13px; }

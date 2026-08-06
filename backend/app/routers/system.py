@@ -4,24 +4,25 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from .. import db
-from ..config import DATA_DIR, DB_PATH
 
 router = APIRouter(prefix='/api/system')
-BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
+
+
+def _backup_dir() -> str:
+    return db.backup_dir()
 
 
 def _safe_backup(name: str) -> str:
     clean = os.path.basename(name)
     if not clean.endswith('.db') or clean != name:
         raise HTTPException(400, '备份文件名不合法')
-    path = os.path.abspath(os.path.join(BACKUP_DIR, clean))
-    if os.path.dirname(path) != os.path.abspath(BACKUP_DIR):
+    path = os.path.abspath(os.path.join(_backup_dir(), clean))
+    if os.path.dirname(path) != os.path.abspath(_backup_dir()):
         raise HTTPException(400, '备份文件路径不合法')
     if not os.path.isfile(path):
         raise HTTPException(404, '备份文件不存在')
@@ -29,16 +30,7 @@ def _safe_backup(name: str) -> str:
 
 
 def _make_backup() -> str:
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    filename = f'workbench-{datetime.now().strftime("%Y%m%d-%H%M%S")}.db'
-    path = os.path.join(BACKUP_DIR, filename)
-    source = db.get_conn()
-    target = sqlite3.connect(path)
-    try:
-        source.backup(target)
-    finally:
-        target.close()
-    return filename
+    return db.create_backup('manual')
 
 
 @router.post('/backup')
@@ -49,13 +41,13 @@ def create_backup():
 
 @router.get('/backups')
 def list_backups():
-    if not os.path.isdir(BACKUP_DIR):
+    if not os.path.isdir(_backup_dir()):
         return {'backups': []}
     backups = []
-    for filename in os.listdir(BACKUP_DIR):
+    for filename in os.listdir(_backup_dir()):
         if not filename.endswith('.db'):
             continue
-        path = os.path.join(BACKUP_DIR, filename)
+        path = os.path.join(_backup_dir(), filename)
         backups.append({'filename': filename, 'size': os.path.getsize(path), 'modified': os.path.getmtime(path)})
     backups.sort(key=lambda x: x['modified'], reverse=True)
     return {'backups': backups}
@@ -84,12 +76,12 @@ async def restore_backup(file: UploadFile = File(...)):
     finally:
         check.close()
 
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(_backup_dir(), exist_ok=True)
     pre_restore = _make_backup()
-    temp_path = os.path.join(BACKUP_DIR, f'.restore-{datetime.now().strftime("%Y%m%d-%H%M%S")}.db')
+    temp_path = os.path.join(_backup_dir(), '.restore-upload.db')
     with open(temp_path, 'wb') as f:
         f.write(data)
     db.close()
-    os.replace(temp_path, DB_PATH)
+    os.replace(temp_path, db.DB_PATH)
     db.get_conn()
     return {'ok': True, 'pre_restore_backup': pre_restore}

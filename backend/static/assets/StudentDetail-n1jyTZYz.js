@@ -1,4 +1,4 @@
-import{c as M,o as B,a,b as s,t as l,u as i,d,e as u,P as L,x as z,T as w,z as $,I as C,F as r,g as c,f as _,j as T,k as V,r as p,n as R,J as U,q as o,y,K as D}from"./index-ZQ0nOhUx.js";import{_ as F}from"./QuickRecordModal-COGjp9vE.js";import{M as x}from"./message-circle-C1UxswI1.js";import{U as I}from"./user-round-gGJB5WL2.js";/**
+import{c as M,o as B,a,b as s,t as l,u as i,d,e as u,P as L,x as z,T as w,z as $,I as C,F as r,g as c,f as _,j as T,k as V,r as p,n as R,J as U,q as o,y,K as D}from"./index-CXZQLM6J.js";import{_ as F}from"./QuickRecordModal-CW9so9-b.js";import{M as x}from"./message-circle-D0tlxqyz.js";import{U as I}from"./user-round-DjdueQAo.js";/**
  * @license lucide-vue-next v0.577.0 - ISC
  *
  * This source code is licensed under the ISC license.
