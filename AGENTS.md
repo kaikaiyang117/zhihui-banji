@@ -1,70 +1,262 @@
-# AGENTS.md — 美美大王工作台 v2.2
+# AGENTS.md — 美美大王工作台 v2.3
 
-## Setup & startup order
+## 文档用途
 
+本文件是本项目的 AI 开发助手协作规范。修改代码前先阅读本文件，并以仓库中的实际代码、配置和测试结果为准；如果本文件与代码现状冲突，应优先修正文档或向用户说明冲突，不要默默假设。
+
+## 项目定位
+
+- 这是一个面向班主任和教师的本地个人工作台，包含教师工作台、个人工作台和知识库。
+- 采用“本地桌面主程序 + 局域网移动访问端”模式。结构化数据保存在本地 SQLite，知识库保存在本地 Markdown 文件，Excel 只用于导入和导出。
+- 后端使用 FastAPI + Uvicorn，前端使用 Vue 3 + Vite + Vue Router，桌面打包配置位于 `packaging/`。
+- 详细的产品功能、完整项目结构和发布说明见 [README.md](README.md)；本文件只记录 AI 修改代码时必须遵守的规则和容易忽略的约束。
+
+## 修改原则
+
+- 先检查相关源码、配置和现有测试，再决定修改方案；保持改动小而集中，不顺手重构无关代码。
+- 新增功能时优先复用现有组件、路由、API 封装和服务层；不要为一次性逻辑引入新的抽象层。
+- 不要把运行时数据重新写回旧版 Excel；`班主任工作台/` 和 `健康管理/` 中的旧文件是归档数据源。
+- 涉及真实数据库、知识库、批量删除、数据库恢复、依赖升级、发布、提交或推送的操作，必须以用户明确要求为前提。
+- 不要自动执行 `git commit`、`git push`、发布安装包或修改远程服务。
+
+## 环境准备与启动顺序
+
+优先使用项目提供的环境脚本：
+
+```bash
+# macOS/Linux
+./scripts/setup-dev.sh
 ```
-# 1. Backend deps (Python 3.11+)
-pip install -r backend/requirements.txt
 
-# 2. Frontend deps (Node 20+)
-cd frontend
-npm install
-npm approve-scripts esbuild          # required on first install
-npm run build                         # outputs to backend/static/
+```powershell
+# Windows PowerShell
+.\scripts\setup-dev.ps1
+```
 
-# 3. Data migration (first time only; preserves existing data)
+脚本会检查 Python 3.11+ 和 Node.js 20+，创建项目 `.venv`，安装后端依赖和前端依赖，并处理 esbuild 的脚本许可。
+
+手动安装和启动：
+
+```bash
+# 1. 后端依赖
 cd backend
-python migrate.py                     # reads legacy .xlsx into data/workbench.db
+pip install -r requirements.txt
 
-# 4. Run
-python run.py                         # http://localhost:5000
+# 2. 首次迁移旧 Excel 数据（已有数据时会保留数据）
+python migrate.py
+
+# 3. 前端依赖与构建
+cd ../frontend
+npm install
+npm approve-scripts esbuild          # 首次安装且 npm 支持该命令时执行
+npm run build                         # 输出到 ../backend/static/
+
+# 4. 启动服务
+cd ../backend
+python run.py                         # 默认访问 http://localhost:5000
 ```
 
-Double-click `启动工作台.bat` for one-click launch (uses `%~dp0` to resolve the project root).
+也可以双击 `启动工作台.bat` 或 `启动工作台.command` 启动桌面工作台。
 
-## Architecture (non-obvious)
+局域网开发模式：
 
-- **SQLite is the database** (`data/workbench.db`, WAL mode). Excel files in `班主任工作台/` and `健康管理/` are **archived legacy sources only** — they are no longer read or written at runtime. openpyxl is used **only for import/export**.
-- **SQLite thread quirk**: FastAPI sync endpoints run in a threadpool. `db.py` uses `check_same_thread=False` + a `threading.Lock` on the shared connection. Do not replace this with per-request connections without testing — the existing pattern works for single-user workloads.
-- **Vite build outputs to `backend/static/`** (not `frontend/dist/`). FastAPI serves it from there. After any frontend change, run `npm run build` from `frontend/` and restart the server.
-- **Derived columns** (`derived.py`): 成绩总分/积分排名/班费余额/腰臀比 are computed on read, never stored. This replaced the old Flask app's formula-hack code. When adding new computed columns, add a function to `DERIVERS` dict keyed by sheet name.
-- **Student import dedupes on 学号**: `POST /api/students/import` merges by 学号 (new rows inserted, existing rows updated). Rows missing 学号 are skipped with an error message. The template endpoint (`/api/students/template`) builds the expected column layout.
+```bash
+python backend/run.py --lan
+```
 
-## Router gotcha
+局域网模式会生成访问令牌并支持手机/平板访问，只能在可信局域网中使用；不要把端口映射到公网。端口冲突时，启动入口会自动寻找可用端口。
 
-App.vue is the shell (sidebar + top tabs + `<router-view />`), mounted by `createApp(App)` in `main.js`. The router **must not** include App as a route component — doing so causes a nested double-render with duplicated sidebars. Routes are flat:
+## 架构约束
+
+### 系统功能与 Agent 的分层规则
+
+项目开发分为“系统业务能力”和“Agent 能力”两条产品线，但代码必须遵守三层架构：
+
+```text
+系统业务能力层：services → database
+Agent 核心层：planner / runner / tools / session / audit
+渠道适配层：网页 Agent / 微信 iLink
+```
+
+- 系统业务能力层负责学生、成绩、考勤、待办、家校沟通等真实业务逻辑，并同时服务于用户点击操作和 Agent 调用。
+- Agent 核心层负责模型客户端、规划、工具执行、上下文、重试、权限和审计；它不复制业务逻辑。
+- 渠道适配层负责网页或微信的消息收发、会话身份、输出格式和渠道限制；网页端与微信端共享同一个 Agent 核心。
+- `backend/app/services/` 是业务能力的唯一实现位置；Agent 工具调用业务服务，不直接调用 FastAPI 路由，也不直接操作数据库。
+- 业务服务不依赖 Agent、微信或前端；依赖方向只能是“渠道 → Agent → 工具 → 业务服务 → 数据库”。
+- 新功能必须先完成业务服务，再实现系统 API 和页面，然后明确评估是否封装为 Agent 工具，最后接入网页和微信渠道。
+- 详细的系统能力、工具、渠道、权限和测试登记见 [docs/Agent能力矩阵.md](docs/Agent能力矩阵.md)。新增或修改能力时必须同步更新该矩阵。
+
+### Agent 工具、权限与渠道规则
+
+- 新增工具必须登记：工具名称、业务能力、参数、只读/写入属性、敏感等级、允许渠道、是否需要确认、对应业务服务和测试。
+- 工具注册表可以包含全部工具，但发送给模型的工具列表必须按当前渠道和权限筛选；微信默认排除敏感工具和高风险写工具。
+- 查询类工具可以在权限允许时自动执行；创建、修改、删除类工具必须在执行前获得用户明确确认，微信端默认禁止高风险写操作。
+- 权限校验必须在服务端 Agent 核心和工具层完成；网页或微信界面的隐藏按钮不构成安全边界。
+- 网页 Agent 和微信 Agent 必须复用 Planner、Runner、工具注册、会话、审计和错误处理；渠道代码不得复制一套 Agent 逻辑。
+- 网页会话和微信会话必须使用不同命名空间。网页使用 `web:{用户}:{会话}`，微信使用 `wechat:{凭证}:{微信用户}`，禁止跨渠道复用会话 ID。
+- 一个微信凭证默认对应一个 Agent 实例和一个用户主会话；只有明确的产品需求才增加多会话能力。
+- 会话保留用户问题、工具结果和最终回答；审计保留工具调用、参数摘要、状态和时间；不保存或展示模型隐式思维链。
+
+### Agent 故障、模型和数据安全规则
+
+- 模型客户端必须保持 OpenAI-compatible 抽象；模型名称、Base URL 和 API Key 来自配置，业务服务不绑定具体供应商。
+- 工具失败只能有限重试；相同失败调用必须停止，规划失败最多自动重新规划一次，禁止无限循环。
+- 模型不可用、微信断开或 Agent 异常时，系统页面和用户点击功能必须继续可用；返回友好提示并保留本地会话和凭证状态。
+- 工具改名或下线时，优先提供兼容映射或明确的停用错误；不得让模型对停用工具持续重试。
+- 审计和错误日志只记录参数摘要，不记录 API Key、监护人电话、家庭住址等完整敏感字段；测试夹具和截图必须脱敏。
+- 数据库、会话结构或工具参数变化必须兼容已有数据；数据库结构使用版本迁移，旧会话和旧审计记录不得直接删除。
+
+### Agent 专项测试规则
+
+- 业务服务改动：运行后端全量测试。
+- Agent 核心、模型客户端、规划器、工具或会话改动：运行后端全量测试，并覆盖工具调用、规划、权限、重试和流式响应。
+- 网页 Agent 改动：运行前端构建；涉及主要交互时运行 UI 冒烟测试。
+- 微信适配改动：运行微信测试和 Agent 测试，验证登录、消息收发、会话隔离、权限和断线恢复。
+- 共享业务服务改动：同时验证用户点击、网页 Agent 和微信 Agent 的主要调用路径。
+- 发布前分别检查系统功能、Agent 核心、网页渠道和微信渠道；检查项以 [docs/Agent能力矩阵.md](docs/Agent能力矩阵.md) 和 [docs/发布检查清单.md](docs/发布检查清单.md) 为准。
+
+### Agent 文档更新规则
+
+以下变化必须同步更新 `AGENTS.md` 或 [docs/Agent能力矩阵.md](docs/Agent能力矩阵.md)：
+
+- 新增系统业务模块或 Agent 工具
+- 修改工具参数、权限、敏感等级或渠道范围
+- 新增或修改网页/微信 Agent 能力
+- 修改会话、审计、确认、重试或故障回退流程
+- 修改模型接入、启动、构建、测试或发布方式
+
+### 数据与数据库
+
+- SQLite 数据库是运行时唯一的数据源：开发模式默认是 `data/workbench.db`，打包模式位于系统用户数据目录。
+- Excel 文件只由导入/导出逻辑使用，`openpyxl` 不承担运行时存储职责。
+- SQLite 使用 WAL 模式。FastAPI 同步接口在线程池中运行，`backend/app/db.py` 使用 `check_same_thread=False` 和共享连接上的 `threading.Lock`；未经测试不要改成每个请求单独创建连接。
+- 数据库结构通过 `backend/app/db.py` 中的迁移机制维护。修改表结构时必须增加迁移版本、处理已有数据库，并运行后端测试；不要直接手改真实数据库结构。
+- `WORKBENCH_DATA_DIR` 可以指定数据目录，测试或临时验证时应使用隔离目录，避免修改 `data/workbench.db`。
+- `WORKBENCH_KB_DIR` 可以指定知识库目录。知识库是 Markdown 文件，不由 SQLite 管理。
+
+### 派生数据
+
+- 成绩总分、积分排名、班费余额、腰臀比等派生列在读取时计算，不存入数据库。
+- 派生逻辑集中在 `backend/app/derived.py`。新增派生列时，在 `DERIVERS` 字典中按工作表名称添加函数，并补充对应测试。
+- 导出 Excel 时才把派生列写入导出结果；不要为了导出方便把派生值持久化。
+
+### 学生导入
+
+- `POST /api/students/import` 按学号合并：新学生插入，已有学生更新。
+- 缺少学号的行会跳过并返回错误信息；修改导入逻辑时必须保留故障行报告和导入批次记录。
+- 模板接口 `/api/students/template` 负责生成预期列布局，新增学生字段时要同步检查配置、模板、导入和导出逻辑。
+
+### 后端模块
+
+- API 路由放在 `backend/app/routers/`；可复用的业务逻辑放在 `backend/app/services/` 或已有 service 文件中。
+- 通用工作表逻辑集中在 `sheets.py`、`config.py`、`db.py` 和 `derived.py`，不要在多个路由中复制同一套数据逻辑。
+- Agent 和微信相关代码分别位于 `backend/app/agent/`、`backend/app/wechat/` 及对应路由中；涉及工具调用、消息去重或审计时，保留现有本地状态记录机制。
+- FastAPI 自动提供 API 文档，接口修改后可通过 `/docs` 检查路由和请求结构。
+
+### 前端模块
+
+- `App.vue` 是页面外壳，负责侧边栏、顶部标签页和 `<router-view />`；由 `main.js` 中的 `createApp(App)` 挂载。
+- 路由必须保持扁平，不能把 `App` 再作为路由组件，否则会出现嵌套渲染和重复侧边栏。当前使用 `createWebHashHistory()`。
+- API 请求优先通过 `frontend/src/api.js`，以保留统一的错误处理和局域网访问令牌。
+- 导航配置和工作表字段定义集中在 `frontend/src/sheets.js`；新增工作表页面时同步检查导航、字段、后端元数据和导出逻辑。
+- Vite 构建输出到 `backend/static/`，不是 `frontend/dist/`。任何前端修改后都要重新构建。
+
+路由示例：
 
 ```js
-// router.js — correct pattern
+// frontend/src/router.js — 正确写法
 const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', component: () => import('./views/Dashboard.vue') },
-  // ... all flat, no parent wrapper component
+  // ... 全部保持扁平，不使用 App 作为父级包装组件
 ]
 ```
 
-## Dev workflow
+## 测试与验收
 
-- `cd frontend && npm run dev` starts Vite dev server on :5173 with API proxy to :5000 — useful for frontend-only work
-- No formatter/linter configured. No CI. No tests.
-- npm has an `allow-scripts` policy that blocks esbuild's postinstall; run `npm approve-scripts esbuild` after install.
+根据改动范围执行检查，并在交付时说明实际执行过的命令及结果。
 
-## Batch file encoding
+### 后端测试
 
-`启动工作台.bat` must avoid hardcoded Chinese paths (`cd /d "%~dp0backend"`, not `cd /d "D:\Desktop\美美...\backend"`). Windows cmd.exe often garbles UTF-8 paths in batch files — `%~dp0` avoids that entirely.
+后端测试使用隔离 SQLite 数据，不应修改真实的 `data/workbench.db`：
 
-## Key file map
+```bash
+python -m unittest discover -s backend/tests -p 'test_*.py' -v
+```
 
-| Purpose | Path |
-|---------|------|
-| Server entry | `backend/run.py` |
-| DB schema + connection | `backend/app/db.py` |
-| Derived columns | `backend/app/derived.py` |
-| Student import logic | `backend/app/import_service.py` |
-| Excel export | `backend/app/export_service.py` |
-| Sheet metadata (headers, group) | `backend/app/config.py` → `SHEET_META` |
-| Nav config + add-form fields | `frontend/src/sheets.js` |
-| Vue router | `frontend/src/router.js` |
-| Reusable sheet page | `frontend/src/components/SheetPage.vue` |
-| Knowledge base (Obsidian) | `知识库/` (Markdown, not managed by backend) |
-| Legacy Excel files | `班主任工作台/班主任工作台.xlsx`, `健康管理/健康追踪表.xlsx` |
+涉及数据库、API、Agent、微信、导入导出或学生管理的后端改动，至少运行这组测试。
+
+### 前端构建
+
+```bash
+cd frontend
+npm run build
+```
+
+涉及 Vue 页面、路由、API 调用、样式、导航配置或工作表字段的改动，必须执行前端构建，并确认产物写入 `backend/static/`。
+
+### 浏览器冒烟测试
+
+需要 Node.js、Chromium 和可用的后端依赖：
+
+```bash
+npx playwright install chromium
+bash scripts/smoke-ui.sh
+```
+
+该脚本会启动临时服务并使用临时数据目录，检查工作台页面、手机访问入口和更新入口。涉及主要页面、登录令牌、局域网入口或桌面壳层的改动，应执行该测试。
+
+### CI
+
+`.github/workflows/ci.yml` 会执行后端测试、前端构建和浏览器 UI 冒烟测试。发布前还应参考 `docs/发布检查清单.md`，但不要把发布操作当作普通代码修改的一部分自动执行。
+
+## 数据安全
+
+- `data/workbench.db` 和 `知识库/` 可能包含学生、家长和个人隐私信息；不要把真实数据写入测试夹具、日志、截图、提交或公开链接。
+- 运行迁移、恢复或其他可能改变大量数据的操作前，先确认目标目录，并优先创建备份。系统的数据库备份功能会生成带完整性校验的 SQLite 备份。
+- 测试使用 `WORKBENCH_DATA_DIR` 指向临时目录；不要通过修改真实数据库来验证代码。
+- `--lan` 只适用于可信网络。不要移除访问令牌校验，也不要把本地服务配置成公网可访问服务。
+- 旧版 Excel 文件应保留为归档；除非用户明确要求迁移、导入或导出，不要覆盖或删除它们。
+
+## 开发流程
+
+1. 先定位需求涉及的页面、路由、API、数据表和测试。
+2. 修改最少的必要文件，并保持现有命名和代码风格。
+3. 对数据库或导入导出改动，检查已有数据兼容性和错误路径。
+4. 根据改动范围执行后端测试、前端构建和 UI 冒烟测试。
+5. 检查 `git diff`，确认没有临时文件、构建外的无关改动或隐私数据；向用户报告修改文件和验证结果。
+
+当前没有额外的格式化工具或 lint 命令；不要为了“顺手整理”大范围改写格式。
+
+## 批处理文件编码
+
+`启动工作台.bat` 不要写死中文路径（使用 `cd /d "%~dp0backend"`，不要使用 `cd /d "D:\Desktop\美美...\backend"`）。Windows 的 `cmd.exe` 经常无法正确处理批处理文件中的 UTF-8 路径；使用 `%~dp0` 定位项目根目录可以避免这个问题。
+
+## 关键文件索引
+
+| 用途 | 路径 |
+|------|------|
+| 项目概览与完整结构 | `README.md` |
+| 服务端入口 | `backend/run.py` |
+| 数据库结构、连接与迁移 | `backend/app/db.py` |
+| 应用配置与工作表元数据 | `backend/app/config.py` → `SHEET_META` |
+| 派生列 | `backend/app/derived.py` |
+| 学生导入逻辑 | `backend/app/import_service.py` |
+| Excel 导出 | `backend/app/export_service.py` |
+| API 路由 | `backend/app/routers/` |
+| 业务服务 | `backend/app/services/` |
+| Agent 模块 | `backend/app/agent/` |
+| 微信模块 | `backend/app/wechat/` |
+| Agent 能力矩阵 | `docs/Agent能力矩阵.md` |
+| 后端测试 | `backend/tests/` |
+| 前端 API 封装 | `frontend/src/api.js` |
+| 导航配置与工作表字段 | `frontend/src/sheets.js` |
+| Vue 入口与页面外壳 | `frontend/src/main.js`、`frontend/src/App.vue` |
+| Vue 路由 | `frontend/src/router.js` |
+| 可复用工作表页面 | `frontend/src/components/SheetPage.vue` |
+| 开发环境脚本 | `scripts/setup-dev.sh`、`scripts/setup-dev.ps1` |
+| UI 冒烟测试 | `scripts/smoke-ui.sh` |
+| CI 配置 | `.github/workflows/ci.yml` |
+| 发布检查 | `docs/发布检查清单.md` |
+| 知识库 | `知识库/`（Markdown 文件） |
+| 旧版 Excel 归档 | `班主任工作台/`、`健康管理/` |

@@ -2,6 +2,8 @@
 
 当前采用 PyInstaller `onedir` 方案：程序文件和用户数据分离。Windows 通过 Inno Setup 生成安装程序，macOS 通过 `hdiutil` 生成 `.dmg`。
 
+当前可用发布版本：[`v1.0.4`](https://github.com/aitia0718/workbench/releases/tag/v1.0.4)。该版本包含 Windows x64、macOS Apple Silicon 和 macOS Intel 安装包，但由于仓库尚未配置代码签名凭证，安装包为未签名版本。
+
 ## 构建
 
 先构建前端：
@@ -49,6 +51,16 @@ git push origin v0.3.0
 - macOS：`APPLE_CERTIFICATE_P12_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`
 
 带 `v*` 标签的发布会在 Secrets 完整时自动执行签名和 macOS 公证；没有凭证时仍会完成构建并发布未签名安装包，Release 说明会明确标注安全状态。未签名包仅建议在可信环境中测试使用。配置凭证后，无需修改流水线即可恢复签名发布。
+
+发布流水线行为：
+
+| 操作 | 结果 |
+|---|---|
+| 推送 `main` 或 `codex/**` 分支 | CI：后端测试、前端构建、浏览器冒烟测试 |
+| 创建并推送 `v*` 标签 | 构建三个平台安装包并创建 GitHub Release |
+| 手动运行 `Build desktop releases` | 只构建并上传 Actions Artifacts，不创建 Release |
+
+完整流程见 [`docs/开发与发布流程.md`](../docs/开发与发布流程.md)。标签版本一旦创建，不要重复移动同名标签；如果发布失败，修复后使用新的补丁版本号。
 
 ## 启动模式
 
@@ -102,3 +114,5 @@ WORKBENCH_KB_DIR=/path/to/知识库 MeimeiWorkbench
 - 更新前会创建数据库备份；macOS 使用独立更新助手替换 App，并在新程序无法启动时恢复旧 App。
 - Windows 构建保留控制台窗口，便于查看启动地址和局域网提示；macOS 应用会自动打开浏览器。
 - 现有项目中的 `data/workbench.db` 不会自动复制到打包后的用户目录；首次发布需要提供一次数据导入/迁移步骤。
+- 安装包是单机程序：卸载或升级不会主动删除用户数据，但仍建议升级前使用“备份数据”创建备份。
+- 未签名 macOS 安装包可能需要在“系统设置 → 隐私与安全性”中手动允许打开；Windows 可能显示 SmartScreen 提示。

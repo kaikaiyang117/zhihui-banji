@@ -1,7 +1,7 @@
 @echo off
-title Meimei Workbench v2.2
+title Meimei Workbench v2.3
 echo ================================
-echo    Mei Mei Wang Workbench v2.2
+echo    Mei Mei Wang Workbench v2.3
 echo 凯凯小兵为你值守
 echo ================================
 echo Starting...
