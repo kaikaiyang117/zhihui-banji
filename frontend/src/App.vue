@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageCircle, RefreshCw, Send, UserRound } from 'lucide-vue-next'
 import QRCode from 'qrcode'
@@ -26,6 +26,13 @@ const agentInput = ref('')
 const agentMessages = ref([])
 const agentSending = ref(false)
 const agentError = ref('')
+const agentBody = ref(null)
+const agentInputEl = ref(null)
+const agentSuggestions = [
+  '我们班有多少名学生？',
+  '查询张三的基本信息',
+  '最近有哪些学生需要跟进？',
+]
 
 function getWebAgentSessionId() {
   const storageKey = 'meimei_agent_web_session_id'
@@ -102,6 +109,18 @@ async function copyAccessUrl() {
 
 function appendAgentMessage(role, content) {
   agentMessages.value.push({ role, content })
+  scrollAgentToBottom()
+}
+
+function scrollAgentToBottom() {
+  nextTick(() => {
+    if (agentBody.value) agentBody.value.scrollTop = agentBody.value.scrollHeight
+  })
+}
+
+function useAgentSuggestion(message) {
+  agentInput.value = message
+  nextTick(() => agentInputEl.value?.focus())
 }
 
 async function sendAgentMessage() {
@@ -121,6 +140,7 @@ async function sendAgentMessage() {
     appendAgentMessage('assistant', result.answer || '凯凯小兵暂时没有返回内容。')
   } catch (error) {
     agentError.value = error.message || '发送失败，请稍后重试。'
+    scrollAgentToBottom()
   } finally {
     agentSending.value = false
   }
@@ -139,6 +159,7 @@ async function resetAgentSession() {
     await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}`)
     agentMessages.value = []
     agentError.value = ''
+    scrollAgentToBottom()
   } catch (error) {
     agentError.value = error.message || '新会话创建失败，请稍后重试。'
   }
@@ -212,7 +233,7 @@ onMounted(loadAccessInfo)
             <div class="agent-chat-avatar"><MessageCircle :size="18" :stroke-width="2.2" /></div>
             <div>
               <div id="agent-chat-title" class="agent-chat-title">凯凯小兵</div>
-              <div class="agent-chat-subtitle">美美工作台 Agent 助手</div>
+              <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>美美工作台 Agent 助手</div>
             </div>
           </div>
           <div class="agent-chat-actions">
@@ -224,11 +245,17 @@ onMounted(loadAccessInfo)
             </button>
           </div>
         </header>
-        <div class="agent-chat-body" aria-live="polite">
+        <div ref="agentBody" class="agent-chat-body" aria-live="polite">
           <div v-if="!agentMessages.length" class="agent-chat-welcome">
             <div class="agent-welcome-icon"><MessageCircle :size="20" /></div>
-            <strong>你好，我是凯凯小兵</strong>
+            <div class="agent-welcome-title">你好，我是凯凯小兵</div>
             <span>我可以帮你查询和整理工作台里的学生数据。</span>
+            <div class="agent-suggestion-list">
+              <button v-for="suggestion in agentSuggestions" :key="suggestion" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
+                {{ suggestion }}
+                <component :is="renderIcon('ChevronRight')" :size="14" />
+              </button>
+            </div>
           </div>
           <div v-for="(message, index) in agentMessages" :key="`${message.role}-${index}`" class="agent-message" :class="message.role">
             <div v-if="message.role === 'assistant'" class="agent-message-avatar assistant-avatar" aria-hidden="true"><MessageCircle :size="14" :stroke-width="2.2" /></div>
@@ -242,10 +269,15 @@ onMounted(loadAccessInfo)
           <div v-if="agentError" class="agent-chat-error">{{ agentError }}</div>
         </div>
         <footer class="agent-chat-foot">
-          <textarea v-model="agentInput" rows="2" maxlength="2000" placeholder="例如：查询张三的基本信息" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
-          <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="!agentInput.trim() || agentSending" @click="sendAgentMessage">
-            <Send :size="16" :stroke-width="2.2" />
-          </button>
+          <div class="agent-composer">
+            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给凯凯小兵发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
+            <div class="agent-composer-bottom">
+              <div class="agent-composer-meta"><span class="agent-status-dot"></span>工作台数据已连接</div>
+              <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="!agentInput.trim() || agentSending" @click="sendAgentMessage">
+                <Send :size="16" :stroke-width="2.2" />
+              </button>
+            </div>
+          </div>
           <div class="agent-chat-hint">Enter 发送 · Shift + Enter 换行</div>
         </footer>
       </section>
@@ -390,42 +422,51 @@ onMounted(loadAccessInfo)
 .agent-fab { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 17px; border: 1px solid rgba(255,255,255,.7); border-radius: 999px; background: var(--primary); color: #fff; box-shadow: 0 12px 28px rgba(72, 88, 170, .28); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: transform var(--transition-fast), box-shadow var(--transition-fast); touch-action: manipulation; }
 .agent-fab:hover { transform: translateY(-2px); box-shadow: 0 16px 32px rgba(72, 88, 170, .34); }
 .agent-fab:active { transform: scale(.97); }
-.agent-chat-panel { display: flex; flex-direction: column; width: min(380px, calc(100vw - 32px)); height: min(580px, calc(100vh - 40px)); overflow: hidden; border: 1px solid rgba(255,255,255,.78); border-radius: 22px; background: rgba(255,255,255,.95); box-shadow: 0 24px 70px rgba(33, 43, 86, .24); animation: agent-panel-in 220ms cubic-bezier(.16, 1, .3, 1); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.agent-chat-panel { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); height: min(640px, calc(100vh - 40px)); overflow: hidden; border: 1px solid rgba(255,255,255,.78); border-radius: 22px; background: rgba(255,255,255,.97); box-shadow: 0 24px 70px rgba(33, 43, 86, .24); animation: agent-panel-in 220ms cubic-bezier(.16, 1, .3, 1); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .agent-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, rgba(91,106,191,.11), rgba(255,255,255,.66)); }
 .agent-chat-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .agent-chat-avatar, .agent-welcome-icon { display: grid; place-items: center; flex: 0 0 auto; border-radius: 13px; background: var(--primary); color: #fff; }
 .agent-chat-avatar { width: 34px; height: 34px; }
 .agent-chat-title { color: var(--text); font-size: 14px; font-weight: 700; }
-.agent-chat-subtitle { margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
+.agent-chat-subtitle { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
+.agent-status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #43b866; box-shadow: 0 0 0 3px rgba(67,184,102,.12); }
 .agent-chat-actions { display: flex; gap: 4px; }
 .agent-icon-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); cursor: pointer; touch-action: manipulation; }
 .agent-icon-button:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-icon-button:active { transform: scale(.94); }
-.agent-chat-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 14px; background: linear-gradient(180deg, rgba(248,249,253,.76), rgba(255,255,255,.9)); }
-.agent-chat-welcome { display: grid; justify-items: center; gap: 7px; margin: 42px 18px; color: var(--text-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
-.agent-chat-welcome strong { color: var(--text); font-size: 15px; }
-.agent-chat-welcome span { max-width: 240px; }
+.agent-chat-body { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 20px; background: linear-gradient(180deg, rgba(248,249,253,.76), rgba(255,255,255,.9)); scroll-behavior: smooth; }
+.agent-chat-welcome { display: grid; justify-items: center; gap: 8px; margin: 58px 8px 30px; color: var(--text-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
+.agent-chat-welcome span { max-width: 260px; }
+.agent-welcome-title { color: var(--text); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
 .agent-welcome-icon { width: 42px; height: 42px; margin-bottom: 4px; border-radius: 15px; background: var(--primary-bg); color: var(--primary); }
+.agent-suggestion-list { display: grid; width: min(300px, 100%); gap: 7px; margin-top: 13px; }
+.agent-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.78); color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast); }
+.agent-suggestion:hover { border-color: rgba(91,106,191,.36); background: var(--primary-bg); color: var(--primary); }
+.agent-suggestion:active { transform: scale(.98); }
 .agent-message { display: flex; align-items: flex-end; gap: 7px; margin: 9px 0; }
 .agent-message.user { justify-content: flex-end; }
 .agent-message-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 26px; margin-bottom: 2px; border-radius: 9px; }
 .assistant-avatar { background: var(--primary); color: #fff; }
 .user-avatar { background: var(--primary-bg); color: var(--primary); }
-.agent-message-bubble { max-width: min(82%, 300px); padding: 10px 12px; border-radius: 15px 15px 15px 5px; background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
-.agent-message.user .agent-message-bubble { border-radius: 15px 15px 5px 15px; background: var(--primary); color: #fff; box-shadow: 0 5px 13px rgba(72, 88, 170, .18); }
+.agent-message-bubble { max-width: min(86%, 320px); padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.62; }
+.agent-message.user .agent-message-bubble { max-width: min(78%, 290px); padding: 10px 12px; border-radius: 15px 15px 5px 15px; background: var(--primary-bg); color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
 .agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-bounce 1s infinite ease-in-out; }
 .agent-thinking span:nth-child(2) { animation-delay: .12s; }
 .agent-thinking span:nth-child(3) { animation-delay: .24s; }
 .agent-chat-error { margin: 12px 2px 0; padding: 8px 10px; border-radius: 9px; background: var(--danger-bg, #fff1f0); color: var(--danger, #c83b32); font-size: 11px; line-height: 1.45; }
-.agent-chat-foot { position: relative; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: rgba(255,255,255,.88); }
-.agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 58px; resize: none; padding: 10px 46px 10px 11px; border: 1px solid var(--border); border-radius: 13px; outline: none; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; }
+.agent-chat-foot { padding: 10px 14px 13px; border-top: 1px solid var(--border); background: rgba(255,255,255,.9); }
+.agent-composer { padding: 7px 9px 8px 12px; border: 1px solid rgba(126,137,194,.35); border-radius: 16px; background: #fff; box-shadow: 0 3px 12px rgba(40, 48, 85, .06); }
+.agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; resize: none; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
 .agent-chat-foot textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.12); }
 .agent-chat-foot textarea:disabled { opacity: .7; }
-.agent-send-button { position: absolute; right: 20px; top: 19px; display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 9px; background: var(--primary); color: #fff; cursor: pointer; transition: transform var(--transition-fast), opacity var(--transition-fast); touch-action: manipulation; }
+.agent-chat-foot textarea:focus { box-shadow: none; }
+.agent-composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-composer-meta { display: flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 10px; }
+.agent-send-button { display: grid; place-items: center; flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 10px; background: var(--primary); color: #fff; cursor: pointer; transition: transform var(--transition-fast), opacity var(--transition-fast); touch-action: manipulation; }
 .agent-send-button:disabled { opacity: .38; cursor: default; }
 .agent-send-button:not(:disabled):active { transform: scale(.93); }
-.agent-chat-hint { margin-top: 6px; color: var(--text-tertiary); font-size: 10px; }
+.agent-chat-hint { margin: 7px 2px 0; color: var(--text-tertiary); font-size: 10px; }
 @keyframes agent-panel-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes agent-thinking-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
 
