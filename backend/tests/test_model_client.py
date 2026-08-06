@@ -73,3 +73,55 @@ class ModelClientTest(unittest.TestCase):
         chunks, final = asyncio.run(run())
         self.assertEqual(''.join(chunks), '你好，凯凯小兵')
         self.assertEqual(final.content, '你好，凯凯小兵')
+
+    def test_dsml_tool_calls_in_content_are_normalized(self):
+        body = '<|DSML|tool_calls><|DSML|invoke name="tasks_list">{"limit":2}</|DSML|invoke></|DSML|tool_calls>'
+
+        def handler(_request):
+            return httpx.Response(200, json={
+                'choices': [{'message': {'content': body}}]
+            })
+
+        async def run():
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                client = OpenAICompatibleClient(
+                    ModelConfig('secret', 'https://model.test/v1', 'demo-model'),
+                    http_client=http_client,
+                )
+                return await client.complete([{'role': 'user', 'content': '查询待办'}], [])
+
+        result = asyncio.run(run())
+        self.assertEqual(result.content, '')
+        self.assertEqual(result.tool_calls[0].name, 'tasks_list')
+        self.assertEqual(result.tool_calls[0].arguments, '{"limit":2}')
+
+    def test_stream_dsml_tool_calls_are_not_emitted_as_text(self):
+        body = (
+            'data: {"choices":[{"delta":{"content":"<|DSML|tool_calls>"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"<|DSML|invoke name=\\"tasks_list\\">{}"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"</|DSML|invoke></|DSML|tool_calls>"}}]}\n\n'
+            'data: [DONE]\n\n'
+        )
+
+        def handler(_request):
+            return httpx.Response(200, text=body, headers={'content-type': 'text/event-stream'})
+
+        async def run():
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as http_client:
+                client = OpenAICompatibleClient(
+                    ModelConfig('secret', 'https://model.test/v1', 'demo-model'),
+                    http_client=http_client,
+                )
+                chunks, final = [], None
+                async for event in client.iter_complete([{'role': 'user', 'content': '查询待办'}], []):
+                    if event.content:
+                        chunks.append(event.content)
+                    final = event.response or final
+                return chunks, final
+
+        chunks, final = asyncio.run(run())
+        self.assertEqual(chunks, [])
+        self.assertEqual(final.content, '')
+        self.assertEqual(final.tool_calls[0].name, 'tasks_list')

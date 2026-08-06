@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -178,7 +179,9 @@ class OpenAICompatibleClient:
                     content = str(delta.get('content') or '')
                     if content:
                         content_parts.append(content)
-                        yield ModelStreamEvent(content=content)
+                        combined_content = ''.join(content_parts)
+                        if not _looks_like_dsml(combined_content):
+                            yield ModelStreamEvent(content=content)
                     reasoning = str(delta.get('reasoning_content') or '')
                     if reasoning:
                         reasoning_parts.append(reasoning)
@@ -194,9 +197,10 @@ class OpenAICompatibleClient:
         finally:
             if owns_client:
                 await client.aclose()
+        parsed_content, dsml_tool_calls = _parse_dsml_tool_calls(''.join(content_parts))
         yield ModelStreamEvent(response=ModelResponse(
-            content=''.join(content_parts),
-            tool_calls=[ToolCall(**tool_calls[index]) for index in sorted(tool_calls)],
+            content=parsed_content,
+            tool_calls=[ToolCall(**tool_calls[index]) for index in sorted(tool_calls)] + dsml_tool_calls,
             reasoning_content=''.join(reasoning_parts),
         ))
 
@@ -214,11 +218,11 @@ def _parse_response(data: dict[str, Any]) -> ModelResponse:
             name=str(function.get('name') or ''),
             arguments=str(function.get('arguments') or '{}'),
         ))
-    content = message.get('content') or ''
+    content, dsml_tool_calls = _parse_dsml_tool_calls(str(message.get('content') or ''))
     reasoning_content = message.get('reasoning_content') or ''
     return ModelResponse(
         content=str(content),
-        tool_calls=calls,
+        tool_calls=calls + dsml_tool_calls,
         reasoning_content=str(reasoning_content),
     )
 
@@ -229,3 +233,60 @@ def _error_text(response: httpx.Response) -> str:
         return str(data.get('error', data))[:500]
     except ValueError:
         return response.text[:500]
+
+
+_DSML_PREFIX = r'<\s*(?:[|｜]\s*)+DSML\s*(?:[|｜]\s*)+'
+_DSML_CLOSE = r'</\s*(?:[|｜]\s*)+DSML\s*(?:[|｜]\s*)+'
+_DSML_BLOCK_RE = re.compile(
+    rf'{_DSML_PREFIX}tool_calls\s*>(.*?)' rf'{_DSML_CLOSE}tool_calls\s*>',
+    re.IGNORECASE | re.DOTALL,
+)
+_DSML_INVOKE_RE = re.compile(
+    rf'{_DSML_PREFIX}invoke\s+name\s*=\s*["\']([^"\']+)["\']'
+    rf'(?:\s+arguments\s*=\s*["\']([^"\']*)["\'])?\s*>(.*?)'
+    rf'{_DSML_CLOSE}invoke\s*>',
+    re.IGNORECASE | re.DOTALL,
+)
+_DSML_FRAGMENT_RE = re.compile(
+    rf'</?\s*(?:[|｜]\s*)+DSML\b.*?>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _looks_like_dsml(content: str) -> bool:
+    text = str(content or '').lstrip()
+    return '<' in text[:160] and 'DSML' in text[:160].upper()
+
+
+def _parse_dsml_tool_calls(content: str) -> tuple[str, list[ToolCall]]:
+    """兼容部分 DeepSeek-compatible 网关把工具调用放进 content 的情况。"""
+    text = str(content or '')
+    calls: list[ToolCall] = []
+    blocks = list(_DSML_BLOCK_RE.finditer(text))
+    for block in blocks:
+        body = block.group(1)
+        invokes = list(_DSML_INVOKE_RE.finditer(body))
+        for index, invoke in enumerate(invokes):
+            arguments = invoke.group(2) or invoke.group(3).strip() or '{}'
+            calls.append(ToolCall(
+                id=f'dsml-call-{len(calls) + 1}',
+                name=invoke.group(1).strip(),
+                arguments=arguments,
+            ))
+
+    for block in reversed(blocks):
+        text = text[:block.start()] + text[block.end():]
+
+    if not calls:
+        invokes = list(_DSML_INVOKE_RE.finditer(text))
+        for index, invoke in enumerate(invokes):
+            arguments = invoke.group(2) or invoke.group(3).strip() or '{}'
+            calls.append(ToolCall(
+                id=f'dsml-call-{index + 1}',
+                name=invoke.group(1).strip(),
+                arguments=arguments,
+            ))
+        text = _DSML_INVOKE_RE.sub('', text)
+
+    text = _DSML_FRAGMENT_RE.sub('', text).strip()
+    return text, calls

@@ -245,10 +245,10 @@ class AgentRunner:
             if _has_retry_exhausted(executed):
                 return _tool_failure_message()
         final_response = await self.model_client.complete(
-            messages + _plan_tool_messages(executed), None
+            _plan_final_messages(messages, executed), None
         )
         if final_response.tool_calls:
-            return None
+            return _fallback_plan_answer(executed)
         return final_response.content.strip() or _fallback_plan_answer(executed)
 
     async def _run_planned_stream(
@@ -287,7 +287,7 @@ class AgentRunner:
         response = None
         content_parts: list[str] = []
         async for event in self.model_client.iter_complete(
-            messages + _plan_tool_messages(executed), None
+            _plan_final_messages(messages, executed), None
         ):
             if event.content:
                 content_parts.append(event.content)
@@ -296,7 +296,7 @@ class AgentRunner:
         if response is None:
             raise RuntimeError('模型流式响应缺少最终结果')
         if response.tool_calls:
-            return None
+            return _fallback_plan_answer(executed), plan_events
         return (
             response.content.strip() or ''.join(content_parts).strip() or _fallback_plan_answer(executed),
             plan_events,
@@ -449,6 +449,23 @@ def _plan_tool_messages(executed: list[dict[str, Any]]) -> list[dict[str, Any]]:
         'content': json.dumps(item['result'], ensure_ascii=False),
     } for item in executed)
     return messages
+
+
+def _plan_final_messages(
+    messages: list[dict[str, Any]],
+    executed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not messages:
+        return _plan_tool_messages(executed)
+    return [
+        messages[0],
+        {
+            'role': 'system',
+            'content': '本轮查询计划已经执行完成。请只根据工具结果生成最终中文回答，不要再次调用工具，不要输出 DSML、XML 或工具协议标记。',
+        },
+        *messages[1:],
+        *_plan_tool_messages(executed),
+    ]
 
 
 def _plan_started_event(plan: AgentPlan, status: str = 'started') -> dict[str, Any]:
