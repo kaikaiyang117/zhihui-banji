@@ -11,6 +11,7 @@ from app import db
 from app.agent.agent_service import invoke_tool, list_audits, list_tools
 from app.agent.model_client import ModelResponse, ModelStreamEvent, ToolCall
 from app.agent.runner import AgentRunner
+from app.agent.session_store import SessionStore
 from app.agent.tool_registry import ToolError
 
 
@@ -135,6 +136,27 @@ class AgentFoundationTest(unittest.TestCase):
             return ''.join(chunks)
 
         self.assertEqual(asyncio.run(run()), '班级共有 2 名学生。')
+
+    def test_session_store_keeps_tool_messages_with_their_call(self):
+        store = SessionStore(max_messages=8)
+        db.save_agent_session('trim-session', [
+            {'role': 'tool', 'tool_call_id': 'orphan', 'content': '{}'},
+            {'role': 'system', 'content': 'system'},
+            {'role': 'user', 'content': '旧问题'},
+            {'role': 'assistant', 'content': None, 'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'students_search', 'arguments': '{}'},
+            }]},
+            {'role': 'tool', 'tool_call_id': 'call-1', 'content': '{}'},
+            {'role': 'assistant', 'content': '旧回答'},
+            {'role': 'user', 'content': '新问题'},
+            {'role': 'assistant', 'content': '新回答'},
+        ])
+        messages = store.load('trim-session')
+        self.assertEqual(messages[0]['role'], 'system')
+        for index, message in enumerate(messages):
+            if message['role'] == 'tool':
+                self.assertTrue(index > 0 and messages[index - 1].get('tool_calls'))
 
 
 if __name__ == '__main__':
