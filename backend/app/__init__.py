@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from . import db
 from .config import APP_VERSION, STATIC_DIR
 from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system, agent, wechat
+from .wechat.service import wechat_service
 
 app = FastAPI(title='美美大王工作台', version=APP_VERSION)
 

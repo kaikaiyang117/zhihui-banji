@@ -12,7 +12,9 @@ pip install -r backend/requirements.txt
 
 ## 2. 配置模型
 
-启动后端前设置：
+启动工作台后打开左侧“Agent 设置”，在“模型连接”中选择 DeepSeek，填写 API Key，保存并点击“测试模型”。Key 会保存到本机 `data/agent-model.json`，不会通过接口返回，也不会进入 Git。
+
+也可以在启动后通过环境变量配置：
 
 ```bash
 export MEIMEI_MODEL_API_KEY="你的模型 API Key"
@@ -24,6 +26,17 @@ export MEIMEI_MODEL_NAME="你的模型名称"
 
 ## 3. 微信扫码授权
 
+推荐直接打开工作台的“Agent 设置”→“微信 iLink 连接”：
+
+1. 点击“扫码连接微信”，在页面中用微信扫描二维码并确认。
+2. 页面会自动轮询登录状态；确认后会自动启动消息循环。
+3. 在“使用授权”中加入允许使用 Agent 的微信用户 ID，然后保存授权策略。
+4. 回到微信发送“查询张三”等问题。
+
+默认是白名单模式，未授权用户会收到自己的用户 ID，管理员可把这个 ID 加入页面白名单。临时联调可以勾选“允许所有微信用户”，测试完成后应关闭。
+
+命令行方式如下：
+
 启动工作台后，调用：
 
 ```bash
@@ -31,7 +44,7 @@ curl -H "X-Workbench-Token: <访问令牌>" \
   -X POST http://127.0.0.1:5000/api/wechat/login/start
 ```
 
-返回结果中的 `qrcode_img_content` 是微信扫码地址。扫码确认后，轮询：
+返回结果中的 `qrcode_img_content` 是二维码图片内容。扫码确认后，轮询：
 
 ```bash
 curl -H "X-Workbench-Token: <访问令牌>" \
@@ -48,7 +61,7 @@ export MEIMEI_WECHAT_ALLOW_USERS="微信用户ID1,微信用户ID2"
 export MEIMEI_WECHAT_ENABLED=true
 ```
 
-`MEIMEI_WECHAT_ALLOW_USERS` 为空时不启用白名单，适合本地测试；正式使用应填写管理员微信用户 ID。
+界面保存的授权策略位于本机 `data/wechat-config.json`，不会进入 Git。若设置了 `MEIMEI_WECHAT_ALLOW_USERS`，环境变量优先，界面会显示“由环境变量管理”。
 
 ## 4. 本地测试 Agent
 
@@ -66,6 +79,8 @@ curl -H "X-Workbench-Token: <访问令牌>" \
 ```text
 GET  /api/agent/status
 GET  /api/wechat/status
+GET  /api/wechat/config
+PUT  /api/wechat/config
 GET  /api/agent/tools
 GET  /api/agent/audit
 ```

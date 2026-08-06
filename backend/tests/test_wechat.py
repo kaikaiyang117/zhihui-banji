@@ -15,7 +15,9 @@ from app import db
 from app.wechat.ilink_client import ILinkClient, ILinkConfig
 from app.wechat.message_loop import MessageLoop
 from app.wechat.message_parser import parse_text_messages
-from app.wechat.models import ILinkCredentials
+from app.wechat.config import load_config, save_config
+from app.wechat.models import ILinkCredentials, IncomingText
+from app.wechat.service import WeChatService
 
 
 class WeChatProtocolTest(unittest.TestCase):
@@ -92,3 +94,25 @@ class WeChatProtocolTest(unittest.TestCase):
         self.assertEqual(received, ['m-1'])
         self.assertEqual(loop.cursor, 'cursor-1')
         self.assertEqual(db.get_agent_setting('wechat.get_updates_buf'), 'cursor-1')
+
+    def test_policy_is_persisted_locally_and_rejects_unknown_sender(self):
+        save_config(['wx-allowed'], False)
+        self.assertEqual(load_config()['allow_users'], ['wx-allowed'])
+        self.assertFalse(load_config()['allow_all'])
+
+        sent = []
+
+        class FakeClient:
+            async def send_message(self, to_user_id, context_token, text):
+                sent.append((to_user_id, context_token, text))
+
+        service = WeChatService()
+        service.client = FakeClient()
+
+        async def run():
+            await service._handle_message(IncomingText('m-2', 'wx-unknown', 'bot', 'ctx-2', '你好'))
+
+        asyncio.run(run())
+        self.assertEqual(service.recent_senders, ['wx-unknown'])
+        self.assertEqual(sent[0][0:2], ('wx-unknown', 'ctx-2'))
+        self.assertIn('wx-unknown', sent[0][2])

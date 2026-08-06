@@ -8,6 +8,7 @@ from typing import Any
 from ..agent.model_client import ModelError
 from ..agent.runner import AgentRunner
 from .auth_service import AuthService
+from .config import public_config, save_config
 from .credential_store import CredentialStore
 from .ilink_client import ILinkClient, ILinkConfig, ILinkError
 from .message_loop import MessageLoop
@@ -24,6 +25,7 @@ class WeChatService:
         self.loop: MessageLoop | None = None
         self.loop_task = None
         self.last_error = ''
+        self.recent_senders: list[str] = []
 
     async def start_login(self):
         return await self.auth.start()
@@ -66,6 +68,7 @@ class WeChatService:
 
     def status(self) -> dict[str, Any]:
         credentials = self.credentials.load()
+        policy = public_config()
         return {
             'configured': bool(credentials),
             'running': bool(self.loop_task and not self.loop_task.done()),
@@ -73,12 +76,25 @@ class WeChatService:
             'last_error': self.loop.last_error if self.loop else self.last_error,
             'processed': self.loop.processed if self.loop else 0,
             'account_id': credentials.account_id if credentials else '',
+            'policy': policy,
+            'recent_senders': list(self.recent_senders),
         }
 
+    def policy(self) -> dict[str, Any]:
+        return public_config()
+
+    def update_policy(self, allow_users: list[str], allow_all: bool) -> dict[str, Any]:
+        return save_config(allow_users, allow_all)
+
     async def _handle_message(self, message: IncomingText):
-        allowed = _allowed_users()
-        if allowed and message.from_user_id not in allowed:
-            await self.client.send_message(message.from_user_id, message.context_token, '你尚未获得美美工作台的使用授权。')
+        self._remember_sender(message.from_user_id)
+        policy = public_config()
+        if not policy['allow_all'] and message.from_user_id not in set(policy['allow_users']):
+            await self.client.send_message(
+                message.from_user_id,
+                message.context_token,
+                f'你尚未获得美美工作台的使用授权。请管理员将此用户 ID 加入白名单：{message.from_user_id}',
+            )
             return
         runner = AgentRunner()
         try:
@@ -92,10 +108,12 @@ class WeChatService:
             answer = f'美美助手暂时无法回答：{exc}'
         await self.client.send_message(message.from_user_id, message.context_token, answer)
 
-
-def _allowed_users() -> set[str]:
-    raw = os.environ.get('MEIMEI_WECHAT_ALLOW_USERS', '')
-    return {item.strip() for item in raw.split(',') if item.strip()}
+    def _remember_sender(self, user_id: str):
+        if not user_id:
+            return
+        self.recent_senders = [item for item in self.recent_senders if item != user_id]
+        self.recent_senders.insert(0, user_id)
+        del self.recent_senders[20:]
 
 
 wechat_service = WeChatService()
