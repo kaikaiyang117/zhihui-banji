@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 
 from app import db
 from app.config import (LEGACY_BZR, LEGACY_HEALTH, SHEET_META, STUDENT_COLUMNS)
-from app.services import attendance, funds, points
+from app.services import attendance, comments, funds, points
 from app.services.class_context import enroll_student, scope_ids
 
 
@@ -153,6 +153,9 @@ def main():
     print('=== 迁移班费分类账 ===')
     fund_report = funds.migrate_legacy_rows(conn=db.get_conn())
     print(f"  班费管理: 导入 {fund_report['imported_entries']} 条，跳过 {fund_report['skipped_entries']} 条")
+    print('=== 迁移学生评语 ===')
+    comment_report = comments.migrate_legacy_rows(conn=db.get_conn())
+    print(f"  评语管理: 导入 {comment_report['imported_entries']} 条，跳过 {comment_report['skipped_entries']} 条")
     print('=== 迁移健康追踪表 ===')
     health = [n for n, m in SHEET_META.items() if m['group'] == 'personal']
     migrate_file(LEGACY_HEALTH, health)

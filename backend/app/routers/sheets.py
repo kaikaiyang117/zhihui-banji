@@ -64,6 +64,8 @@ def append_row(name: str, body: AppendBody):
         raise HTTPException(409, '行为积分已升级为结构化流水，请使用行为积分页面新增记录')
     if name == '班费管理':
         raise HTTPException(409, '班费已升级为结构化分类账，请使用班费管理页面新增流水')
+    if name == '评语管理':
+        raise HTTPException(409, '评语已升级为结构化审核工作流，请使用评语管理页面新增草稿')
     if not body.data:
         raise HTTPException(400, '缺少 data 参数')
     row_no = db.insert_row(name, body.data)
@@ -82,6 +84,8 @@ def update_cell(name: str, body: UpdateBody):
         raise HTTPException(409, '行为积分已升级为结构化流水，请使用行为积分页面修改或撤销')
     if name == '班费管理':
         raise HTTPException(409, '班费已升级为结构化分类账，请使用班费管理页面修改、撤销或冲正')
+    if name == '评语管理':
+        raise HTTPException(409, '评语已升级为结构化审核工作流，请使用评语管理页面修改草稿')
     try:
         db.update_cell(name, body.row_no, body.col, body.value)
         audit.record('sheet_row', f'{name}:{body.row_no}', 'update', summary=f'更新{name}记录',
@@ -102,6 +106,8 @@ def delete_row(name: str, row_no: int):
         raise HTTPException(409, '行为积分流水不能删除，请使用撤销并填写原因')
     if name == '班费管理':
         raise HTTPException(409, '班费流水不能删除，请使用撤销或冲正并填写原因')
+    if name == '评语管理':
+        raise HTTPException(409, '结构化评语不再通过通用工作表删除')
     try:
         return recycle.soft_delete_sheet_row(name, row_no)
     except recycle.RecycleError as exc:

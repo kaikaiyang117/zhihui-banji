@@ -11,9 +11,9 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .config import APP_VERSION, STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export, points as points_router, funds as funds_router, p0, p1, system, agent, wechat, context, workflow, recycle
+from .routers import sheets, students, seating, stats, knowledge, export, points as points_router, funds as funds_router, comments as comments_router, p0, p1, system, agent, wechat, context, workflow, recycle
 from .services.class_context import bind_request_scope, reset_request_scope, ScopeError, ArchivedScopeError
-from .services import attendance, audit, funds as funds_service, points as points_service, scores
+from .services import attendance, audit, comments as comments_service, funds as funds_service, points as points_service, scores
 from .services.audit import bind_actor, reset_actor
 from .services import devices
 from .wechat.service import wechat_service
@@ -85,7 +85,7 @@ async def scope_error_handler(_request: Request, exc: ScopeError):
     return JSONResponse({'detail': str(exc)}, status_code=status)
 
 for r in (sheets.router, students.router, seating.router,
-          stats.router, knowledge.router, export.router, points_router.router, funds_router.router, p0.router, p1.router, system.router,
+          stats.router, knowledge.router, export.router, points_router.router, funds_router.router, comments_router.router, p0.router, p1.router, system.router,
           agent.router, wechat.router, context.router, workflow.router, recycle.router):
     app.include_router(r)
 
@@ -113,6 +113,11 @@ async def startup():
         funds_service.evaluate_startup()
     except Exception:
         # 班费旧数据迁移失败不能阻塞工作台启动，页面会展示可修复的迁移错误。
+        pass
+    try:
+        comments_service.evaluate_startup()
+    except Exception:
+        # 旧评语迁移失败不阻塞启动，教师可进入评语页检查迁移报告。
         pass
     os.makedirs(db.DATA_DIR, exist_ok=True)
     with open(os.path.join(db.DATA_DIR, '.workbench-ready'), 'w', encoding='utf-8') as marker:

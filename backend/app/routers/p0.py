@@ -13,6 +13,7 @@ from ..services import (
     attendance as attendance_service,
     class_context,
     class_tasks as class_tasks_service,
+    comments as comments_service,
     points as points_service,
     scores as scores_service,
     work_items,
@@ -229,6 +230,7 @@ def student_detail(student_id: int):
     points_summary['updated_at'] = max(
         (str(item.get('updated_at') or item.get('created_at') or '')
          for item in points_summary.get('entries', [])), default='')
+    comments_summary = comments_service.student_comment_summary(student_id, conn=db.get_conn())
 
     timeline = []
     for row in events:
@@ -258,6 +260,13 @@ def student_detail(student_id: int):
         timeline.append({'kind': 'focus', 'id': row['id'], 'at': row['started_at'],
                          'title': f"关注 · {row['topic']}", 'summary': row['reason'],
                          'status': row['status']})
+    for row in comments_summary['comments']:
+        timeline.append({
+            'kind': 'comment', 'id': row['id'],
+            'at': row.get('sent_at') or row.get('reviewed_at') or row.get('updated_at'),
+            'title': f"评语 · {row['comment_type']}",
+            'summary': row['content'][:120], 'status': row['status'],
+        })
     source_names = {'event': '事件', 'communication': '家校沟通', 'focus': '关注事项'}
     for row in workflow_updates:
         status_text = f"{row['status_from']} → {row['status_to']}" if row['status_from'] != row['status_to'] else row['status_to']
@@ -342,6 +351,7 @@ def student_detail(student_id: int):
             'communications': communications, 'attendance': attendance,
             'workflow_updates': workflow_updates,
             'score_summary': score_summary, 'points_summary': points_summary,
+            'comments_summary': comments_summary,
             'timeline': timeline, 'insights': insights}
 
 

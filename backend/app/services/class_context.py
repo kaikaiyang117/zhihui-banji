@@ -445,6 +445,15 @@ def rollover_term(source_term_id: int, name: str, start_date: str = '', end_date
             (term_id, source_term_id),
         )
         conn.execute(
+            '''INSERT INTO comment_templates(
+                   class_id, term_id, name, comment_type, content, enabled
+               )
+               SELECT class_id, ?, name, comment_type, content, enabled
+               FROM comment_templates
+               WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
             '''INSERT INTO class_task_templates(
                    class_id, term_id, name, task_type, material_name,
                    description, default_due_days, enabled

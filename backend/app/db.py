@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -1099,6 +1099,111 @@ def _migration_14(conn: sqlite3.Connection):
     ''')
 
 
+def _migration_15(conn: sqlite3.Connection):
+    """增加评语模板、学生评语、版本历史和旧通用表迁移报告。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS comment_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            comment_type TEXT NOT NULL DEFAULT '学期评语',
+            content TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS comment_generation_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            template_id INTEGER REFERENCES comment_templates(id) ON DELETE SET NULL,
+            comment_type TEXT NOT NULL DEFAULT '学期评语',
+            requested_count INTEGER NOT NULL DEFAULT 0,
+            created_count INTEGER NOT NULL DEFAULT 0,
+            updated_count INTEGER NOT NULL DEFAULT 0,
+            protected_count INTEGER NOT NULL DEFAULT 0,
+            missing_count INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS student_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            template_id INTEGER REFERENCES comment_templates(id) ON DELETE SET NULL,
+            generation_run_id INTEGER REFERENCES comment_generation_runs(id) ON DELETE SET NULL,
+            comment_type TEXT NOT NULL DEFAULT '学期评语',
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '草稿',
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
+            is_manually_edited INTEGER NOT NULL DEFAULT 0,
+            edited_at TEXT NOT NULL DEFAULT '',
+            edited_by TEXT NOT NULL DEFAULT '',
+            reviewed_at TEXT NOT NULL DEFAULT '',
+            reviewed_by TEXT NOT NULL DEFAULT '',
+            review_note TEXT NOT NULL DEFAULT '',
+            sent_at TEXT NOT NULL DEFAULT '',
+            delivery_method TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS comment_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL REFERENCES student_comments(id) ON DELETE CASCADE,
+            version_no INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL,
+            change_type TEXT NOT NULL DEFAULT 'create',
+            note TEXT NOT NULL DEFAULT '',
+            changed_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(comment_id, version_no)
+        );
+
+        CREATE TABLE IF NOT EXISTS comment_migration_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            source_sheet TEXT NOT NULL DEFAULT '评语管理',
+            source_version TEXT NOT NULL DEFAULT 'v1',
+            source_rows INTEGER NOT NULL DEFAULT 0,
+            imported_entries INTEGER NOT NULL DEFAULT 0,
+            skipped_entries INTEGER NOT NULL DEFAULT 0,
+            report TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, source_sheet, source_version)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_student_comments_active_unique
+            ON student_comments(class_id, term_id, student_id, comment_type)
+            WHERE deleted_at='';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_student_comments_source_key
+            ON student_comments(class_id, term_id, source_key)
+            WHERE source_key<>'';
+        CREATE INDEX IF NOT EXISTS idx_student_comments_scope
+            ON student_comments(class_id, term_id, status, comment_type, student_id, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_comment_templates_scope
+            ON comment_templates(class_id, term_id, enabled, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_comment_versions_comment
+            ON comment_versions(comment_id, version_no DESC);
+        CREATE INDEX IF NOT EXISTS idx_comment_generation_runs_scope
+            ON comment_generation_runs(class_id, term_id, created_at);
+    ''')
+
+
 MIGRATIONS = {
     2: _migration_2,
     3: _migration_3,
@@ -1113,6 +1218,7 @@ MIGRATIONS = {
     12: _migration_12,
     13: _migration_13,
     14: _migration_14,
+    15: _migration_15,
 }
 
 

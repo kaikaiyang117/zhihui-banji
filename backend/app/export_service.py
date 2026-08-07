@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 from .config import STUDENT_COLUMNS
 from .db import get_conn, get_rows, get_sheet_meta
 from .derived import derive
-from .services import attendance, funds, points, scores
+from .services import attendance, comments, funds, points, scores
 from .services.class_context import scope_ids
 
 HEADER_FILL = PatternFill('solid', fgColor='5B6ABF')
@@ -51,6 +51,8 @@ def export_sheet(sheet: str) -> tuple[io.BytesIO, str]:
         return export_points()
     if sheet == '班费管理':
         return export_funds()
+    if sheet == '评语管理':
+        return export_comments()
     meta = get_sheet_meta(sheet)
     headers = meta['headers'] if meta else []
     rows = derive(sheet, get_rows(sheet))
@@ -76,6 +78,13 @@ def export_funds() -> tuple[io.BytesIO, str]:
     headers = ['日期', '收支类型', '金额', '分类', '用途说明', '经手人', '证明人',
                '备注', '状态', '结算期间', '处理原因', '来源', '凭证数']
     return _sheet_bytes('班费分类账', headers, funds.export_entries()), '班费分类账.xlsx'
+
+
+def export_comments() -> tuple[io.BytesIO, str]:
+    """导出结构化评语及审核交付信息。"""
+    headers = ['学号', '姓名', '评语类型', '评语内容', '状态', '模板', '人工修改',
+               '审核时间', '审核人', '审核意见', '发送时间', '交付方式', '备注', '来源']
+    return _sheet_bytes('学生评语', headers, comments.export_rows()), '学生评语.xlsx'
 
 
 def export_seating() -> tuple[io.BytesIO, str]:

@@ -46,6 +46,10 @@ class DataSafetyTest(unittest.TestCase):
         'fund_categories', 'fund_settlements', 'fund_ledger',
         'fund_attachments', 'fund_migration_runs',
     )
+    COMMENT_TABLES = (
+        'comment_templates', 'comment_generation_runs', 'student_comments',
+        'comment_versions', 'comment_migration_runs',
+    )
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -95,6 +99,7 @@ class DataSafetyTest(unittest.TestCase):
             *self.SCORE_TABLES,
             *self.POINT_TABLES,
             *self.FUND_TABLES,
+            *self.COMMENT_TABLES,
         ):
             self.assertIsNotNone(conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
