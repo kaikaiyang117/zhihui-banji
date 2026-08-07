@@ -16,11 +16,13 @@ import time
 import urllib.error
 import urllib.request
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .. import db
 from ..config import APP_VERSION, IS_FROZEN, RESOURCE_ROOT, UPDATE_API_URL, UPDATE_MANIFEST_URL
+from ..services import devices
 
 router = APIRouter(prefix='/api/system')
 
@@ -34,14 +36,89 @@ _update_state = {
 
 
 @router.get('/access-info')
-def access_info():
-    """返回当前桌面服务的局域网入口；访问令牌只通过完整网址传递。"""
-    url = os.environ.get('WORKBENCH_ACCESS_URL', '')
+def access_info(request: Request):
+    """返回局域网配对状态；只有本机可以生成和管理授权。"""
+    base_url = os.environ.get('WORKBENCH_LAN_URL_BASE', '')
+    host = request.client.host if request.client else ''
     return {
-        'enabled': bool(url),
-        'url': url,
-        'message': '请让手机或平板连接同一 Wi-Fi 后扫描二维码。' if url else '',
+        'enabled': bool(base_url),
+        'can_manage': devices.is_local_host(host),
+        'paired_device_count': sum(
+            1 for item in devices.list_devices() if item['status'] == '已授权'),
+        'message': '请在电脑端生成短时配对二维码。' if base_url else '',
     }
+
+
+class PairingClaimBody(BaseModel):
+    code: str
+    name: str = '移动设备'
+
+
+def _require_local(request: Request):
+    host = request.client.host if request.client else ''
+    if not devices.is_local_host(host):
+        raise HTTPException(403, '设备授权只能在工作台本机管理')
+
+
+@router.post('/pairing/start')
+def start_pairing(request: Request):
+    _require_local(request)
+    try:
+        return devices.create_pairing(os.environ.get('WORKBENCH_LAN_URL_BASE', ''))
+    except devices.DeviceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/pairing/claim')
+def claim_pairing(body: PairingClaimBody, request: Request, response: Response):
+    try:
+        result = devices.claim_pairing(
+            body.code, name=body.name,
+            user_agent=request.headers.get('user-agent', ''),
+            ip=request.client.host if request.client else '',
+        )
+    except devices.DeviceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    credential = result.pop('device_token')
+    response.set_cookie(
+        'workbench_device', credential, max_age=devices.DEVICE_TTL_DAYS * 86400,
+        httponly=True, samesite='lax', secure=False,
+    )
+    return result
+
+
+@router.get('/devices')
+def paired_devices(request: Request):
+    _require_local(request)
+    return {'devices': devices.list_devices()}
+
+
+@router.delete('/devices/{device_id}')
+def revoke_device(device_id: int, request: Request):
+    _require_local(request)
+    try:
+        return devices.revoke(device_id)
+    except devices.DeviceError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post('/devices/revoke-all')
+def revoke_all_devices(request: Request):
+    _require_local(request)
+    return devices.revoke_all()
+
+
+@router.post('/devices/logout')
+def logout_device(request: Request, response: Response):
+    credential = (
+        request.headers.get('x-workbench-device')
+        or request.cookies.get('workbench_device')
+        or request.query_params.get('device_token')
+        or ''
+    )
+    devices.revoke_credential(credential)
+    response.delete_cookie('workbench_device')
+    return {'ok': True}
 
 
 def _fetch_json(url: str):

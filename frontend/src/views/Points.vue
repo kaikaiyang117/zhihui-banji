@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { Star, Download } from 'lucide-vue-next'
 import { get, del } from '../api'
@@ -14,6 +14,13 @@ const loading = ref(true)
 const showAdd = ref(false)
 const chartEl = ref(null)
 let chart = null
+const chartSummary = computed(() => {
+  const students = stats.value?.students || []
+  if (!students.length) return '暂无积分趋势数据。'
+  const leader = students[0]
+  const activeWeeks = leader.weekly.filter(value => Number(value)).length
+  return `当前积分最高的是${leader.name}，累计 ${leader.total} 分；其 ${activeWeeks} 个周次有积分记录。`
+})
 
 async function load() {
   loading.value = true
@@ -70,6 +77,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
 
     <div class="card">
       <div class="card-title">积分排行榜</div>
+      <p class="chart-text-summary">{{ chartSummary }}</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
         <ul v-if="stats?.students?.length" class="rank-list">
           <li v-for="(s, i) in stats.students.slice(0, 10)" :key="i" class="rank-item">
@@ -79,7 +87,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
           </li>
         </ul>
         <div v-else class="empty-state">暂无积分数据</div>
-        <div ref="chartEl" class="chart-box" style="height:300px"></div>
+        <div ref="chartEl" class="chart-box" style="height:300px" role="img" :aria-label="chartSummary"></div>
       </div>
     </div>
 
@@ -87,7 +95,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
       <div class="card-title">积分明细</div>
       <div v-if="loading" class="loading">加载中...</div>
       <DataTable v-else :headers="headers" :rows="rows" :max-height="400"
-        :highlight="[10, 11]" @delete="removeRow($event)" />
+        :highlight="[10, 11]" :show-delete="true" @delete="removeRow($event)" />
     </div>
 
     <AddModal v-if="showAdd" title="添加积分" :fields="SHEET_FIELDS['日常行为积分']"

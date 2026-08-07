@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from .. import db
 from ..config import SHEET_META
 from ..derived import derive
+from ..services import attendance, audit, recycle
 
 router = APIRouter(prefix='/api')
 
@@ -39,6 +40,13 @@ def list_sheets():
 def get_sheet(name: str):
     if name not in SHEET_META:
         raise HTTPException(404, f'工作表 "{name}" 不存在')
+    if name == '考勤管理':
+        return {
+            'name': name,
+            'headers': ['日期', '星期', '学号', '姓名', '状态', '到校时间',
+                        '离校时间', '原因', '备注', '考勤场景'],
+            'rows': attendance.compatibility_rows(),
+        }
     meta = db.get_sheet_meta(name)
     headers = meta['headers'] if meta else []
     rows = derive(name, db.get_rows(name))
@@ -50,9 +58,13 @@ def get_sheet(name: str):
 def append_row(name: str, body: AppendBody):
     if name not in SHEET_META:
         raise HTTPException(404, f'工作表 "{name}" 不存在')
+    if name == '考勤管理':
+        raise HTTPException(409, '考勤已升级为结构化记录，请使用考勤管理页面批量保存')
     if not body.data:
         raise HTTPException(400, '缺少 data 参数')
     row_no = db.insert_row(name, body.data)
+    audit.record('sheet_row', f'{name}:{row_no}', 'create', summary=f'新增{name}记录',
+                 params={'sheet': name, 'row_no': row_no})
     return {'ok': True, 'row_no': row_no}
 
 
@@ -60,8 +72,13 @@ def append_row(name: str, body: AppendBody):
 def update_cell(name: str, body: UpdateBody):
     if name not in SHEET_META:
         raise HTTPException(404, f'工作表 "{name}" 不存在')
+    if name == '考勤管理':
+        raise HTTPException(409, '考勤已升级为结构化记录，请使用考勤管理页面修改')
     try:
         db.update_cell(name, body.row_no, body.col, body.value)
+        audit.record('sheet_row', f'{name}:{body.row_no}', 'update', summary=f'更新{name}记录',
+                     params={'sheet': name, 'row_no': body.row_no, 'col': body.col,
+                             'value': body.value})
     except KeyError:
         raise HTTPException(404, f'行 {body.row_no} 不存在')
     return {'ok': True, 'row_no': body.row_no, 'col': body.col}
@@ -71,5 +88,9 @@ def update_cell(name: str, body: UpdateBody):
 def delete_row(name: str, row_no: int):
     if name not in SHEET_META:
         raise HTTPException(404, f'工作表 "{name}" 不存在')
-    db.delete_row(name, row_no)
-    return {'ok': True}
+    if name == '考勤管理':
+        raise HTTPException(409, '考勤已升级为结构化记录，请在考勤管理页面重新保存')
+    try:
+        return recycle.soft_delete_sheet_row(name, row_no)
+    except recycle.RecycleError as exc:
+        raise HTTPException(404, str(exc)) from exc

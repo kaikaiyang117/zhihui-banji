@@ -1,1 +1,0 @@
-import{_ as t}from"./SheetPage-BYeY4XZY.js";import{j as e,q as r}from"./index-4O-dajNL.js";import"./DataTable-3g34AQc5.js";import"./AddModal-DhIKdjue.js";const n={__name:"Activities",setup(a){return(o,s)=>(r(),e(t,{title:"班级活动","sheet-name":"班级活动","add-button":"添加活动",searchable:!0}))}};export{n as default};

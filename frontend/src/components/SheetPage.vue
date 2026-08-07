@@ -35,7 +35,7 @@ async function load() {
 }
 
 async function removeRow(rowNo) {
-  if (!confirm('确定删除这一行吗？')) return
+  if (!confirm('删除后记录会进入回收站，可以恢复。确定继续吗？')) return
   try {
     await del(`/api/sheet/${props.sheetName}/row/${rowNo}`)
     load()
@@ -60,7 +60,7 @@ onMounted(load)
       <div class="card-title">{{ title }}</div>
       <div v-if="loading" class="loading">加载中...</div>
       <DataTable v-else :headers="headers" :rows="rows" :searchable="searchable"
-        :max-height="500" :highlight="highlight" @delete="showDelete ? removeRow($event) : null" />
+        :max-height="500" :highlight="highlight" :show-delete="showDelete" @delete="removeRow" />
     </div>
 
     <AddModal v-if="showModal" :title="addTitle"

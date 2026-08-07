@@ -1,16 +1,27 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { MessageCircle, Plus } from 'lucide-vue-next'
-import { get } from '../api'
+import { useRoute } from 'vue-router'
+import { MessageCircle, Plus, Trash2 } from 'lucide-vue-next'
+import { del, get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
+import WorkflowModal from '../components/WorkflowModal.vue'
 
 const communications = ref([])
 const loading = ref(true)
 const showAdd = ref(false)
+const route = useRoute()
+const sourceId = Number(route.query.source_id || 0)
+const workflowTarget = ref(null)
 
 async function load() {
   loading.value = true
-  try { communications.value = (await get('/api/communications?limit=200')).communications || [] } finally { loading.value = false }
+  const query = sourceId ? `source_id=${sourceId}` : 'limit=200'
+  try { communications.value = (await get(`/api/communications?${query}`)).communications || [] } finally { loading.value = false }
+}
+async function removeCommunication(item) {
+  if (!confirm(`删除“${item.reason}”沟通记录并移入回收站吗？关联待办会一同隐藏。`)) return
+  await del(`/api/records/communication/${item.id}`)
+  await load()
 }
 onMounted(load)
 </script>
@@ -28,13 +39,14 @@ onMounted(load)
       <div v-if="loading" class="loading">加载中…</div>
       <div v-else-if="!communications.length" class="empty-state">还没有沟通记录</div>
       <div v-else class="communication-list">
-        <div v-for="item in communications" :key="item.id" class="communication-row">
+        <div v-for="item in communications" :key="item.id" class="communication-row" :class="{ 'source-highlight': item.id === sourceId }">
           <div class="communication-date">{{ item.communicated_at }}<span>{{ item.method }}</span></div>
           <div class="communication-copy"><strong>{{ item.student_name }} · {{ item.reason }}</strong><p>{{ item.summary }}</p><span v-if="item.agreement" class="hint">约定：{{ item.agreement }}</span></div>
-          <div class="communication-status"><span class="tag" :class="item.followup_at && item.status !== '已完成' ? 'tag-orange' : 'tag-green'">{{ item.followup_at ? `回访 ${item.followup_at}` : item.status }}</span></div>
+          <div class="communication-status"><span class="tag" :class="item.followup_at && item.status !== '已完成' ? 'tag-orange' : 'tag-green'">{{ item.followup_at ? `回访 ${item.followup_at}` : item.status }}</span><div class="record-actions"><button class="btn btn-sm btn-outline" @click="workflowTarget = item">处理</button><button class="btn btn-sm btn-outline" aria-label="删除沟通记录" @click="removeCommunication(item)"><Trash2 :size="13" /></button></div></div>
         </div>
       </div>
     </div>
     <QuickRecordModal v-if="showAdd" mode="comm" @success="showAdd = false; load()" @close="showAdd = false" />
+    <WorkflowModal v-if="workflowTarget" source-type="communication" :source-id="workflowTarget.id" :title="`${workflowTarget.student_name} · ${workflowTarget.reason}`" @close="workflowTarget = null" @success="workflowTarget = null; load()" />
   </div>
 </template>

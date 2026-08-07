@@ -64,7 +64,7 @@ python run.py                         # 默认访问 http://localhost:5000
 python backend/run.py --lan
 ```
 
-局域网模式会生成访问令牌并支持手机/平板访问，只能在可信局域网中使用；不要把端口映射到公网。端口冲突时，启动入口会自动寻找可用端口。
+局域网模式下，本机点击“手机访问”生成 5 分钟有效、仅可使用一次的配对二维码；配对成功后设备获得可撤销凭证。只能在可信局域网中使用，不要把端口映射到公网。端口冲突时，启动入口会自动寻找可用端口。
 
 ## 架构约束
 
@@ -84,6 +84,7 @@ Agent 核心层：planner / runner / tools / session / audit
 - `backend/app/services/` 是业务能力的唯一实现位置；Agent 工具调用业务服务，不直接调用 FastAPI 路由，也不直接操作数据库。
 - 业务服务不依赖 Agent、微信或前端；依赖方向只能是“渠道 → Agent → 工具 → 业务服务 → 数据库”。
 - 新功能必须先完成业务服务，再实现系统 API 和页面，然后明确评估是否封装为 Agent 工具，最后接入网页和微信渠道。
+- 开始新增或重构系统业务功能前，必须先读取 [docs/系统功能开发计划.md](docs/系统功能开发计划.md)，按依赖顺序选择工作包，并在全部验收条件满足后更新其状态。
 - 详细的系统能力、工具、渠道、权限和测试登记见 [docs/Agent能力矩阵.md](docs/Agent能力矩阵.md)。新增或修改能力时必须同步更新该矩阵。
 
 ### Agent 工具、权限与渠道规则
@@ -129,7 +130,7 @@ Agent 核心层：planner / runner / tools / session / audit
 
 - SQLite 数据库是运行时唯一的数据源：开发模式默认是 `data/workbench.db`，打包模式位于系统用户数据目录。
 - Excel 文件只由导入/导出逻辑使用，`openpyxl` 不承担运行时存储职责。
-- SQLite 使用 WAL 模式。FastAPI 同步接口在线程池中运行，`backend/app/db.py` 使用 `check_same_thread=False` 和共享连接上的 `threading.Lock`；未经测试不要改成每个请求单独创建连接。
+- SQLite 使用 WAL 模式。FastAPI 同步接口在线程池中运行，`backend/app/db.py` 为每个工作线程维护独立连接，并在退出或测试切库时关闭整个连接注册表；WAL 和 `busy_timeout` 负责连接间协调。不要改回跨线程共享单连接，否则并发 API 请求会触发 `sqlite3.InterfaceError`；未经并发和迁移测试也不要改成每请求连接。
 - 数据库结构通过 `backend/app/db.py` 中的迁移机制维护。修改表结构时必须增加迁移版本、处理已有数据库，并运行后端测试；不要直接手改真实数据库结构。
 - `WORKBENCH_DATA_DIR` 可以指定数据目录，测试或临时验证时应使用隔离目录，避免修改 `data/workbench.db`。
 - `WORKBENCH_KB_DIR` 可以指定知识库目录。知识库是 Markdown 文件，不由 SQLite 管理。
@@ -157,7 +158,7 @@ Agent 核心层：planner / runner / tools / session / audit
 
 - `App.vue` 是页面外壳，负责侧边栏、顶部标签页和 `<router-view />`；由 `main.js` 中的 `createApp(App)` 挂载。
 - 路由必须保持扁平，不能把 `App` 再作为路由组件，否则会出现嵌套渲染和重复侧边栏。当前使用 `createWebHashHistory()`。
-- API 请求优先通过 `frontend/src/api.js`，以保留统一的错误处理和局域网访问令牌。
+- API 请求优先通过 `frontend/src/api.js`，以保留统一的错误处理、班级/学期上下文和局域网设备凭证。
 - 导航配置和工作表字段定义集中在 `frontend/src/sheets.js`；新增工作表页面时同步检查导航、字段、后端元数据和导出逻辑。
 - Vite 构建输出到 `backend/static/`，不是 `frontend/dist/`。任何前端修改后都要重新构建。
 
@@ -204,7 +205,7 @@ npx playwright install chromium
 bash scripts/smoke-ui.sh
 ```
 
-该脚本会启动临时服务并使用临时数据目录，检查工作台页面、手机访问入口和更新入口。涉及主要页面、登录令牌、局域网入口或桌面壳层的改动，应执行该测试。
+该脚本会启动临时服务并使用临时数据目录，检查工作台页面、手机访问入口和更新入口。涉及主要页面、设备配对凭证、局域网入口或桌面壳层的改动，应执行该测试。
 
 ### CI
 
@@ -215,7 +216,7 @@ bash scripts/smoke-ui.sh
 - `data/workbench.db` 和 `知识库/` 可能包含学生、家长和个人隐私信息；不要把真实数据写入测试夹具、日志、截图、提交或公开链接。
 - 运行迁移、恢复或其他可能改变大量数据的操作前，先确认目标目录，并优先创建备份。系统的数据库备份功能会生成带完整性校验的 SQLite 备份。
 - 测试使用 `WORKBENCH_DATA_DIR` 指向临时目录；不要通过修改真实数据库来验证代码。
-- `--lan` 只适用于可信网络。不要移除访问令牌校验，也不要把本地服务配置成公网可访问服务。
+- `--lan` 只适用于可信网络。不要绕过短时配对、设备凭证校验和撤权边界，也不要把本地服务配置成公网可访问服务。
 - 旧版 Excel 文件应保留为归档；除非用户明确要求迁移、导入或导出，不要覆盖或删除它们。
 
 ## 开发流程
@@ -247,6 +248,7 @@ bash scripts/smoke-ui.sh
 | 业务服务 | `backend/app/services/` |
 | Agent 模块 | `backend/app/agent/` |
 | 微信模块 | `backend/app/wechat/` |
+| 系统功能开发计划 | `docs/系统功能开发计划.md` |
 | Agent 能力矩阵 | `docs/Agent能力矩阵.md` |
 | 后端测试 | `backend/tests/` |
 | 前端 API 封装 | `frontend/src/api.js` |

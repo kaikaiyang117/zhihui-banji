@@ -2,34 +2,34 @@
 """P0 核心工作流：学生全景、事件、待办、关注、沟通与批量考勤。"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import db
+from ..services import attendance as attendance_service, class_context, scores as scores_service, work_items
 
 router = APIRouter(prefix='/api')
 
 EVENT_STATUSES = {'待处理', '处理中', '待复查', '已完成', '无需处理'}
-TASK_STATUSES = {'待处理', '处理中', '待复查', '已完成', '已取消'}
 FOCUS_STATUSES = {'待确认', '跟进中', '情况改善', '已结束'}
-ATTENDANCE_STATUSES = {'出勤', '迟到', '请假', '早退', '缺勤'}
+COMMUNICATION_STATUSES = {'待回访', '进行中', '已完成', '无需回访'}
 
 
-def _now() -> str:
-    return datetime.now().strftime('%Y-%m-%d %H:%M')
+def _scope(write: bool = False) -> tuple[int, int]:
+    return class_context.scope_ids(write=write, conn=db.get_conn())
 
 
-def _student(student_id: int) -> dict:
-    row = db.get_conn().execute(
-        'SELECT id, 学号, 姓名, 性别, 出生年月, 民族, 家庭住址, 监护人姓名, 监护人电话, '
-        '监护人职业, 是否住校, 特长, 班级任职, 备注, 监护人2姓名, 监护人2电话, 监护人2关系 '
-        'FROM students WHERE id=?', (student_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, '学生不存在')
-    return dict(row)
+def _student(student_id: int, write: bool = False) -> dict:
+    try:
+        return class_context.ensure_student_in_scope(
+            student_id, write=write, conn=db.get_conn())
+    except class_context.ArchivedScopeError:
+        raise
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 def _rows(sql: str, params: tuple = ()) -> list[dict]:
@@ -41,9 +41,11 @@ def migrate_legacy_core_rows():
     conn = db.get_conn()
     if conn.execute('SELECT 1 FROM app_flags WHERE key=?', ('p0_legacy_migrated',)).fetchone():
         return
+    class_id, term_id = _scope(write=True)
 
     source_count = 0
-    students = {str(row['姓名']).strip(): row['id'] for row in conn.execute('SELECT id, 姓名 FROM students').fetchall()}
+    students = {str(row['姓名']).strip(): row['id'] for row in conn.execute(
+        "SELECT id, 姓名 FROM students WHERE deleted_at=''").fetchall()}
     for row in db.get_rows('家校沟通记录'):
         data = row['data']
         name = str(data[1] or '').strip() if len(data) > 1 else ''
@@ -52,10 +54,10 @@ def migrate_legacy_core_rows():
             continue
         source_count += 1
         conn.execute(
-            'INSERT INTO communications(student_id, communicated_at, method, reason, summary, feedback, agreement, status) '
-            'VALUES(?,?,?,?,?,?,?,?)',
+            'INSERT INTO communications(student_id, communicated_at, method, reason, summary, feedback, agreement, status, class_id, term_id) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?)',
             (student_id, str(data[0] or ''), str(data[2] or ''), str(data[3] or ''), str(data[4] or ''),
-             str(data[5] or ''), str(data[6] or ''), str(data[7] or '已完成')))
+             str(data[5] or ''), str(data[6] or ''), str(data[7] or '已完成'), class_id, term_id))
 
     for row in db.get_rows('谈心记录'):
         data = row['data']
@@ -67,9 +69,10 @@ def migrate_legacy_core_rows():
         next_review = str(data[7] or '') if len(data) > 7 else ''
         conn.execute(
             'INSERT INTO student_events(student_id, occurred_at, event_type, description, handling, needs_followup, '
-            'followup_due, status) VALUES(?,?,?,?,?,?,?,?)',
+            'followup_due, status, class_id, term_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
             (student_id, str(data[0] or ''), '谈心记录', str(data[4] or data[2] or ''),
-             str(data[6] or ''), int(bool(next_review)), next_review, '待复查' if next_review else '已完成'))
+             str(data[6] or ''), int(bool(next_review)), next_review,
+             '待复查' if next_review else '已完成', class_id, term_id))
 
     for row in db.get_rows('特殊学生档案'):
         data = row['data']
@@ -81,15 +84,14 @@ def migrate_legacy_core_rows():
         old_status = str(data[6] or '') if len(data) > 6 else ''
         status = '已结束' if '结束' in old_status else '跟进中' if '跟进' in old_status else '待确认'
         conn.execute(
-            'INSERT INTO focus_items(student_id, topic, reason, evidence, action_plan, status, next_review_at) '
-            'VALUES(?,?,?,?,?,?,?)',
+            'INSERT INTO focus_items(student_id, topic, reason, evidence, action_plan, status, next_review_at, class_id, term_id) '
+            'VALUES(?,?,?,?,?,?,?,?,?)',
             (student_id, str(data[2] or '未分类'), str(data[3] or ''), str(data[4] or ''),
-             str(data[5] or ''), status, str(data[7] or '')))
+             str(data[5] or ''), status, str(data[7] or ''), class_id, term_id))
 
-    if source_count:
-        conn.execute('INSERT INTO app_flags(key, value) VALUES(?, ?)',
-                     ('p0_legacy_migrated', f'{source_count} rows'))
-        conn.commit()
+    conn.execute('INSERT OR IGNORE INTO app_flags(key, value) VALUES(?, ?)',
+                 ('p0_legacy_migrated', f'{source_count} rows'))
+    conn.commit()
 
 
 class EventBody(BaseModel):
@@ -109,6 +111,8 @@ class TaskBody(BaseModel):
     student_id: Optional[int] = None
     event_id: Optional[int] = None
     source: str = '手动创建'
+    owner: str = '班主任'
+    scheduled_at: str = ''
     due_at: str = ''
     priority: str = '普通'
     status: str = '待处理'
@@ -116,8 +120,14 @@ class TaskBody(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    status: str
+    title: Optional[str] = None
+    owner: Optional[str] = None
+    priority: Optional[str] = None
+    scheduled_at: Optional[str] = None
+    due_at: Optional[str] = None
+    status: Optional[str] = None
     notes: Optional[str] = None
+    result: Optional[str] = None
 
 
 class FocusBody(BaseModel):
@@ -134,6 +144,9 @@ class FocusUpdate(BaseModel):
     status: str
     conclusion: str = ''
     next_review_at: str = ''
+    progress: str = ''
+    task_action: Optional[str] = None
+    request_id: str = ''
 
 
 class CommunicationBody(BaseModel):
@@ -160,56 +173,50 @@ class AttendanceRecord(BaseModel):
 
 class DailyAttendanceBody(BaseModel):
     date: str = Field(min_length=10)
+    scene: str = '常规到校'
     records: list[AttendanceRecord]
 
 
 @router.get('/students/{student_id}/detail')
 def student_detail(student_id: int):
     student = _student(student_id)
+    class_id, term_id = _scope()
     events = _rows(
         'SELECT e.*, s.姓名 AS student_name FROM student_events e '
-        'JOIN students s ON s.id=e.student_id WHERE e.student_id=? ORDER BY e.occurred_at DESC, e.id DESC',
-        (student_id,))
+        "JOIN students s ON s.id=e.student_id WHERE e.student_id=? AND e.class_id=? AND e.term_id=? AND e.deleted_at='' "
+        'ORDER BY e.occurred_at DESC, e.id DESC',
+        (student_id, class_id, term_id))
     tasks = _rows(
         'SELECT t.*, s.姓名 AS student_name FROM student_tasks t '
-        'LEFT JOIN students s ON s.id=t.student_id WHERE t.student_id=? '
+        "LEFT JOIN students s ON s.id=t.student_id WHERE t.student_id=? AND t.class_id=? AND t.term_id=? AND t.deleted_at='' "
         'ORDER BY CASE WHEN t.status IN (\'已完成\',\'已取消\') THEN 1 ELSE 0 END, t.due_at, t.id DESC',
-        (student_id,))
+        (student_id, class_id, term_id))
     focus = _rows(
-        'SELECT * FROM focus_items WHERE student_id=? ORDER BY '
+        "SELECT * FROM focus_items WHERE student_id=? AND class_id=? AND term_id=? AND deleted_at='' ORDER BY "
         'CASE WHEN status=\'已结束\' THEN 1 ELSE 0 END, next_review_at, id DESC',
-        (student_id,))
+        (student_id, class_id, term_id))
     communications = _rows(
         'SELECT c.*, s.姓名 AS student_name FROM communications c '
-        'JOIN students s ON s.id=c.student_id WHERE c.student_id=? '
-        'ORDER BY c.communicated_at DESC, c.id DESC', (student_id,))
+        "JOIN students s ON s.id=c.student_id WHERE c.student_id=? AND c.class_id=? AND c.term_id=? AND c.deleted_at='' "
+        'ORDER BY c.communicated_at DESC, c.id DESC', (student_id, class_id, term_id))
+    workflow_updates = _rows(
+        'SELECT * FROM workflow_updates WHERE student_id=? AND class_id=? AND term_id=? '
+        'ORDER BY created_at DESC, id DESC', (student_id, class_id, term_id))
 
-    attendance = []
-    xh = str(student.get('学号') or '').strip()
-    for row in db.get_rows('考勤管理'):
-        data = row['data']
-        if len(data) > 3 and str(data[2] or '').strip() == xh:
-            attendance.append({
-                'row_no': row['row_no'], 'date': data[0] if len(data) > 0 else '',
-                'status': data[4] if len(data) > 4 else '',
-                'reason': data[5] if len(data) > 5 else '',
-                'arrive': data[6] if len(data) > 6 else '',
-                'leave': data[7] if len(data) > 7 else '',
-                'note': data[8] if len(data) > 8 else '',
-            })
-    attendance.sort(key=lambda x: str(x['date']), reverse=True)
+    attendance = [{
+        'id': row['id'], 'date': row['attendance_date'], 'scene': row['scene'],
+        'status': row['status'], 'reason': row['reason'],
+        'arrive': row['arrive_at'], 'leave': row['leave_at'], 'note': row['note'],
+    } for row in attendance_service.list_records(
+        student_id=student_id, limit=5_000, conn=db.get_conn())]
 
-    score_rows = _rows(
-        'SELECT exam_name, exam_date, subject, score, rank FROM exam_records '
-        'WHERE student_id=? ORDER BY exam_date, exam_name, subject', (student_id,))
-    score_exams = {}
-    for row in score_rows:
-        key = (row['exam_name'], row['exam_date'])
-        exam = score_exams.setdefault(key, {'exam_name': row['exam_name'], 'exam_date': row['exam_date'], 'subjects': {}, 'total': 0})
-        exam['subjects'][row['subject']] = row['score']
-        if row['score'] is not None:
-            exam['total'] += row['score']
-    score_summary = {'exams': list(score_exams.values()), 'subjects': sorted({row['subject'] for row in score_rows})}
+    score_data = scores_service.score_summary(student_id=student_id, conn=db.get_conn())
+    score_student = score_data['students'][0] if score_data['students'] else None
+    score_summary = {
+        'exams': score_student['exams'] if score_student else [],
+        'subjects': [item['name'] for item in score_data['subjects']],
+        'definition': score_data['definition'],
+    }
 
     points_summary = {'total': 0, 'weekly': [], 'updated_at': ''}
     for row in db.get_rows('日常行为积分'):
@@ -230,57 +237,155 @@ def student_detail(student_id: int):
                          'title': f"家校沟通 · {row['method']}", 'summary': row['summary'],
                          'status': row['status']})
     for row in attendance:
-        timeline.append({'kind': 'attendance', 'id': row['row_no'], 'at': row['date'],
-                         'title': f"考勤 · {row['status']}", 'summary': row['reason'] or '无备注',
+        timeline.append({'kind': 'attendance', 'id': row['id'], 'at': row['date'],
+                         'title': f"考勤 · {row['scene']} · {row['status']}",
+                         'summary': row['reason'] or row['note'] or '无备注',
                          'status': row['status']})
+    for row in tasks:
+        if row.get('source_type') not in {'attendance_rule', 'score_rule'} or not row.get('result'):
+            continue
+        is_attendance = row.get('source_type') == 'attendance_rule'
+        timeline.append({
+            'kind': 'attendance_followup' if is_attendance else 'score_followup', 'id': row['id'],
+            'at': row.get('completed_at') or row.get('cancelled_at') or row.get('updated_at'),
+            'title': '考勤异常跟进' if is_attendance else '成绩异常跟进',
+            'summary': row['result'], 'status': row['status'],
+        })
     for row in focus:
         timeline.append({'kind': 'focus', 'id': row['id'], 'at': row['started_at'],
                          'title': f"关注 · {row['topic']}", 'summary': row['reason'],
                          'status': row['status']})
+    source_names = {'event': '事件', 'communication': '家校沟通', 'focus': '关注事项'}
+    for row in workflow_updates:
+        status_text = f"{row['status_from']} → {row['status_to']}" if row['status_from'] != row['status_to'] else row['status_to']
+        timeline.append({
+            'kind': 'workflow', 'id': row['id'], 'at': row['created_at'],
+            'title': f"{source_names.get(row['source_type'], '跟进')} · 过程记录",
+            'summary': row['content'] or status_text or '更新记录',
+            'status': status_text,
+            'source_type': row['source_type'], 'source_id': row['source_id'],
+        })
     timeline.sort(key=lambda x: str(x['at'] or ''), reverse=True)
+
+    today_text = date.today().isoformat()
+    open_actions = work_items.list_work_items(
+        bucket='open', student_id=student_id, limit=50, conn=db.get_conn())
+    overdue_actions = [item for item in open_actions
+                       if item['timing_state'] == '已逾期']
+    due_focus = [item for item in focus if item['status'] != '已结束'
+                 and item['next_review_at']
+                 and str(item['next_review_at'])[:10] <= today_text]
+    recent_attendance = attendance[:5]
+    attendance_risks = [item for item in recent_attendance
+                        if item['status'] in {'迟到', '早退', '缺勤'}]
+    risk_reasons = []
+    if overdue_actions:
+        risk_reasons.append(f'{len(overdue_actions)} 项行动已逾期')
+    if due_focus:
+        risk_reasons.append(f'{len(due_focus)} 项关注需要复查')
+    if attendance_risks:
+        risk_reasons.append(f'最近 5 次考勤有 {len(attendance_risks)} 次异常')
+    if overdue_actions or attendance_risks:
+        risk_level = '高'
+    elif due_focus or open_actions:
+        risk_level = '中'
+    else:
+        risk_level = '低'
+
+    conclusions = []
+    for row in events:
+        if row.get('result'):
+            conclusions.append((row.get('closed_at') or row['updated_at'], row['result']))
+    for row in communications:
+        if row.get('result'):
+            conclusions.append((row.get('closed_at') or row['updated_at'], row['result']))
+    for row in focus:
+        if row.get('conclusion'):
+            conclusions.append((row.get('ended_at') or row['updated_at'], row['conclusion']))
+    conclusions.sort(key=lambda item: str(item[0] or ''), reverse=True)
+
+    exams = score_summary['exams']
+    comparable_exams = [item for item in exams if item['total'] is not None]
+    if len(comparable_exams) >= 2:
+        previous, latest = comparable_exams[-2], comparable_exams[-1]
+        change = round(latest['total'] - previous['total'], 1)
+        direction = '提升' if change > 0 else '下降' if change < 0 else '持平'
+        score_summary['text_summary'] = (
+            f"最近一次 {latest['exam_name']} 共 {latest['total']} 分，"
+            f"较前一次{direction} {abs(change):g} 分。")
+    elif comparable_exams:
+        score_summary['text_summary'] = (
+            f"当前有 1 次完整考试记录，{comparable_exams[0]['exam_name']} "
+            f"共 {comparable_exams[0]['total']} 分。")
+    elif exams:
+        score_summary['text_summary'] = '已有成绩记录，但预期科目尚未录入完整，暂不计算总分趋势。'
+    else:
+        score_summary['text_summary'] = '暂无成绩趋势数据。'
+    nonzero_weeks = sum(1 for point in points_summary['weekly'] if point)
+    points_summary['text_summary'] = (
+        f"累计 {points_summary['total']} 分，{nonzero_weeks} 个周次有积分记录。"
+        if points_summary['weekly'] else '暂无行为积分趋势数据。')
+
+    insights = {
+        'risk_level': risk_level,
+        'risk_reasons': risk_reasons or ['当前没有逾期行动、到期复查或近期考勤异常'],
+        'recent_changes': timeline[:4],
+        'open_actions': open_actions,
+        'stage_conclusion': conclusions[0][1] if conclusions else
+            '暂无阶段结论；完成一次跟进后可在这里回顾结果。',
+    }
 
     return {'student': student, 'events': events, 'tasks': tasks, 'focus': focus,
             'communications': communications, 'attendance': attendance,
+            'workflow_updates': workflow_updates,
             'score_summary': score_summary, 'points_summary': points_summary,
-            'timeline': timeline}
+            'timeline': timeline, 'insights': insights}
 
 
 @router.post('/events')
 def create_event(body: EventBody):
-    _student(body.student_id)
+    _student(body.student_id, write=True)
     if body.status not in EVENT_STATUSES:
         raise HTTPException(400, '事件状态不合法')
+    if body.needs_followup and not body.followup_due:
+        raise HTTPException(400, '需要跟进时必须填写跟进日期')
     conn = db.get_conn()
+    class_id, term_id = _scope(write=True)
+    event_status = '待复查' if body.needs_followup and body.status == '已完成' else body.status
     cur = conn.execute(
         'INSERT INTO student_events(student_id, occurred_at, event_type, description, handling, '
-        'parent_contacted, needs_followup, followup_due, status) VALUES(?,?,?,?,?,?,?,?,?)',
+        'parent_contacted, needs_followup, followup_due, status, class_id, term_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
         (body.student_id, body.occurred_at, body.event_type, body.description, body.handling,
-         int(body.parent_contacted), int(body.needs_followup), body.followup_due, body.status))
+         int(body.parent_contacted), int(body.needs_followup), body.followup_due, event_status,
+         class_id, term_id))
     event_id = cur.lastrowid
     task_id = None
     if body.needs_followup:
-        if not body.followup_due:
-            raise HTTPException(400, '需要跟进时必须填写跟进日期')
-        task = conn.execute(
-            'INSERT INTO student_tasks(student_id, event_id, title, source, due_at, priority, status, notes) '
-            'VALUES(?,?,?,?,?,?,?,?)',
-            (body.student_id, event_id, f'{body.event_type} · 跟进', '学生事件', body.followup_due,
-             '重要', '待复查', body.description)).lastrowid
-        task_id = task
+        task = work_items.ensure_source_work_item(
+            title=f'{body.event_type} · 跟进', student_id=body.student_id,
+            source_type='event', source_id=event_id, due_at=body.followup_due,
+            priority='重要', status='待复查', notes=body.description,
+            conn=conn, commit=False)
+        task_id = task['id']
     conn.commit()
     return {'ok': True, 'event_id': event_id, 'task_id': task_id}
 
 
 @router.get('/events')
-def list_events(student_id: Optional[int] = None, status: Optional[str] = None, limit: int = Query(100, ge=1, le=500)):
+def list_events(student_id: Optional[int] = None, status: Optional[str] = None,
+                source_id: Optional[int] = None, limit: int = Query(100, ge=1, le=500)):
+    class_id, term_id = _scope()
     sql = 'SELECT e.*, s.姓名 AS student_name FROM student_events e JOIN students s ON s.id=e.student_id'
-    where, params = [], []
+    where, params = ['e.class_id=?', 'e.term_id=?', "e.deleted_at=''", "s.deleted_at=''"], [class_id, term_id]
     if student_id:
         where.append('e.student_id=?')
         params.append(student_id)
     if status:
         where.append('e.status=?')
         params.append(status)
+    if source_id:
+        where.append('e.id=?')
+        params.append(source_id)
     if where:
         sql += ' WHERE ' + ' AND '.join(where)
     sql += ' ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?'
@@ -291,80 +396,94 @@ def list_events(student_id: Optional[int] = None, status: Optional[str] = None, 
 @router.post('/tasks')
 def create_task(body: TaskBody):
     if body.student_id:
-        _student(body.student_id)
-    if body.status not in TASK_STATUSES:
-        raise HTTPException(400, '待办状态不合法')
-    if body.priority not in {'普通', '重要', '紧急'}:
-        raise HTTPException(400, '优先级不合法')
-    conn = db.get_conn()
-    task_id = conn.execute(
-        'INSERT INTO student_tasks(student_id, event_id, title, source, due_at, priority, status, notes) '
-        'VALUES(?,?,?,?,?,?,?,?)',
-        (body.student_id, body.event_id, body.title, body.source, body.due_at, body.priority,
-         body.status, body.notes)).lastrowid
-    conn.commit()
-    return {'ok': True, 'task_id': task_id}
+        _student(body.student_id, write=True)
+    try:
+        result = work_items.create_work_item(
+            title=body.title, student_id=body.student_id, source_type='manual',
+            source_label=body.source, owner=body.owner, scheduled_at=body.scheduled_at,
+            due_at=body.due_at, priority=body.priority, status=body.status,
+            notes=body.notes)
+    except work_items.WorkItemError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'ok': True, 'task_id': result['id']}
 
 
 @router.get('/tasks')
-def list_tasks(status: Optional[str] = None, student_id: Optional[int] = None, limit: int = Query(100, ge=1, le=500)):
-    sql = 'SELECT t.*, s.姓名 AS student_name FROM student_tasks t LEFT JOIN students s ON s.id=t.student_id'
-    where, params = [], []
-    if status:
-        where.append('t.status=?')
-        params.append(status)
-    if student_id:
-        where.append('t.student_id=?')
-        params.append(student_id)
-    if where:
-        sql += ' WHERE ' + ' AND '.join(where)
-    sql += ' ORDER BY CASE WHEN t.status IN (\'已完成\',\'已取消\') THEN 1 ELSE 0 END, '
-    sql += 'CASE t.priority WHEN \'紧急\' THEN 0 WHEN \'重要\' THEN 1 ELSE 2 END, t.due_at, t.id DESC LIMIT ?'
-    params.append(limit)
-    return {'tasks': _rows(sql, tuple(params))}
+def list_tasks(
+    status: Optional[str] = None,
+    student_id: Optional[int] = None,
+    bucket: str = 'all',
+    source_type: Optional[str] = None,
+    q: str = '',
+    date_from: str = '',
+    date_to: str = '',
+    limit: int = Query(200, ge=1, le=1000),
+):
+    try:
+        tasks = work_items.list_work_items(
+            status=status, student_id=student_id, bucket=bucket,
+            source_type=source_type, query=q, date_from=date_from,
+            date_to=date_to, limit=limit)
+    except work_items.WorkItemError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'tasks': tasks}
+
+
+@router.get('/tasks/summary')
+def task_summary():
+    return {'summary': work_items.work_item_summary()}
 
 
 @router.put('/tasks/{task_id}')
 def update_task(task_id: int, body: TaskUpdate):
-    if body.status not in TASK_STATUSES:
-        raise HTTPException(400, '待办状态不合法')
-    conn = db.get_conn()
-    exists = conn.execute('SELECT id FROM student_tasks WHERE id=?', (task_id,)).fetchone()
-    if not exists:
-        raise HTTPException(404, '待办不存在')
-    completed_at = _now() if body.status == '已完成' else ''
-    if body.notes is None:
-        conn.execute('UPDATE student_tasks SET status=?, completed_at=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
-                     (body.status, completed_at, task_id))
-    else:
-        conn.execute('UPDATE student_tasks SET status=?, notes=?, completed_at=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
-                     (body.status, body.notes, completed_at, task_id))
-    conn.commit()
-    return {'ok': True}
+    try:
+        item = work_items.update_work_item(
+            task_id, title=body.title, owner=body.owner, priority=body.priority,
+            scheduled_at=body.scheduled_at, due_at=body.due_at,
+            status=body.status, notes=body.notes, result=body.result)
+    except work_items.WorkItemError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+    return {'ok': True, 'task': item}
 
 
 @router.post('/focus')
 def create_focus(body: FocusBody):
-    _student(body.student_id)
+    _student(body.student_id, write=True)
     if body.status not in FOCUS_STATUSES:
         raise HTTPException(400, '关注状态不合法')
     conn = db.get_conn()
+    class_id, term_id = _scope(write=True)
     focus_id = conn.execute(
-        'INSERT INTO focus_items(student_id, topic, reason, evidence, action_plan, status, next_review_at) '
-        'VALUES(?,?,?,?,?,?,?)',
+        'INSERT INTO focus_items(student_id, topic, reason, evidence, action_plan, status, next_review_at, class_id, term_id) '
+        'VALUES(?,?,?,?,?,?,?,?,?)',
         (body.student_id, body.topic, body.reason, body.evidence, body.action_plan,
-         body.status, body.next_review_at)).lastrowid
+         body.status, body.next_review_at, class_id, term_id)).lastrowid
+    task_id = None
+    if body.next_review_at and body.status != '已结束':
+        task = work_items.ensure_source_work_item(
+            title=f'{body.topic} · 复查', student_id=body.student_id,
+            source_type='focus', source_id=focus_id, due_at=body.next_review_at,
+            priority='重要', status='待复查', notes=body.action_plan or body.reason,
+            conn=conn, commit=False)
+        task_id = task['id']
     conn.commit()
-    return {'ok': True, 'focus_id': focus_id}
+    return {'ok': True, 'focus_id': focus_id, 'task_id': task_id}
 
 
 @router.get('/focus')
-def list_focus(status: Optional[str] = None, limit: int = Query(100, ge=1, le=500)):
+def list_focus(status: Optional[str] = None, source_id: Optional[int] = None,
+               limit: int = Query(100, ge=1, le=500)):
+    class_id, term_id = _scope()
     sql = 'SELECT f.*, s.姓名 AS student_name FROM focus_items f JOIN students s ON s.id=f.student_id'
-    params = []
+    sql += " WHERE f.class_id=? AND f.term_id=? AND f.deleted_at='' AND s.deleted_at=''"
+    params = [class_id, term_id]
     if status:
-        sql += ' WHERE f.status=?'
+        sql += ' AND f.status=?'
         params.append(status)
+    if source_id:
+        sql += ' AND f.id=?'
+        params.append(source_id)
     sql += ' ORDER BY CASE WHEN f.status=\'已结束\' THEN 1 ELSE 0 END, f.next_review_at, f.id DESC LIMIT ?'
     params.append(limit)
     return {'focus': _rows(sql, tuple(params))}
@@ -372,47 +491,56 @@ def list_focus(status: Optional[str] = None, limit: int = Query(100, ge=1, le=50
 
 @router.put('/focus/{focus_id}')
 def update_focus(focus_id: int, body: FocusUpdate):
-    if body.status not in FOCUS_STATUSES:
-        raise HTTPException(400, '关注状态不合法')
-    conn = db.get_conn()
-    exists = conn.execute('SELECT id FROM focus_items WHERE id=?', (focus_id,)).fetchone()
-    if not exists:
-        raise HTTPException(404, '关注事项不存在')
-    ended_at = _now() if body.status == '已结束' else ''
-    conn.execute(
-        'UPDATE focus_items SET status=?, conclusion=?, next_review_at=?, ended_at=?, '
-        'updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
-        (body.status, body.conclusion, body.next_review_at, ended_at, focus_id))
-    conn.commit()
-    return {'ok': True}
+    from ..services import workflow
+    try:
+        result = workflow.update_source(
+            'focus', focus_id, status=body.status, progress=body.progress,
+            result=body.conclusion, next_action_at=body.next_review_at,
+            task_action=body.task_action, request_id=body.request_id)
+    except workflow.WorkflowError as exc:
+        status = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status, str(exc)) from exc
+    return {'ok': True, **result}
 
 
 @router.post('/communications')
 def create_communication(body: CommunicationBody):
-    _student(body.student_id)
+    _student(body.student_id, write=True)
+    communication_status = '待回访' if body.followup_at and body.status == '已完成' else body.status
+    if communication_status not in COMMUNICATION_STATUSES:
+        raise HTTPException(400, '沟通状态不合法')
     conn = db.get_conn()
+    class_id, term_id = _scope(write=True)
     communication_id = conn.execute(
         'INSERT INTO communications(student_id, communicated_at, method, reason, summary, feedback, '
-        'agreement, followup_at, status, event_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
+        'agreement, followup_at, status, event_id, class_id, term_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
         (body.student_id, body.communicated_at, body.method, body.reason, body.summary, body.feedback,
-         body.agreement, body.followup_at, body.status, body.event_id)).lastrowid
+         body.agreement, body.followup_at, communication_status, body.event_id, class_id, term_id)).lastrowid
     task_id = None
     if body.followup_at:
-        task_id = conn.execute(
-            'INSERT INTO student_tasks(student_id, title, source, due_at, priority, status, notes) '
-            'VALUES(?,?,?,?,?,?,?)',
-            (body.student_id, '家校沟通回访', '家校沟通', body.followup_at, '重要', '待复查', body.agreement or body.summary)).lastrowid
+        task = work_items.ensure_source_work_item(
+            title='家校沟通回访', student_id=body.student_id,
+            source_type='communication', source_id=communication_id,
+            due_at=body.followup_at, priority='重要', status='待复查',
+            notes=body.agreement or body.summary, conn=conn, commit=False)
+        task_id = task['id']
     conn.commit()
     return {'ok': True, 'communication_id': communication_id, 'task_id': task_id}
 
 
 @router.get('/communications')
-def list_communications(status: Optional[str] = None, limit: int = Query(100, ge=1, le=500)):
+def list_communications(status: Optional[str] = None, source_id: Optional[int] = None,
+                        limit: int = Query(100, ge=1, le=500)):
+    class_id, term_id = _scope()
     sql = 'SELECT c.*, s.姓名 AS student_name FROM communications c JOIN students s ON s.id=c.student_id'
-    params = []
+    sql += " WHERE c.class_id=? AND c.term_id=? AND c.deleted_at='' AND s.deleted_at=''"
+    params = [class_id, term_id]
     if status:
-        sql += ' WHERE c.status=?'
+        sql += ' AND c.status=?'
         params.append(status)
+    if source_id:
+        sql += ' AND c.id=?'
+        params.append(source_id)
     sql += ' ORDER BY c.communicated_at DESC, c.id DESC LIMIT ?'
     params.append(limit)
     return {'communications': _rows(sql, tuple(params))}
@@ -421,35 +549,18 @@ def list_communications(status: Optional[str] = None, limit: int = Query(100, ge
 @router.post('/attendance/daily')
 def save_daily_attendance(body: DailyAttendanceBody):
     try:
-        date_obj = datetime.strptime(body.date[:10], '%Y-%m-%d')
-    except ValueError:
-        raise HTTPException(400, '日期格式必须为 YYYY-MM-DD')
-    if not body.records:
-        raise HTTPException(400, '至少提交一名学生的考勤')
+        return attendance_service.save_daily(
+            body.date, body.scene,
+            [record.model_dump() for record in body.records],
+        )
+    except attendance_service.AttendanceError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    conn = db.get_conn()
-    students = {row['id']: dict(row) for row in conn.execute('SELECT id, 学号, 姓名 FROM students').fetchall()}
-    existing = db.get_rows('考勤管理')
-    existing_by_xh = {}
-    for row in existing:
-        data = row['data']
-        if len(data) > 2 and str(data[0] or '')[:10] == body.date[:10]:
-            existing_by_xh[str(data[2] or '').strip()] = row
 
-    saved = 0
-    for record in body.records:
-        student = students.get(record.student_id)
-        if not student:
-            raise HTTPException(400, f'学生 {record.student_id} 不存在')
-        if record.status not in ATTENDANCE_STATUSES:
-            raise HTTPException(400, f'考勤状态不合法：{record.status}')
-        xh = str(student['学号'] or '').strip()
-        data = [body.date[:10], ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][date_obj.weekday()],
-                xh, student['姓名'], record.status, record.reason, record.arrive, record.leave, record.note]
-        old = existing_by_xh.get(xh)
-        if old:
-            db.replace_row('考勤管理', old['row_no'], data)
-        else:
-            db.insert_row('考勤管理', data)
-        saved += 1
-    return {'ok': True, 'date': body.date[:10], 'saved': saved}
+@router.get('/attendance/records')
+def list_attendance_records(date: str = '', scene: str = '常规到校'):
+    try:
+        return {'records': attendance_service.list_records(
+            attendance_date=date, scene=scene, limit=5_000)}
+    except attendance_service.AttendanceError as exc:
+        raise HTTPException(400, str(exc)) from exc

@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 
 from .config import STUDENT_COLUMNS
 from .db import get_conn
+from .services import class_context
 
 NORMALIZE = {
     '学号': '学号', '姓名': '姓名', '性别': '性别', '出生年月': '出生年月',
@@ -121,7 +122,11 @@ def preview_students(file_bytes: bytes, filename: str = '') -> dict:
         fields = {k: get_val(r, k) for k in STUDENT_COLUMNS}
         fields['学号'] = xh
         fields['姓名'] = name
-        existing = conn.execute('SELECT id FROM students WHERE 学号=?', (xh,)).fetchone()
+        existing = conn.execute('SELECT id, deleted_at FROM students WHERE 学号=?', (xh,)).fetchone()
+        if existing and existing['deleted_at']:
+            result['errors'].append({'row': r, 'msg': f'学号「{xh}」位于回收站，请先恢复'})
+            result['summary']['skipped'] += 1
+            continue
         action = '更新' if existing else '新增'
         result['rows'].append({
             'row': r,
@@ -140,6 +145,7 @@ def preview_students(file_bytes: bytes, filename: str = '') -> dict:
 def commit_student_import(rows: list[dict], filename: str = '') -> dict:
     """提交预览后的有效行，提交前再次校验学号和文件内重复。"""
     conn = get_conn()
+    class_id, term_id = class_context.scope_ids(write=True, conn=conn)
     result = {'imported': 0, 'updated': 0, 'skipped': 0, 'errors': []}
     valid = []
     seen = set()
@@ -167,23 +173,31 @@ def commit_student_import(rows: list[dict], filename: str = '') -> dict:
             vals = tuple(fields.values())
             cols = ','.join(f'[{k}]' for k in STUDENT_COLUMNS)
             placeholders = ','.join('?' for _ in STUDENT_COLUMNS)
-            existing = conn.execute('SELECT id FROM students WHERE 学号=?', (fields['学号'],)).fetchone()
+            existing = conn.execute('SELECT id, deleted_at FROM students WHERE 学号=?', (fields['学号'],)).fetchone()
+            if existing and existing['deleted_at']:
+                result['errors'].append({'row': _, 'msg': f'学号「{fields["学号"]}」位于回收站，请先恢复'})
+                result['skipped'] += 1
+                continue
             if existing:
                 updates = ','.join(f'[{k}]=?' for k in STUDENT_COLUMNS)
                 conn.execute(
                     f'UPDATE students SET {updates}, updated_at=datetime(\'now\',\'localtime\') WHERE 学号=?',
                     (*vals, fields['学号']))
                 result['updated'] += 1
+                student_id = existing['id']
             else:
-                conn.execute(
+                student_id = conn.execute(
                     f'INSERT INTO students({cols}) VALUES({placeholders})', vals)
+                student_id = student_id.lastrowid
                 result['imported'] += 1
+            class_context.enroll_student(
+                student_id, class_id, term_id, conn=conn, commit=False)
         conn.execute(
             '''INSERT INTO student_import_runs
-               (filename, imported, updated, skipped, error_count)
-               VALUES(?,?,?,?,?)''',
+               (filename, imported, updated, skipped, error_count, class_id, term_id)
+               VALUES(?,?,?,?,?,?,?)''',
             (filename or '', result['imported'], result['updated'],
-             result['skipped'], len(result['errors'])))
+             result['skipped'], len(result['errors']), class_id, term_id))
         conn.commit()
     except Exception:
         conn.rollback()

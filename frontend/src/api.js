@@ -1,10 +1,65 @@
 // API 封装
+const CLASS_KEY = 'workbench_class_id'
+const TERM_KEY = 'workbench_term_id'
+let pairingPromise = null
+
+export function clearDeviceCredential() {
+  pairingPromise = null
+}
+
+export function getStoredScope() {
+  return {
+    classId: window.localStorage.getItem(CLASS_KEY) || '',
+    termId: window.localStorage.getItem(TERM_KEY) || '',
+  }
+}
+
+export function setStoredScope(classId, termId) {
+  const previous = getStoredScope()
+  window.localStorage.setItem(CLASS_KEY, String(classId || ''))
+  window.localStorage.setItem(TERM_KEY, String(termId || ''))
+  if (String(previous.classId) !== String(classId || '') || String(previous.termId) !== String(termId || '')) {
+    window.localStorage.removeItem('meimei_agent_web_session_id')
+  }
+}
+
+export function clearStoredScope() {
+  window.localStorage.removeItem(CLASS_KEY)
+  window.localStorage.removeItem(TERM_KEY)
+}
+
 function accessHeaders() {
   const params = new URLSearchParams(window.location.search)
-  const fromUrl = params.get('access')
-  if (fromUrl) window.localStorage.setItem('workbench_access_token', fromUrl)
-  const token = window.localStorage.getItem('workbench_access_token')
-  return token ? { 'X-Workbench-Token': token } : {}
+  if (params.has('access')) {
+    params.delete('access')
+    window.history.replaceState({}, '', `${window.location.pathname}${params.size ? `?${params}` : ''}${window.location.hash}`)
+  }
+  const headers = {}
+  const { classId, termId } = getStoredScope()
+  if (classId) headers['X-Workbench-Class'] = classId
+  if (termId) headers['X-Workbench-Term'] = termId
+  return headers
+}
+
+async function ensureDevicePairing() {
+  const code = new URLSearchParams(window.location.search).get('pair')
+  if (!code) return
+  if (!pairingPromise) {
+    pairingPromise = fetch('/api/system/pairing/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        name: `移动设备 · ${navigator.platform || '浏览器'}`,
+      }),
+    }).then(parse).then(result => {
+      const params = new URLSearchParams(window.location.search)
+      params.delete('pair')
+      window.history.replaceState({}, '', `${window.location.pathname}${params.size ? `?${params}` : ''}${window.location.hash}`)
+      return result
+    })
+  }
+  await pairingPromise
 }
 
 async function parse(res) {
@@ -12,19 +67,28 @@ async function parse(res) {
   try { data = await res.json() } catch (e) { /* 空响应 */ }
   if (!res.ok) {
     const msg = data?.detail || data?.error || `请求失败 (${res.status})`
-    throw new Error(msg)
+    const error = new Error(msg)
+    error.status = res.status
+    throw error
   }
   return data
 }
 
-export const get = (url) => fetch(url, { headers: accessHeaders() }).then(parse)
-export const post = (url, body) => fetch(url, {
+export const get = async (url) => {
+  await ensureDevicePairing()
+  return fetch(url, { headers: accessHeaders(), cache: 'no-store' }).then(parse)
+}
+export const post = async (url, body) => {
+  await ensureDevicePairing()
+  return fetch(url, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', ...accessHeaders() },
   body: JSON.stringify(body)
-}).then(parse)
+  }).then(parse)
+}
 
 export async function streamPost(url, body, onEvent) {
+  await ensureDevicePairing()
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...accessHeaders() },
@@ -57,17 +121,34 @@ export async function streamPost(url, body, onEvent) {
     reader.releaseLock()
   }
 }
-export const put = (url, body) => fetch(url, {
+export const put = async (url, body) => {
+  await ensureDevicePairing()
+  return fetch(url, {
   method: 'PUT',
   headers: { 'Content-Type': 'application/json', ...accessHeaders() },
   body: JSON.stringify(body)
-}).then(parse)
-export const del = (url) => fetch(url, { method: 'DELETE', headers: accessHeaders() }).then(parse)
+  }).then(parse)
+}
+export const del = async (url, body) => {
+  await ensureDevicePairing()
+  return fetch(url, {
+  method: 'DELETE',
+  headers: body === undefined
+    ? accessHeaders()
+    : { 'Content-Type': 'application/json', ...accessHeaders() },
+  body: body === undefined ? undefined : JSON.stringify(body),
+  }).then(parse)
+}
 
 // 文件下载（GET 导出）
-export function download(url, filename) {
+export async function download(url, filename) {
+  await ensureDevicePairing()
   const a = document.createElement('a')
-  a.href = url
+  const target = new URL(url, window.location.origin)
+  const { classId, termId } = getStoredScope()
+  if (classId) target.searchParams.set('class_id', classId)
+  if (termId) target.searchParams.set('term_id', termId)
+  a.href = target.toString()
   a.download = filename || ''
   document.body.appendChild(a)
   a.click()
@@ -75,7 +156,8 @@ export function download(url, filename) {
 }
 
 // 文件上传（multipart）
-export function upload(url, file) {
+export async function upload(url, file) {
+  await ensureDevicePairing()
   const fd = new FormData()
   fd.append('file', file)
   return fetch(url, { method: 'POST', headers: accessHeaders(), body: fd }).then(parse)

@@ -22,7 +22,6 @@ command -v npx >/dev/null 2>&1 || { echo '需要 Node.js/npm 才能运行浏览�
 
 cd "$PROJECT_ROOT"
 WORKBENCH_DATA_DIR="$DATA_DIR/data" \
-WORKBENCH_ACCESS_TOKEN='smoke-token' \
 "$PYTHON_BIN" backend/run.py --lan --port "$PORT" --no-browser >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -35,7 +34,7 @@ done
 curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null
 
 PWCLI=(npx --yes --package @playwright/cli playwright-cli)
-URL="http://127.0.0.1:${PORT}/?access=smoke-token"
+URL="http://127.0.0.1:${PORT}/"
 "${PWCLI[@]}" open "$URL" >/dev/null
 SNAPSHOT="$("${PWCLI[@]}" snapshot 2>&1)"
 printf '%s\n' "$SNAPSHOT"

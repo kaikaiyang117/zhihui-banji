@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { get } from '../api'
 import DataTable from '../components/DataTable.vue'
@@ -13,6 +13,15 @@ const sleep = ref(null)
 const loading = ref(true)
 const chartEl = ref(null)
 let chart = null
+const weightSummary = computed(() => {
+  const rows = weight.value?.rows || []
+  if (!rows.length) return '暂无体重趋势数据。'
+  const values = rows.map(row => Number(row.data?.[2])).filter(Number.isFinite)
+  if (!values.length) return `已有 ${rows.length} 条记录，但没有可计算的体重数值。`
+  const change = values[values.length - 1] - values[0]
+  const direction = change > 0 ? '增加' : change < 0 ? '下降' : '持平'
+  return `共 ${values.length} 次有效记录，最近体重 ${values[values.length - 1]} 斤，较首条${direction} ${Math.abs(change).toFixed(1)} 斤。`
+})
 
 const modalKind = ref(null)   // 'weight' | 'exercise' | 'sleep'
 
@@ -68,9 +77,10 @@ onBeforeUnmount(() => { if (chart) chart.dispose(); window.removeEventListener('
 
     <div class="card">
       <div class="card-title">体重趋势</div>
+      <p class="chart-text-summary">{{ weightSummary }}</p>
       <div v-if="loading" class="loading">加载中...</div>
       <div v-else-if="!weight?.rows?.length" class="empty-state">开始记录体重数据后这里会显示趋势图</div>
-      <div v-else ref="chartEl" class="chart-box"></div>
+      <div v-else ref="chartEl" class="chart-box" role="img" :aria-label="weightSummary"></div>
       <div class="toolbar">
         <button class="btn btn-primary" @click="modalKind = 'weight'"><Plus :size="14" :stroke-width="2" /> 添加记录</button>
       </div>

@@ -18,12 +18,12 @@
 
 | 功能 | 说明 |
 |------|------|
-| 首页仪表盘 | 班级人数、出勤统计、班费余额、积分 TOP5、最近日志、快捷操作 |
+| 今日工作台 | 逾期/今日/未来行动、考勤规则命中、材料进度、待复查学生和完成/延期直达 |
 | 学生信息 | 学生总表 + 搜索 + **Excel 批量导入（按学号合并去重）** + 导出 |
 | 特殊学生档案 | 重点关注学生档案管理 |
 | 评语管理 | 学期/毕业/日常评语 |
-| 考勤管理 | 出勤/迟到/请假/缺勤记录 + 状态统计 + **日期筛选汇总报表导出** |
-| 成绩跟踪 | 月考/期中成绩、平均分、ECharts 对比图、进退步标注 + **月考/期中汇总报表导出** |
+| 考勤管理 | 五类点名场景、出勤/迟到/请假/早退/缺勤、批量备注、学生/月/周统计、异常规则自动跟进 + **日期筛选汇总报表导出** |
+| 成绩跟踪 | 科目/考试配置、长宽表预览导入、缺考口径、班级均值/排名/分层、个人变化、异常跟进 + **单次考试汇总报表导出** |
 | 行为积分 | 每周积分 + 排行榜 + TOP5 趋势折线图 |
 | 座位表 | 可视化班级座位网格（讲台/过道特殊标识） |
 | 家校沟通 | 电话/微信/面谈/家访记录与跟进状态 |
@@ -31,6 +31,7 @@
 | 班费管理 | 收支明细、自动滚动余额 |
 | 班主任日志 | 每日记事 + 待办 |
 | 班级活动 | 活动类型、预算、总结 |
+| 回收站与审计 | 核心记录软删除、原位恢复、操作追踪、脱敏日志和本机确认永久删除 |
 | Excel 导出 | **每个工作表 + 成绩/考勤汇总报表**一键下载 xlsx |
 
 ### 👤 个人工作台
@@ -135,18 +136,23 @@ Uvicorn :: FastAPI
    └── 知识库（文件系统）
       │
       ▼
-   SQLite (WAL, atomic commit)
+   SQLite (WAL, per-thread connections, atomic commit)
 ```
 
-**核心理念**：SQLite 存结构化数据（学生表 + 通用 JSON 行）、Excel 仅作为"导入模板 + 导出报表"的外部交换格式，不再用作运行时的数据库。
+**核心理念**：SQLite 存结构化核心业务数据和仍在过渡期的通用 JSON 行；Excel 仅作为“导入模板 + 导出报表”的外部交换格式，不再用作运行时数据库。
 
 ### 4.2 存储设计
 
 | 存储 | 内容 | 设计 |
 |------|------|------|
 | `students` 表 | 学号(PK)、姓名、性别...13 列 | 结构化，学号唯一 → 导入去重的依据 |
+| `attendance_records` 表 | 日期、场景、学生、状态、原因、到离校时间、备注 | 结构化考勤事实，同一学生/日期/场景唯一 |
+| `attendance_rules` / `attendance_rule_runs` / `attendance_rule_hits` | 规则、执行批次、学生命中状态 | 自动评估、幂等跟进和执行历史 |
+| `exam_records` 表 | 学生、考试、科目、分数、状态、排名 | 结构化成绩事实；缺考、免考和未录入不按 0 分处理 |
+| `score_exams` / `score_subjects` / `score_exam_subjects` | 考试、科目、满分和应考科目 | 按班级和学期维护成绩配置 |
+| `score_import_runs` / `score_rules` / `score_rule_runs` / `score_rule_hits` | 导入批次、异常规则、执行与命中 | 原子导入、幂等跟进和状态追溯 |
 | `sheet_meta` 表 | 工作表名 → 表头 JSON、分类 | 通用工作表元数据 |
-| `sheet_rows` 表 | 工作表名 + 行号 → 行数据 JSON | 通用表数据（考勤/成绩/积分等） |
+| `sheet_rows` 表 | 工作表名 + 行号 → 行数据 JSON | 尚未结构化的通用表数据 |
 | `seating` 表 | 行列座标 → 值 | 座位网格 |
 | 知识库 | Markdown 文件 | Obsidian Vault（根目录 `知识库/`） |
 
@@ -156,7 +162,7 @@ Uvicorn :: FastAPI
 
 | 工作表 | 计算列 | 逻辑 |
 |--------|--------|------|
-| 成绩跟踪 | 总分月考1/总分期中/进退步 | SUM(各科) / 月考排名−期中排名 |
+| 旧版成绩工作表 | 总分月考1/总分期中/进退步 | 仅保留旧通用工作表兼容；当前成绩页面由结构化成绩服务实时统计 |
 | 日常行为积分 | 月合计/排名 | SUM(8周) / 排序生成排名 |
 | 班费管理 | 余额 | 收入+ 支出− 滚动累计 |
 | 体重体脂追踪 | 腰臀比/与上周对比 | 腰围÷臀围 / 本周−上周 |
@@ -171,12 +177,23 @@ Uvicorn :: FastAPI
 | GET | `/api/sheet/<name>` | 读取（含派生计算列） |
 | POST | `/api/sheet/<name>/append` | 追加行 |
 | PUT | `/api/sheet/<name>/update` | 更新单元格 |
-| DELETE | `/api/sheet/<name>/row/<row_no>` | 删除行 |
+| DELETE | `/api/sheet/<name>/row/<row_no>` | 将工作表行移入回收站 |
 | GET | `/api/students` | 学生列表（支持 keyword 搜索） |
-| DELETE | `/api/students/<id>` | 删除学生 |
+| DELETE | `/api/students/<id>` | 将学生移入回收站 |
+| DELETE | `/api/records/<object_type>/<id>` | 将核心业务记录移入回收站 |
+| GET | `/api/recycle-bin` | 查看当前班级/学期回收站 |
+| POST | `/api/recycle-bin/<id>/restore` | 恢复记录 |
+| DELETE | `/api/recycle-bin/<id>/purge` | 本机二次确认后永久删除 |
+| GET | `/api/system/audit` | 查看脱敏后的系统业务审计 |
 | GET | `/api/students/template` | 下载导入模板 xlsx |
 | POST | `/api/students/import` | **上传 Excel 导入（按学号合并/故障行报告）** |
 | GET | `/api/students/export` | 导出学生信息 |
+| GET | `/api/score-config` | 查询当前班级/学期的考试和科目配置 |
+| POST | `/api/exams/import/preview` | 预览长表或宽表成绩文件，不写入数据库 |
+| POST | `/api/exams/import/commit` | 再次校验并原子提交预览中的有效成绩 |
+| GET | `/api/exams/summary` | 查询班级与学生成绩、排名、分层和变化统计 |
+| GET/POST | `/api/score-rules` | 查询或创建成绩异常跟进规则 |
+| POST | `/api/score-rules/evaluate` | 手工重新评估成绩异常规则 |
 | GET | `/api/export/sheet/<name>` | **导出任意工作表 xlsx** |
 | GET | `/api/export/report/scores?exam=` | **成绩汇总报表** |
 | GET | `/api/export/report/attendance?date_from=&date_to=` | **考勤汇总报表** |
@@ -188,10 +205,15 @@ Uvicorn :: FastAPI
 
 - `/api/students/{id}/detail`：学生全景页与成长时间线
 - `/api/events`：学生事件记录，支持自动创建跟进事项
-- `/api/tasks`：待办、截止日期、优先级和完成状态
+- `/api/tasks`、`/api/tasks/summary`：统一工作项、来源、时间筛选、日历、负责人、延期、完成结果和取消
 - `/api/focus`：关注事项生命周期
 - `/api/communications`：结构化家校沟通与回访
-- `/api/attendance/daily`：按日期批量保存全班考勤
+- `/api/workflows/{source_type}/{source_id}`：事件、沟通、关注的过程记录、复查和工作项状态联动
+- `/api/attendance/daily`、`/api/attendance/records`：按日期和场景批量保存、读取全班考勤
+- `/api/attendance/rules`：管理规则、查看命中状态与执行历史，支持手工补充检查
+- `/api/stats/attendance`：按日期范围和场景统计学生、月份、周次及异常名单
+- `/api/score-config`、`/api/exams/*`：配置考试科目、预览并提交成绩、查询结构化统计
+- `/api/score-rules`：管理成绩下降规则，幂等生成工作项并联动学生时间线
 - `/api/system/backup`、`/api/system/restore`：本地数据库备份与恢复
 
 ## 开发测试
@@ -215,7 +237,7 @@ npm run build
 bash scripts/smoke-ui.sh
 ```
 
-CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
+当前基线包含 89 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
 
 ---
 
@@ -285,7 +307,7 @@ macOS 使用：
 python backend/run.py --lan
 ```
 
-程序默认已经监听可信局域网地址；`--lan` 用于显式指定局域网模式。程序会生成一次性访问令牌和二维码入口，并在端口冲突时切换端口。局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 [`packaging/README.md`](packaging/README.md)。
+程序默认已经监听可信局域网地址；`--lan` 用于显式指定局域网模式。点击“手机访问”后会生成 5 分钟有效、仅可使用一次的配对二维码；配对设备获得 90 天有效的本地凭证，可在电脑端查看最近访问时间、单独撤权或全部撤权，也可在移动端主动退出。凭证只保存哈希到 SQLite，服务重启后仍有效。局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 [`packaging/README.md`](packaging/README.md)。
 
 发布前还会运行浏览器 UI 冒烟测试，检查工作台页面、二维码入口和更新入口能够加载：
 

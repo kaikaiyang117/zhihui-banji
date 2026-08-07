@@ -44,15 +44,13 @@ export MEIMEI_MODEL_NAME="你的模型名称"
 启动工作台后，调用：
 
 ```bash
-curl -H "X-Workbench-Token: <访问令牌>" \
-  -X POST http://127.0.0.1:5000/api/wechat/login/start
+curl -X POST http://127.0.0.1:5000/api/wechat/login/start
 ```
 
 返回结果中的 `qrcode_img_content` 是二维码图片内容。扫码确认后，轮询：
 
 ```bash
-curl -H "X-Workbench-Token: <访问令牌>" \
-  -X POST http://127.0.0.1:5000/api/wechat/login/poll
+curl -X POST http://127.0.0.1:5000/api/wechat/login/poll
 ```
 
 返回 `status=confirmed` 后，凭证会保存到系统凭据库，并自动启动消息接收循环。
@@ -70,8 +68,7 @@ export MEIMEI_WECHAT_ENABLED=true
 ## 4. 本地测试 Agent
 
 ```bash
-curl -H "X-Workbench-Token: <访问令牌>" \
-  -H "Content-Type: application/json" \
+curl -H "Content-Type: application/json" \
   -X POST http://127.0.0.1:5000/api/agent/chat \
   -d '{"session_id":"local:me","message":"查询张三的基本信息"}'
 ```

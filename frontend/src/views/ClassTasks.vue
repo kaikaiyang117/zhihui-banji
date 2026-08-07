@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Check, ClipboardList, Plus } from 'lucide-vue-next'
-import { get, post, put } from '../api'
+import { useRoute } from 'vue-router'
+import { Check, ClipboardList, Plus, Trash2 } from 'lucide-vue-next'
+import { del, get, post, put } from '../api'
 
 const students = ref([])
 const tasks = ref([])
@@ -9,14 +10,17 @@ const activeId = ref(null)
 const creating = ref(false)
 const saving = ref(false)
 const message = ref('')
+const route = useRoute()
+const sourceId = Number(route.query.source_id || 0)
 const form = ref({ title: '', task_type: '材料收集', start_at: '', due_at: '', material_name: '', description: '', student_ids: [] })
 const activeTask = computed(() => tasks.value.find(task => task.id === activeId.value))
 
 async function load() {
-  const [taskData, studentData] = await Promise.all([get('/api/class-tasks'), get('/api/students')])
+  const taskPath = sourceId ? `/api/class-tasks?source_id=${sourceId}` : '/api/class-tasks'
+  const [taskData, studentData] = await Promise.all([get(taskPath), get('/api/students')])
   tasks.value = taskData.tasks || []
   students.value = studentData.students || []
-  if (!activeId.value && tasks.value.length) activeId.value = tasks.value[0].id
+  if ((!activeId.value || sourceId) && tasks.value.length) activeId.value = sourceId || tasks.value[0].id
 }
 
 function selectAll() { form.value.student_ids = students.value.map(student => student.id) }
@@ -45,6 +49,12 @@ async function closeTask() {
   await put(`/api/class-tasks/${activeTask.value.id}`, { status: '已完成' })
   await load()
 }
+async function removeTask() {
+  if (!activeTask.value || !confirm(`删除“${activeTask.value.title}”并移入回收站吗？`)) return
+  await del(`/api/records/class_task/${activeTask.value.id}`)
+  activeId.value = null
+  await load()
+}
 
 onMounted(load)
 </script>
@@ -68,8 +78,8 @@ onMounted(load)
     </div>
 
     <div class="class-task-layout">
-      <div class="card"><div class="card-title"><ClipboardList :size="16" /> 任务列表 <span class="count">{{ tasks.length }}</span></div><div v-if="!tasks.length" class="empty-state">还没有班级任务</div><button v-for="task in tasks" :key="task.id" class="class-task-row" :class="{ active: task.id === activeId }" @click="activeId = task.id"><div><strong>{{ task.title }}</strong><small>{{ task.task_type }} · {{ task.due_at || '未设置截止日期' }}</small></div><span class="task-progress">{{ task.submitted }}/{{ task.total }}</span></button></div>
-      <div class="card"><div v-if="activeTask" class="card-title">{{ activeTask.title }} <span class="tag" :class="activeTask.status === '已完成' ? 'tag-green' : 'tag-orange'">{{ activeTask.status }}</span><button v-if="activeTask.status !== '已完成'" class="btn btn-outline task-close" @click="closeTask"><Check :size="14" /> 完成任务</button></div><div v-if="activeTask" class="task-detail"><div class="hint">{{ activeTask.material_name || '无指定材料' }} · {{ activeTask.description || '无补充说明' }}</div><div class="task-progress-bar"><i :style="{ width: `${activeTask.total ? activeTask.submitted / activeTask.total * 100 : 0}%` }"></i></div><div v-for="item in activeTask.items" :key="item.id" class="collection-row"><div><strong>{{ item.姓名 }}</strong><span>{{ item.学号 }} · {{ item.note || '暂无备注' }}</span></div><button class="tag" :class="item.status === '已提交' ? 'tag-green' : 'tag-orange'" @click="markSubmitted(item)">{{ item.status === '已提交' ? '已提交' : '未提交' }}</button></div></div><div v-else class="empty-state">选择一个任务查看收集进度</div></div>
+      <div class="card"><div class="card-title"><ClipboardList :size="16" /> 任务列表 <span class="count">{{ tasks.length }}</span></div><div v-if="!tasks.length" class="empty-state">还没有班级任务</div><button v-for="task in tasks" :key="task.id" class="class-task-row" :class="{ active: task.id === activeId, 'source-highlight': task.id === sourceId }" @click="activeId = task.id"><div><strong>{{ task.title }}</strong><small>{{ task.task_type }} · {{ task.due_at || '未设置截止日期' }}</small></div><span class="task-progress">{{ task.submitted }}/{{ task.total }}</span></button></div>
+      <div class="card"><div v-if="activeTask" class="card-title">{{ activeTask.title }} <span class="tag" :class="activeTask.status === '已完成' ? 'tag-green' : 'tag-orange'">{{ activeTask.status }}</span><button v-if="activeTask.status !== '已完成'" class="btn btn-outline task-close" @click="closeTask"><Check :size="14" /> 完成任务</button><button class="btn btn-outline" aria-label="删除班级任务" @click="removeTask"><Trash2 :size="14" /></button></div><div v-if="activeTask" class="task-detail"><div class="hint">{{ activeTask.material_name || '无指定材料' }} · {{ activeTask.description || '无补充说明' }}</div><div class="task-progress-bar"><i :style="{ width: `${activeTask.total ? activeTask.submitted / activeTask.total * 100 : 0}%` }"></i></div><div v-for="item in activeTask.items" :key="item.id" class="collection-row"><div><strong>{{ item.姓名 }}</strong><span>{{ item.学号 }} · {{ item.note || '暂无备注' }}</span></div><button class="tag" :class="item.status === '已提交' ? 'tag-green' : 'tag-orange'" @click="markSubmitted(item)">{{ item.status === '已提交' ? '已提交' : '未提交' }}</button></div></div><div v-else class="empty-state">选择一个任务查看收集进度</div></div>
     </div>
   </div>
 </template>

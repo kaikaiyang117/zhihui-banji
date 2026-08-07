@@ -3,12 +3,13 @@ import os
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
+from app.services import attendance
 from app.routers.p0 import student_detail
 from app.routers.p1 import (
     AttendanceRuleBody,
@@ -27,6 +28,7 @@ from app.routers.p1 import (
     update_class_task_item,
     upsert_exam_record,
 )
+from backend.tests.helpers import enroll_all_students
 
 
 class P1WorkflowTest(unittest.TestCase):
@@ -43,6 +45,7 @@ class P1WorkflowTest(unittest.TestCase):
         conn.executemany('INSERT INTO students(学号, 姓名, 性别) VALUES(?,?,?)', [
             (row['学号'], row['姓名'], row['性别']) for row in fixture['students']])
         conn.commit()
+        enroll_all_students()
         self.fixture = fixture
 
     def tearDown(self):
@@ -60,21 +63,33 @@ class P1WorkflowTest(unittest.TestCase):
 
     def test_attendance_rule_creates_one_followup_task(self):
         today = date.today().isoformat()
-        db.insert_row('考勤管理', [today, '周一', 'P1001', '测试同学甲', '迟到', '', '', '', ''])
-        db.insert_row('考勤管理', [today, '周一', 'P1001', '测试同学甲', '迟到', '', '', '', ''])
-        create_attendance_rule(AttendanceRuleBody(name='一周迟到提醒', metric='迟到次数', threshold=2, period_days=7))
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        for day in (yesterday, today):
+            attendance.save_daily(day, '常规到校', [
+                {'student_id': 1, 'status': '迟到'},
+            ], evaluate=False)
+        created = create_attendance_rule(AttendanceRuleBody(
+            name='一周迟到提醒', metric='迟到次数', threshold=2, period_days=7))
+        self.assertEqual(created['evaluation']['created_count'], 1)
         result = evaluate_attendance_rules()
-        self.assertEqual(result['count'], 1)
-        self.assertEqual(evaluate_attendance_rules()['count'], 0)
+        self.assertEqual(result['count'], 0)
+        row = db.get_conn().execute('SELECT source_key FROM student_tasks').fetchone()
+        self.assertEqual(row['source_key'], 'attendance_rule:1:student:1')
 
     def test_class_task_material_collection_and_duty(self):
         task = create_class_task(ClassTaskBody(title='收齐家长回执', material_name='家长回执', student_ids=[1, 2]))
         self.assertEqual(list_class_tasks()['tasks'][0]['total'], 2)
+        self.assertIsNotNone(db.get_conn().execute(
+            "SELECT 1 FROM student_tasks WHERE source_key=?", (f"class_task:{task['task_id']}",)
+        ).fetchone())
         update_class_task_item(task['task_id'], 1, ClassTaskItemUpdate(status='已提交', note='纸质版'))
         task_data = list_class_tasks()['tasks'][0]
         self.assertEqual(task_data['submitted'], 1)
         duty = create_duty(DutyBody(duty_date='2026-08-07', area='教室前排', student_id=2))
         self.assertTrue(duty['assignment_id'])
+        self.assertIsNotNone(db.get_conn().execute(
+            "SELECT 1 FROM student_tasks WHERE source_key=?", (f"duty_assignment:{duty['assignment_id']}",)
+        ).fetchone())
         self.assertEqual(list_duty('2026-08-07')['assignments'][0]['姓名'], '测试同学乙')
 
 

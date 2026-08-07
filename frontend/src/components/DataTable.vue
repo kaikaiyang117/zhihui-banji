@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, useAttrs } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps({
   headers: { type: Array, default: () => [] },
@@ -8,11 +8,10 @@ const props = defineProps({
   maxHeight: { type: Number, default: 500 },
   highlight: { type: Array, default: () => [] },  // 列索引 → 特殊样式
   showEdit: { type: Boolean, default: false },    // 显示编辑按钮
+  showDelete: { type: Boolean, default: false },  // 显示删除按钮
   colWidths: { type: Array, default: () => [] }   // 每列宽度（px 数值或 'auto'）
 })
 const emit = defineEmits(['delete', 'edit', 'row-click'])
-const attrs = useAttrs()
-const hasDelete = computed(() => Boolean(attrs.onDelete))
 
 const keyword = ref('')
 
@@ -42,13 +41,13 @@ function fmt(v) {
         <colgroup v-if="colWidths.length">
           <col style="width:30px">
           <col v-for="(w, i) in colWidths" :key="i" :style="{ width: typeof w === 'number' ? w + 'px' : w }">
-          <col v-if="hasDelete || showEdit" style="width:100px">
+          <col v-if="showDelete || showEdit" style="width:100px">
         </colgroup>
         <thead>
           <tr>
             <th>#</th>
             <th v-for="(h, i) in headers" :key="i">{{ h }}</th>
-            <th v-if="hasDelete || showEdit"></th>
+            <th v-if="showDelete || showEdit"></th>
           </tr>
         </thead>
         <tbody>
@@ -58,10 +57,10 @@ function fmt(v) {
               :class="highlight.includes(ci) ? 'cell-strong' : ''">
               <span class="cell-text">{{ fmt(row.data[ci]) }}</span>
             </td>
-            <td v-if="hasDelete || showEdit" class="cell-del">
+            <td v-if="showDelete || showEdit" class="cell-del">
               <button v-if="showEdit" class="btn btn-sm btn-outline"
                 @click.stop="$emit('edit', row.row_no, row.data)" style="margin-right:4px">编辑</button>
-              <button v-if="hasDelete" class="btn btn-sm btn-danger"
+              <button v-if="showDelete" class="btn btn-sm btn-danger"
                 @click.stop="$emit('delete', row.row_no)">删除</button>
             </td>
           </tr>

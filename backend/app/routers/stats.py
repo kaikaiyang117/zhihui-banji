@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """统计接口：仪表盘 / 考勤 / 成绩 / 积分"""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from datetime import datetime
 
 from .. import db
 from ..derived import derive
+from ..services import attendance as attendance_service, scores as scores_service, work_items
+from ..services.class_context import scope_ids
 
 router = APIRouter(prefix='/api/stats')
 
@@ -12,18 +14,18 @@ router = APIRouter(prefix='/api/stats')
 @router.get('/dashboard')
 def dashboard(date: str | None = None):
     conn = db.get_conn()
-    total_students = conn.execute('SELECT COUNT(*) AS n FROM students').fetchone()['n']
+    class_id, term_id = scope_ids(conn=conn)
+    total_students = conn.execute(
+        "SELECT COUNT(*) AS n FROM student_enrollments e JOIN students s ON s.id=e.student_id "
+        "WHERE e.class_id=? AND e.term_id=? AND e.status='在读' AND s.deleted_at=''",
+        (class_id, term_id)).fetchone()['n']
 
     target_date = (date or datetime.now().strftime('%Y-%m-%d'))[:10]
-    att_rows = derive('考勤管理', db.get_rows('考勤管理'))
-    today_att = {'出勤': 0, '迟到': 0, '请假': 0, '缺勤': 0}
-    for r in att_rows:
-        row_date = str(r['data'][0] or '')[:10] if r['data'] else ''
-        if row_date != target_date:
-            continue
-        s = str(r['data'][4] or '').strip() if len(r['data']) > 4 else ''
-        if s in today_att:
-            today_att[s] += 1
+    try:
+        reference_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise HTTPException(400, '日期格式必须为 YYYY-MM-DD') from exc
+    today_att = attendance_service.dashboard_counts(target_date, conn=conn)
 
     points_rows = derive('日常行为积分', db.get_rows('日常行为积分'))
     top = [{'name': r['data'][1], 'points': int(r['data'][10] or 0)}
@@ -39,22 +41,68 @@ def dashboard(date: str | None = None):
     logs = [{'date': str(r['data'][0])[:10], 'content': str(r['data'][3])[:50]}
             for r in log_rows if len(r['data']) > 3 and r['data'][0] and r['data'][3]][-5:]
 
-    tasks = [dict(r) for r in conn.execute(
-        'SELECT t.id, t.title, t.source, t.due_at, t.priority, t.status, t.student_id, '
-        's.姓名 AS student_name FROM student_tasks t LEFT JOIN students s ON s.id=t.student_id '
-        'WHERE t.status NOT IN (\'已完成\',\'已取消\') ORDER BY t.due_at, t.id DESC LIMIT 20').fetchall()]
+    work_summary = work_items.work_item_summary(
+        reference_date=reference_date, conn=conn)
+    work_sections = {
+        bucket: work_items.list_work_items(
+            bucket=bucket, reference_date=reference_date, limit=8, conn=conn)
+        for bucket in ('overdue', 'today', 'next7')
+    }
+    tasks = work_items.list_work_items(
+        bucket='open', reference_date=reference_date, limit=20, conn=conn)
+    all_rule_hits = work_items.list_work_items(
+        bucket='open', source_type='attendance_rule',
+        reference_date=reference_date, limit=1_000_000, conn=conn)
+    rule_hits = all_rule_hits[:8]
     focus = [dict(r) for r in conn.execute(
         'SELECT f.id, f.student_id, s.姓名 AS student_name, f.topic, f.reason, f.status, f.next_review_at '
-        'FROM focus_items f JOIN students s ON s.id=f.student_id WHERE f.status != \'已结束\' '
-        'ORDER BY f.next_review_at, f.id DESC LIMIT 20').fetchall()]
+        'FROM focus_items f JOIN students s ON s.id=f.student_id '
+        "WHERE f.class_id=? AND f.term_id=? AND f.deleted_at='' AND s.deleted_at='' AND f.status != '已结束' "
+        'ORDER BY f.next_review_at, f.id DESC LIMIT 20', (class_id, term_id)).fetchall()]
     recent_events = [dict(r) for r in conn.execute(
         'SELECT e.id, e.occurred_at, e.event_type, e.description, e.status, e.student_id, s.姓名 AS student_name '
-        'FROM student_events e JOIN students s ON s.id=e.student_id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 10').fetchall()]
+        'FROM student_events e JOIN students s ON s.id=e.student_id '
+        "WHERE e.class_id=? AND e.term_id=? AND e.deleted_at='' AND s.deleted_at='' ORDER BY e.occurred_at DESC, e.id DESC LIMIT 10",
+        (class_id, term_id)).fetchall()]
     pending_communications = [dict(r) for r in conn.execute(
         'SELECT c.id, c.student_id, s.姓名 AS student_name, c.followup_at, c.status, c.summary '
         'FROM communications c JOIN students s ON s.id=c.student_id '
-        'WHERE c.followup_at != \'\' AND c.status NOT IN (\'已完成\',\'已解决\') '
-        'ORDER BY c.followup_at, c.id DESC LIMIT 20').fetchall()]
+        "WHERE c.class_id=? AND c.term_id=? AND c.deleted_at='' AND s.deleted_at='' AND c.followup_at != '' "
+        'AND c.status NOT IN (\'已完成\',\'已解决\') '
+        'ORDER BY c.followup_at, c.id DESC LIMIT 20', (class_id, term_id)).fetchall()]
+
+    material_tasks = []
+    for row in conn.execute(
+        '''SELECT ct.id, ct.title, ct.task_type, ct.material_name, ct.due_at, ct.status,
+                  COUNT(i.id) AS total,
+                  SUM(CASE WHEN i.status='已提交' THEN 1 ELSE 0 END) AS submitted
+           FROM class_tasks ct
+           LEFT JOIN class_task_items i ON i.task_id=ct.id
+           WHERE ct.class_id=? AND ct.term_id=? AND ct.deleted_at=''
+             AND ct.status NOT IN ('已完成','已取消')
+           GROUP BY ct.id
+           ORDER BY CASE WHEN ct.due_at='' THEN 1 ELSE 0 END, ct.due_at, ct.id DESC
+           ''',
+        (class_id, term_id),
+    ).fetchall():
+        item = dict(row)
+        item['submitted'] = int(item['submitted'] or 0)
+        item['total'] = int(item['total'] or 0)
+        item['progress'] = round(
+            item['submitted'] * 100 / item['total']) if item['total'] else 0
+        material_tasks.append(item)
+
+    review_students = [dict(row) for row in conn.execute(
+        '''SELECT f.id, f.student_id, s.姓名 AS student_name, f.topic, f.reason,
+                  f.status, f.next_review_at
+           FROM focus_items f
+           JOIN students s ON s.id=f.student_id
+           WHERE f.class_id=? AND f.term_id=? AND f.deleted_at='' AND s.deleted_at=''
+             AND f.status<>'已结束' AND f.next_review_at<>''
+             AND substr(f.next_review_at,1,10)<=?
+           ORDER BY f.next_review_at, f.id DESC''',
+        (class_id, term_id, target_date),
+    ).fetchall()]
 
     return {'date': target_date,
             'total_students': total_students,
@@ -62,62 +110,32 @@ def dashboard(date: str | None = None):
             'top_points': top,
             'recent_logs': logs,
             'class_fund_balance': balance,
+            'work_summary': work_summary,
+            'work_sections': work_sections,
             'tasks': tasks,
+            'rule_hits': rule_hits,
+            'rule_hit_count': len(all_rule_hits),
+            'material_tasks': material_tasks[:8],
+            'material_task_count': len(material_tasks),
+            'review_students': review_students[:8],
+            'review_student_count': len(review_students),
             'focus': focus,
             'recent_events': recent_events,
             'pending_communications': pending_communications}
 
 
 @router.get('/attendance')
-def attendance():
-    rows = db.get_rows('考勤管理')
-    status_count: dict = {}
-    date_stats: dict = {}
-    for r in rows:
-        d = r['data']
-        status = str(d[4] or '').strip() if len(d) > 4 else ''
-        if status:
-            status_count[status] = status_count.get(status, 0) + 1
-        date = str(d[0] or '')[:10]
-        if date and status:
-            day = date_stats.setdefault(date, {'出勤': 0, '迟到': 0, '请假': 0, '缺勤': 0, '总人数': 0})
-            if status in day:
-                day[status] += 1
-            day['总人数'] += 1
-    return {'status_count': status_count, 'date_stats': date_stats}
+def attendance(date_from: str = '', date_to: str = '', scene: str = '全部场景'):
+    try:
+        return attendance_service.attendance_stats(
+            date_from=date_from, date_to=date_to, scene=scene)
+    except attendance_service.AttendanceError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get('/scores')
 def scores():
-    rows = derive('成绩跟踪', db.get_rows('成绩跟踪'))
-    subjects = ['语文', '数学', '英语', '政治', '历史', '地理']
-    students = []
-    for r in rows:
-        d = r['data']
-        name = d[1] if len(d) > 1 else None
-        if not name:
-            continue
-        students.append({
-            'name': str(name),
-            'yuekao1': [d[i] for i in range(2, 8)],
-            'yuekao1_total': d[8] if len(d) > 8 else None,
-            'rank1': d[9] if len(d) > 9 else None,
-            'qizhong': [d[i] for i in range(10, 16)],
-            'qizhong_total': d[16] if len(d) > 16 else None,
-            'rank2': d[17] if len(d) > 17 else None,
-            'change': d[18] if len(d) > 18 else None,
-        })
-
-    avg = {'yuekao1': {}, 'qizhong': {}}
-    for i, subj in enumerate(subjects):
-        def avg_of(key):
-            vals = [s[key][i] for s in students
-                    if i < len(s[key]) and s[key][i] is not None and isinstance(s[key][i], (int, float))]
-            return round(sum(vals) / len(vals), 1) if vals else 0
-        avg['yuekao1'][subj] = avg_of('yuekao1')
-        avg['qizhong'][subj] = avg_of('qizhong')
-
-    return {'students': students, 'avg_scores': avg, 'subjects': subjects}
+    return scores_service.score_summary()
 
 
 @router.get('/points')

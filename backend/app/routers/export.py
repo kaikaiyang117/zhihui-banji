@@ -31,9 +31,10 @@ def export_work_sheet(name: str):
 
 @router.get('/report/scores')
 def report_scores(exam: str = '月考1'):
-    if exam not in ('月考1', '期中'):
-        raise HTTPException(400, 'exam 参数必须为 月考1 或 期中')
-    buf, fname = export_score_report(exam)
+    try:
+        buf, fname = export_score_report(exam)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return _response(buf, fname)
 
 

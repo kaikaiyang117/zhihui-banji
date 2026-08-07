@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """启动入口：python run.py [--lan] [--port 5000]"""
 import argparse
-import secrets
 import sys
 import os
 import threading
@@ -59,19 +58,16 @@ def main(argv=None):
     if port != requested_port:
         print(f'端口 {requested_port} 已被占用，已自动切换到 {port}')
     if lan_mode:
-        os.environ.setdefault('WORKBENCH_ACCESS_TOKEN', secrets.token_urlsafe(24))
         os.environ['WORKBENCH_PORT'] = str(port)
-        os.environ['WORKBENCH_ACCESS_URL'] = f'http://{local_ip()}:{port}/?access={os.environ["WORKBENCH_ACCESS_TOKEN"]}'
+        os.environ['WORKBENCH_LAN_URL_BASE'] = f'http://{local_ip()}:{port}'
     print(f'美美大王工作台启动中 -> http://localhost:{port}')
     if lan_mode:
-        access_token = os.environ['WORKBENCH_ACCESS_TOKEN']
-        print(f'局域网访问地址 -> {os.environ["WORKBENCH_ACCESS_URL"]}')
+        print(f'局域网配对入口 -> {os.environ["WORKBENCH_LAN_URL_BASE"]}')
+        print('请在工作台点击“手机访问”生成 5 分钟有效的单次配对二维码。')
         print('安全提示：仅在可信局域网使用，不要将此端口映射到公网。')
     open_browser = not args.no_browser and (args.open_browser or IS_FROZEN)
     if open_browser:
         browser_url = f'http://127.0.0.1:{port}/'
-        if lan_mode:
-            browser_url += f'?access={os.environ["WORKBENCH_ACCESS_TOKEN"]}'
         threading.Timer(0.8, lambda: webbrowser.open(browser_url)).start()
     uvicorn.run(application, host=host, port=port, reload=False)
 

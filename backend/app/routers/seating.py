@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from .. import db
+from ..services.class_context import scope_ids
 
 router = APIRouter(prefix='/api/seating')
 
@@ -16,7 +17,11 @@ class SeatingUpdate(BaseModel):
 
 @router.get('')
 def get_seating():
-    rows = db.get_conn().execute('SELECT r, c, val FROM seating').fetchall()
+    class_id, term_id = scope_ids(conn=db.get_conn())
+    rows = db.get_conn().execute(
+        'SELECT r, c, val FROM seating WHERE class_id=? AND term_id=?',
+        (class_id, term_id),
+    ).fetchall()
     grid = []
     specials = {}
     for row in rows:
@@ -34,7 +39,9 @@ def get_seating():
 @router.post('/update')
 def update_seating(body: SeatingUpdate):
     conn = db.get_conn()
-    conn.execute('INSERT OR REPLACE INTO seating(r, c, val) VALUES(?,?,?)',
-                 (body.row, body.col, body.value))
+    class_id, term_id = scope_ids(write=True, conn=conn)
+    conn.execute(
+        'INSERT OR REPLACE INTO seating(class_id, term_id, r, c, val) VALUES(?,?,?,?,?)',
+        (class_id, term_id, body.row, body.col, body.value))
     conn.commit()
     return {'ok': True}

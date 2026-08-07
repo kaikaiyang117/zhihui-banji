@@ -16,6 +16,29 @@ from app.import_service import commit_student_import, preview_students
 
 
 class DataSafetyTest(unittest.TestCase):
+    MIGRATION_TABLES = (
+        'students',
+        'student_events',
+        'student_tasks',
+        'focus_items',
+        'communications',
+        'exam_records',
+        'attendance_rules',
+        'class_tasks',
+        'class_task_items',
+        'duty_assignments',
+        'sheet_rows',
+    )
+    SCORE_TABLES = (
+        'score_exams',
+        'score_subjects',
+        'score_exam_subjects',
+        'score_import_runs',
+        'score_rules',
+        'score_rule_runs',
+        'score_rule_hits',
+    )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.old_path, self.old_data_dir = db.DB_PATH, db.DATA_DIR
@@ -47,6 +70,25 @@ class DataSafetyTest(unittest.TestCase):
         self.assertIsNotNone(conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='wechat_message_receipts'"
         ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='recycle_bin'"
+        ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='system_audit'"
+        ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pairing_sessions'"
+        ).fetchone())
+        self.assertIsNotNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='paired_devices'"
+        ).fetchone())
+        for table in (
+            'attendance_records', 'attendance_rule_runs', 'attendance_rule_hits',
+            *self.SCORE_TABLES,
+        ):
+            self.assertIsNotNone(conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone())
 
     def test_legacy_database_migrates_and_creates_pre_migration_backup(self):
         legacy_path = os.path.join(self.temp.name, 'legacy.db')
@@ -64,6 +106,141 @@ class DataSafetyTest(unittest.TestCase):
         self.assertEqual(db.schema_version(conn), db.CURRENT_SCHEMA_VERSION)
         backups = os.listdir(os.path.join(self.temp.name, 'backups'))
         self.assertTrue(any('pre-migrate-v2' in name for name in backups))
+
+    def test_v4_business_fixture_survives_upgrade_and_repeated_startup(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__), 'fixtures', 'migration_v4.sql')
+        legacy_path = os.path.join(self.temp.name, 'business-v4.db')
+        legacy = sqlite3.connect(legacy_path)
+        with open(fixture_path, encoding='utf-8') as fixture:
+            legacy.executescript(fixture.read())
+        before = {
+            table: legacy.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            for table in self.MIGRATION_TABLES
+        }
+        legacy.close()
+
+        db.close()
+        db.DB_PATH = legacy_path
+        conn = db.get_conn()
+        after_upgrade = {
+            table: conn.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            for table in self.MIGRATION_TABLES
+        }
+        for table in self.MIGRATION_TABLES:
+            if table != 'student_tasks':
+                self.assertEqual(after_upgrade[table], before[table], table)
+        self.assertEqual(after_upgrade['student_tasks'], before['student_tasks'] + 4)
+        self.assertEqual(db.schema_version(conn), db.CURRENT_SCHEMA_VERSION)
+        scope = conn.execute(
+            'SELECT c.id AS class_id, t.id AS term_id FROM classes c JOIN terms t ON t.class_id=c.id'
+        ).fetchone()
+        self.assertIsNotNone(scope)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM student_enrollments WHERE class_id=? AND term_id=?',
+            (scope['class_id'], scope['term_id'])).fetchone()[0], before['students'])
+        for table in (
+            'student_events', 'student_tasks', 'focus_items', 'communications',
+            'exam_records', 'attendance_rules', 'class_tasks', 'duty_assignments', 'sheet_rows',
+        ):
+            missing = conn.execute(
+                f'SELECT COUNT(*) FROM {table} WHERE class_id IS NULL OR term_id IS NULL'
+            ).fetchone()[0]
+            self.assertEqual(missing, 0, table)
+
+        task_link = conn.execute(
+            'SELECT student_id, event_id FROM student_tasks WHERE id=1'
+        ).fetchone()
+        self.assertEqual((task_link['student_id'], task_link['event_id']), (1, 1))
+        sources = conn.execute(
+            "SELECT source_type, COUNT(*) AS count FROM student_tasks GROUP BY source_type"
+        ).fetchall()
+        self.assertEqual(
+            {row['source_type']: row['count'] for row in sources},
+            {'event': 1, 'communication': 1, 'focus': 1, 'class_task': 1, 'duty_assignment': 1},
+        )
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM student_tasks WHERE source_key<>''"
+        ).fetchone()[0], 5)
+        material_link = conn.execute(
+            'SELECT task_id, student_id FROM class_task_items WHERE id=1'
+        ).fetchone()
+        self.assertEqual((material_link['task_id'], material_link['student_id']), (1, 1))
+        attendance = conn.execute(
+            "SELECT data FROM sheet_rows WHERE sheet='考勤管理' AND row_no=1"
+        ).fetchone()
+        self.assertIn('M4001', attendance['data'])
+        structured_attendance = conn.execute(
+            '''SELECT a.attendance_date, a.scene, a.status, a.arrive_at, a.reason, s.学号
+               FROM attendance_records a JOIN students s ON s.id=a.student_id'''
+        ).fetchone()
+        self.assertEqual(
+            tuple(structured_attendance),
+            ('2026-08-06', '常规到校', '迟到', '08:10', '交通', 'M4001'),
+        )
+        structured_score = conn.execute(
+            '''SELECT r.exam_id, r.subject_id, r.record_status,
+                      e.name AS exam_name, e.exam_date, s.name AS subject_name
+               FROM exam_records r
+               JOIN score_exams e ON e.id=r.exam_id
+               JOIN score_subjects s ON s.id=r.subject_id
+               WHERE r.id=1'''
+        ).fetchone()
+        self.assertEqual(
+            tuple(structured_score),
+            (1, 1, '正常', '第一次月考', '2026-08-01', '语文'),
+        )
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM score_exam_subjects WHERE exam_id=? AND subject_id=?',
+            (structured_score['exam_id'], structured_score['subject_id']),
+        ).fetchone()[0], 1)
+        score_counts = {
+            table: conn.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            for table in self.SCORE_TABLES
+        }
+
+        db.close()
+        reopened = db.get_conn()
+        after_restart = {
+            table: reopened.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            for table in self.MIGRATION_TABLES
+        }
+        self.assertEqual(after_restart, after_upgrade)
+        self.assertEqual({
+            table: reopened.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            for table in self.SCORE_TABLES
+        }, score_counts)
+        self.assertEqual(db.schema_version(reopened), db.CURRENT_SCHEMA_VERSION)
+        backups = os.listdir(os.path.join(self.temp.name, 'backups'))
+        self.assertTrue(any('pre-migrate-v5' in name for name in backups))
+
+    def test_v5_database_upgrades_work_items_once_and_creates_v6_backup(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__), 'fixtures', 'migration_v4.sql')
+        legacy_path = os.path.join(self.temp.name, 'business-v5.db')
+        legacy = sqlite3.connect(legacy_path)
+        legacy.row_factory = sqlite3.Row
+        with open(fixture_path, encoding='utf-8') as fixture:
+            legacy.executescript(fixture.read())
+        db._migration_5(legacy)
+        legacy.execute('INSERT INTO schema_migrations(version) VALUES(5)')
+        legacy.commit()
+        legacy.close()
+
+        db.close()
+        db.DB_PATH = legacy_path
+        conn = db.get_conn()
+        self.assertEqual(db.schema_version(conn), db.CURRENT_SCHEMA_VERSION)
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM student_tasks').fetchone()[0], 5)
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM student_tasks WHERE source_key<>''"
+        ).fetchone()[0], 5)
+        backups = os.listdir(os.path.join(self.temp.name, 'backups'))
+        self.assertTrue(any('pre-migrate-v6' in name for name in backups))
+
+        db.close()
+        reopened = db.get_conn()
+        self.assertEqual(reopened.execute('SELECT COUNT(*) FROM student_tasks').fetchone()[0], 5)
 
     def test_backup_is_integrity_checked(self):
         filename = db.create_backup('test')

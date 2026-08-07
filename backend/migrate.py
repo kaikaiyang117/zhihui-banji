@@ -13,6 +13,8 @@ from openpyxl import load_workbook
 
 from app import db
 from app.config import (LEGACY_BZR, LEGACY_HEALTH, SHEET_META, STUDENT_COLUMNS)
+from app.services import attendance
+from app.services.class_context import enroll_student, scope_ids
 
 
 def _formula(val):
@@ -46,13 +48,14 @@ def migrate_file(fp: str, sheet_names: list[str]):
         db.set_sheet_meta(name, headers, category, group)
         n = 0
         if name == '座位表':
+            class_id, term_id = scope_ids(write=True, conn=db.get_conn())
             for r in range(1, ws.max_row + 1):
                 for c in range(1, ws.max_column + 1):
                     v = ws.cell(row=r, column=c).value
                     if v is not None:
                         db.get_conn().execute(
-                            'INSERT OR REPLACE INTO seating(r,c,val) VALUES(?,?,?)',
-                            (r, c, str(v)))
+                            'INSERT OR REPLACE INTO seating(class_id,term_id,r,c,val) VALUES(?,?,?,?,?)',
+                            (class_id, term_id, r, c, str(v)))
             db.get_conn().commit()
             print(f'  座位表: 迁移完成')
             continue
@@ -65,7 +68,32 @@ def migrate_file(fp: str, sheet_names: list[str]):
                 if v is not None:
                     has_data = True
             if has_data:
-                db.insert_row(name, row)
+                if name == '考勤管理':
+                    index = {header: i for i, header in enumerate(headers)}
+                    xh = str(row[index.get('学号', -1)] or '').strip() if '学号' in index else ''
+                    student_name = str(row[index.get('姓名', -1)] or '').strip() if '姓名' in index else ''
+                    class_id, term_id = scope_ids(conn=db.get_conn())
+                    student = db.get_conn().execute(
+                        '''SELECT s.id FROM students s JOIN student_enrollments e ON e.student_id=s.id
+                           WHERE e.class_id=? AND e.term_id=?
+                             AND ((?<>'' AND s.学号=?) OR (?='' AND s.姓名=?))
+                           ORDER BY s.id LIMIT 1''',
+                        (class_id, term_id, xh, xh, xh, student_name),
+                    ).fetchone()
+                    if not student:
+                        continue
+                    value = lambda key: row[index[key]] if key in index and index[key] < len(row) else ''
+                    attendance.save_daily(
+                        str(value('日期') or '')[:10], '常规到校', [{
+                            'student_id': student['id'], 'status': str(value('状态') or '出勤'),
+                            'arrive': str(value('到校时间') or ''),
+                            'leave': str(value('离校时间') or ''),
+                            'reason': str(value('原因') or value('请假原因') or ''),
+                            'note': str(value('备注') or ''),
+                        }], evaluate=False,
+                    )
+                else:
+                    db.insert_row(name, row)
                 n += 1
         print(f'  {name}: {n} 行')
     wb.close()
@@ -101,7 +129,8 @@ def migrate_students():
         vals = tuple(fields.get(k) for k in STUDENT_COLUMNS)
         cols_sql = ','.join(f'[{k}]' for k in STUDENT_COLUMNS)
         ph = ','.join('?' for _ in STUDENT_COLUMNS)
-        conn.execute(f'INSERT INTO students({cols_sql}) VALUES({ph})', vals)
+        student_id = conn.execute(f'INSERT INTO students({cols_sql}) VALUES({ph})', vals).lastrowid
+        enroll_student(student_id, conn=conn, commit=False)
         n += 1
     conn.commit()
     wb.close()

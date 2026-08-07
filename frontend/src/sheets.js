@@ -169,6 +169,7 @@ export const NAV = [
       { title: '概览', items: [
         { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },
         { page: 'agent', icon: 'Brain', label: 'Agent 设置' },
+        { page: 'recycle', icon: 'Trash2', label: '回收站与审计' },
         { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' },
         { page: 'class-tasks', icon: 'ClipboardList', label: '班级任务' }
       ] },

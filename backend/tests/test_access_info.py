@@ -5,6 +5,8 @@ import unittest
 from urllib.error import HTTPError
 from unittest.mock import patch
 
+from fastapi import Request
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.routers import system
@@ -13,27 +15,47 @@ from app.routers.system import access_info
 
 class AccessInfoTest(unittest.TestCase):
     def setUp(self):
-        self.old_url = os.environ.get('WORKBENCH_ACCESS_URL')
+        self.old_url = os.environ.get('WORKBENCH_LAN_URL_BASE')
 
     def tearDown(self):
         if self.old_url is None:
-            os.environ.pop('WORKBENCH_ACCESS_URL', None)
+            os.environ.pop('WORKBENCH_LAN_URL_BASE', None)
         else:
-            os.environ['WORKBENCH_ACCESS_URL'] = self.old_url
+            os.environ['WORKBENCH_LAN_URL_BASE'] = self.old_url
 
-    def test_access_info_returns_qr_source_url_for_lan_mode(self):
-        os.environ['WORKBENCH_ACCESS_URL'] = (
-            'http://192.168.31.210:5100/?access=test-token'
-        )
-        self.assertEqual(access_info(), {
+    @staticmethod
+    def request(host='127.0.0.1'):
+        return Request({'type': 'http', 'client': (host, 50000), 'headers': []})
+
+    def test_access_info_returns_device_summary_for_lan_mode(self):
+        os.environ['WORKBENCH_LAN_URL_BASE'] = 'http://192.168.31.210:5100'
+        with patch.object(system.devices, 'list_devices', return_value=[
+            {'status': '已授权'}, {'status': '已撤权'},
+        ]):
+            result = access_info(self.request())
+        self.assertEqual(result, {
             'enabled': True,
-            'url': 'http://192.168.31.210:5100/?access=test-token',
-            'message': '请让手机或平板连接同一 Wi-Fi 后扫描二维码。',
+            'can_manage': True,
+            'paired_device_count': 1,
+            'message': '请在电脑端生成短时配对二维码。',
         })
 
     def test_access_info_is_disabled_without_runtime_url(self):
-        os.environ.pop('WORKBENCH_ACCESS_URL', None)
-        self.assertEqual(access_info(), {'enabled': False, 'url': '', 'message': ''})
+        os.environ.pop('WORKBENCH_LAN_URL_BASE', None)
+        with patch.object(system.devices, 'list_devices', return_value=[]):
+            result = access_info(self.request())
+        self.assertEqual(result, {
+            'enabled': False,
+            'can_manage': True,
+            'paired_device_count': 0,
+            'message': '',
+        })
+
+    def test_remote_device_cannot_manage_pairing(self):
+        os.environ['WORKBENCH_LAN_URL_BASE'] = 'http://192.168.31.210:5100'
+        with patch.object(system.devices, 'list_devices', return_value=[]):
+            result = access_info(self.request('192.168.31.99'))
+        self.assertFalse(result['can_manage'])
 
     def test_update_check_selects_platform_asset_and_checksum(self):
         release = {

@@ -8,6 +8,7 @@
 - 只有明确登记为“是”的渠道，才允许该渠道调用对应 Agent 工具。
 - “微信端”是服务端权限，不是网页按钮状态；敏感信息和写操作必须在工具层拦截。
 - 工具名称、参数、风险等级或对应业务服务变化时，必须同步更新测试。
+- 所有教师业务只读工具都使用班级/学期上下文：网页 Agent 跟随顶部所选范围；微信 Agent 在尚未提供显式切换指令前使用首个未归档班级的当前学期。切换网页范围会清空网页 Agent 的旧会话，防止上下文串班。
 
 ## 当前能力
 
@@ -18,8 +19,8 @@
 | 查看学生档案 | `get_student_profile` | `student_get_profile` | 是 | 是 | 否 | 敏感信息，微信默认拒绝 | 已接入 |
 | 查看学生时间线 | `get_student_timeline` | `student_get_timeline` | 是 | 是 | 是 | 只读，返回事件摘要 | 已接入 |
 | 查询考勤统计 | `get_attendance_summary` | `attendance_summary` | 是 | 是 | 是 | 只读 | 已接入 |
-| 查询成绩统计 | `get_scores_summary` | `scores_summary` | 是 | 是 | 是 | 只读 | 已接入 |
-| 查询待办任务 | `get_tasks_list` | `tasks_list` | 是 | 是 | 是 | 只读 | 已接入 |
+| 查询成绩统计 | `scores.score_summary` → `get_scores_summary` | `scores_summary` | 是 | 是 | 是 | 只读；返回结构化考试、科目状态、总分、排名与变化，不暴露导入明细 | 已接入 |
+| 查询统一工作项 | `work_items.list_work_items` → `get_tasks_list` | `tasks_list` | 是 | 是 | 是 | 只读；默认返回未关闭事项 | 已接入 |
 | 查询家校沟通 | `get_communications_list` | `communications_list` | 是 | 是 | 是 | 只读，隐藏家长电话 | 已接入 |
 
 ## 待评估能力
@@ -57,7 +58,7 @@ Agent 工具：
 
 发布前至少检查四个范围：
 
-1. **系统功能**：页面点击、API、数据库迁移、导入导出。
+1. **系统功能**：页面点击、API、数据库迁移、导入导出；成绩查询需验证网页与 Agent 共用结构化统计口径。
 2. **Agent 核心**：规划、工具调用、上下文、权限、错误重试和审计。
 3. **网页 Agent**：Markdown 渲染、规划卡片、流式响应和会话清空。
 4. **微信 Agent**：凭证、消息收发、会话隔离、敏感权限和断线恢复。

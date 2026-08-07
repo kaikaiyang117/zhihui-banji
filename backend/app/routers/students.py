@@ -15,6 +15,7 @@ from ..import_service import (
     preview_students,
 )
 from ..export_service import export_students
+from ..services import audit, class_context, recycle
 
 router = APIRouter(prefix='/api/students')
 
@@ -60,27 +61,47 @@ def _xlsx_response(buf, fname: str):
 @router.get('')
 def list_students(keyword: str = ''):
     conn = db.get_conn()
-    sql = f'SELECT id, {",".join("["+k+"]" for k in STUDENT_COLUMNS)} FROM students'
-    params: tuple = ()
+    scope = class_context.get_current_scope(conn=conn)
+    class_id, term_id = scope['class_id'], scope['term_id']
+    sql = (
+        f'SELECT s.id, {",".join("s.["+k+"]" for k in STUDENT_COLUMNS)}, '
+        'e.id AS enrollment_id, e.status AS enrollment_status '
+        'FROM students s JOIN student_enrollments e ON e.student_id=s.id '
+        "WHERE e.class_id=? AND e.term_id=? AND s.deleted_at=''"
+    )
+    params: list = [class_id, term_id]
+    if scope['term_status'] != '已归档':
+        sql += " AND e.status='在读'"
     if keyword:
-        sql += ' WHERE 姓名 LIKE ? OR 学号 LIKE ?'
-        params = (f'%{keyword}%', f'%{keyword}%')
-    sql += ' ORDER BY 学号'
-    rows = conn.execute(sql, params).fetchall()
+        sql += ' AND (s.姓名 LIKE ? OR s.学号 LIKE ?)'
+        params.extend((f'%{keyword}%', f'%{keyword}%'))
+    sql += ' ORDER BY s.学号'
+    rows = conn.execute(sql, tuple(params)).fetchall()
     return {'students': [dict(r) for r in rows]}
+
+
+@router.get('/directory')
+def list_student_directory():
+    return {'students': class_context.list_student_directory()}
 
 
 @router.post('')
 def create_student(body: StudentBody):
     conn = db.get_conn()
+    class_context.get_current_scope(write=True, conn=conn)
     if body.学号:
-        existing = conn.execute('SELECT id FROM students WHERE 学号=?', (body.学号,)).fetchone()
+        existing = conn.execute('SELECT id, deleted_at FROM students WHERE 学号=?', (body.学号,)).fetchone()
         if existing:
+            if existing['deleted_at']:
+                raise HTTPException(409, f'学号 {body.学号} 位于回收站，请先恢复')
             raise HTTPException(409, f'学号 {body.学号} 已存在')
     vals = tuple(getattr(body, k) for k in STUDENT_COLUMNS)
     cols = ','.join(f'[{k}]' for k in STUDENT_COLUMNS)
     placeholders = ','.join('?' for _ in STUDENT_COLUMNS)
     cur = conn.execute(f'INSERT INTO students({cols}) VALUES({placeholders})', vals)
+    class_context.enroll_student(cur.lastrowid, conn=conn)
+    audit.record('student', cur.lastrowid, 'create', summary=f'新增学生：{body.姓名}',
+                 params=body.model_dump(), conn=conn, commit=False)
     conn.commit()
     return {'ok': True, 'id': cur.lastrowid}
 
@@ -88,11 +109,14 @@ def create_student(body: StudentBody):
 @router.put('/{sid}')
 def update_student(sid: int, body: StudentBody):
     conn = db.get_conn()
-    existing = conn.execute('SELECT id FROM students WHERE id=?', (sid,)).fetchone()
-    if not existing:
-        raise HTTPException(404, '学生不存在')
+    try:
+        class_context.ensure_student_in_scope(sid, write=True, conn=conn)
+    except class_context.ArchivedScopeError:
+        raise
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
     if body.学号:
-        dup = conn.execute('SELECT id FROM students WHERE 学号=? AND id!=?', (body.学号, sid)).fetchone()
+        dup = conn.execute("SELECT id FROM students WHERE 学号=? AND id!=? AND deleted_at=''", (body.学号, sid)).fetchone()
         if dup:
             raise HTTPException(409, f'学号 {body.学号} 已被其他学生使用')
     updates = ','.join(f'[{k}]=?' for k in STUDENT_COLUMNS)
@@ -100,18 +124,22 @@ def update_student(sid: int, body: StudentBody):
     conn.execute(
         f'UPDATE students SET {updates}, updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
         (*vals, sid))
+    audit.record('student', sid, 'update', summary=f'更新学生：{body.姓名}',
+                 params=body.model_dump(), conn=conn, commit=False)
     conn.commit()
     return {'ok': True}
 
 
 @router.delete('/{sid}')
 def delete_student(sid: int):
-    conn = db.get_conn()
-    cur = conn.execute('DELETE FROM students WHERE id=?', (sid,))
-    conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, '学生不存在')
-    return {'ok': True}
+    try:
+        return recycle.soft_delete('student', sid)
+    except class_context.ArchivedScopeError:
+        raise
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except recycle.RecycleError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get('/template')

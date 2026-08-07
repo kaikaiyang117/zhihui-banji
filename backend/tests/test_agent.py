@@ -15,6 +15,7 @@ from app.agent.model_client import ModelResponse, ModelStreamEvent, ToolCall
 from app.agent.runner import AgentRunner
 from app.agent.session_store import SessionStore
 from app.agent.tool_registry import ToolError
+from backend.tests.helpers import enroll_all_students
 
 
 class AgentFoundationTest(unittest.TestCase):
@@ -30,6 +31,7 @@ class AgentFoundationTest(unittest.TestCase):
             [('A001', '张三', '男', '班长'), ('A002', '李四', '女', '')],
         )
         conn.commit()
+        enroll_all_students()
 
     def tearDown(self):
         db.close()

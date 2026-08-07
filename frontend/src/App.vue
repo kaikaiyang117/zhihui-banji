@@ -5,9 +5,10 @@ import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
-import { del, get, streamPost } from './api'
+import { clearDeviceCredential, del, get, post, streamPost } from './api'
 import { renderAgentMarkdown } from './markdown'
 import UpdateDialog from './components/UpdateDialog.vue'
+import ContextSwitcher from './components/ContextSwitcher.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,11 @@ const accessInfo = ref(null)
 const accessQr = ref('')
 const accessOpen = ref(false)
 const accessCopied = ref(false)
+const accessExpiresAt = ref('')
+const pairedDevices = ref([])
+const accessLoading = ref(false)
+const accessError = ref('')
+const accessBlocked = ref(false)
 const updateOpen = ref(false)
 const agentOpen = ref(false)
 const agentInput = ref('')
@@ -89,16 +95,67 @@ async function loadAccessInfo() {
   try {
     const info = await get('/api/system/access-info')
     accessInfo.value = info
-    if (info.enabled && info.url) {
-      accessQr.value = await QRCode.toDataURL(info.url, {
-        width: 240,
-        margin: 2,
-        errorCorrectionLevel: 'M',
-        color: { dark: '#1d1d1f', light: '#ffffff' },
-      })
+    accessBlocked.value = false
+    accessError.value = ''
+  } catch (error) {
+    if (error.status === 401 || new URLSearchParams(window.location.search).has('pair')) {
+      accessBlocked.value = true
+      accessError.value = error.message || '此设备的访问授权无效，请在电脑端重新配对。'
     }
-  } catch {
-    // 本机模式或旧版本服务没有访问信息时，不显示局域网入口。
+  }
+}
+
+async function openAccessDialog() {
+  accessOpen.value = true
+  await refreshPairing()
+}
+
+async function refreshPairing() {
+  if (!accessInfo.value?.can_manage || accessLoading.value) return
+  accessLoading.value = true
+  accessError.value = ''
+  try {
+    const [pairing, deviceData] = await Promise.all([
+      post('/api/system/pairing/start', {}),
+      get('/api/system/devices'),
+    ])
+    accessInfo.value = { ...accessInfo.value, url: pairing.url }
+    accessExpiresAt.value = pairing.expires_at
+    pairedDevices.value = deviceData.devices || []
+    accessQr.value = await QRCode.toDataURL(pairing.url, {
+      width: 240,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#1d1d1f', light: '#ffffff' },
+    })
+  } catch (error) {
+    accessError.value = error.message
+  } finally {
+    accessLoading.value = false
+  }
+}
+
+async function revokeAccessDevice(device) {
+  if (!confirm(`撤销“${device.name}”的访问权限吗？`)) return
+  await del(`/api/system/devices/${device.id}`)
+  pairedDevices.value = (await get('/api/system/devices')).devices || []
+}
+
+async function revokeAllAccessDevices() {
+  if (!confirm('撤销全部移动设备的访问权限吗？本机仍可正常使用。')) return
+  await post('/api/system/devices/revoke-all', {})
+  pairedDevices.value = (await get('/api/system/devices')).devices || []
+}
+
+async function logoutAccessDevice() {
+  if (!confirm('退出这台设备吗？退出后需要在电脑端重新扫码配对。')) return
+  try {
+    await post('/api/system/devices/logout', {})
+  } finally {
+    clearDeviceCredential()
+    accessInfo.value = null
+    accessBlocked.value = true
+    accessError.value = '这台设备已退出，请在电脑端重新生成二维码后扫码配对。'
   }
 }
 
@@ -225,6 +282,7 @@ onMounted(loadAccessInfo)
         <component :is="renderIcon(tab.icon)" class="tab-icon" />
         <span>{{ tab.title }}</span>
       </router-link>
+      <ContextSwitcher v-if="activeTab === 'teacher'" />
       <div class="global-search">
         <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
         <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
@@ -237,9 +295,13 @@ onMounted(loadAccessInfo)
           </button>
         </div>
       </div>
-      <button v-if="accessInfo?.enabled" class="access-button" type="button" aria-label="显示手机访问二维码" @click="accessOpen = true">
+      <button v-if="accessInfo?.enabled && accessInfo?.can_manage" class="access-button" type="button" aria-label="显示手机访问二维码" @click="openAccessDialog">
         <component :is="renderIcon('Wifi')" :size="16" />
         <span>手机访问</span>
+      </button>
+      <button v-else-if="accessInfo?.enabled" class="device-logout-button" type="button" aria-label="退出当前授权设备" @click="logoutAccessDevice">
+        <component :is="renderIcon('LogOut')" :size="16" />
+        <span>退出设备</span>
       </button>
       <button class="update-button" type="button" aria-label="检查软件更新" @click="updateOpen = true">
         <component :is="renderIcon('Download')" :size="16" />
@@ -247,12 +309,21 @@ onMounted(loadAccessInfo)
       </button>
     </header>
     <UpdateDialog :open="updateOpen" @close="updateOpen = false" />
+    <div v-if="accessBlocked" class="access-scrim access-blocked-scrim">
+      <section class="access-blocked-card" role="alertdialog" aria-modal="true" aria-labelledby="access-blocked-title">
+        <div class="access-blocked-icon"><component :is="renderIcon('ShieldAlert')" :size="24" /></div>
+        <div id="access-blocked-title" class="access-title">需要重新配对</div>
+        <p>{{ accessError }}</p>
+        <div class="access-warning">请回到运行工作台的电脑，点击右上角“手机访问”，再用这台设备扫描新二维码。</div>
+        <button class="btn btn-primary" type="button" @click="loadAccessInfo">重新检查</button>
+      </section>
+    </div>
     <div v-if="accessOpen" class="access-scrim" @click.self="accessOpen = false">
       <section class="access-dialog" role="dialog" aria-modal="true" aria-labelledby="access-title">
         <div class="access-dialog-head">
           <div>
             <div id="access-title" class="access-title">手机 / 平板访问</div>
-            <div class="access-subtitle">连接同一 Wi-Fi 后，用相机扫描二维码</div>
+            <div class="access-subtitle">连接同一 Wi-Fi 后，用相机扫描短时配对二维码</div>
           </div>
           <button class="icon-button" type="button" aria-label="关闭二维码" @click="accessOpen = false">
             <component :is="renderIcon('X')" :size="18" />
@@ -260,15 +331,27 @@ onMounted(loadAccessInfo)
         </div>
         <div class="access-qr-frame">
           <img v-if="accessQr" :src="accessQr" alt="局域网访问二维码" class="access-qr" />
-          <div v-else class="access-qr-loading">二维码生成中…</div>
+          <div v-else class="access-qr-loading">{{ accessLoading ? '正在生成配对二维码…' : '暂时无法生成二维码' }}</div>
         </div>
-        <div class="access-url-label">访问地址</div>
+        <div class="access-url-label">单次配对地址 · {{ accessExpiresAt ? `${accessExpiresAt} 失效` : '5 分钟有效' }}</div>
         <div class="access-url">{{ accessInfo?.url }}</div>
         <button class="btn btn-outline access-copy" type="button" @click="copyAccessUrl">
           <component :is="renderIcon(accessCopied ? 'Check' : 'Copy')" :size="15" />
           {{ accessCopied ? '已复制地址' : '复制访问地址' }}
         </button>
-        <div class="access-warning">二维码包含本次启动生成的访问密钥，请只分享给可信设备。</div>
+        <button class="btn btn-outline access-copy" type="button" :disabled="accessLoading" @click="refreshPairing">
+          <RefreshCw :size="15" /> 重新生成二维码
+        </button>
+        <div v-if="accessError" class="access-error">{{ accessError }}</div>
+        <div class="access-warning">二维码仅可使用一次并在 5 分钟后失效。配对后的设备可在下方随时撤权。</div>
+        <div class="access-device-head"><strong>已授权设备</strong><button v-if="pairedDevices.some(item => item.status === '已授权')" type="button" @click="revokeAllAccessDevices">全部撤权</button></div>
+        <div class="access-devices">
+          <div v-if="!pairedDevices.length" class="access-device-empty">还没有已配对设备</div>
+          <div v-for="device in pairedDevices" :key="device.id" class="access-device-row">
+            <div><strong>{{ device.name }}</strong><span>{{ device.status }} · 最近访问 {{ device.last_seen_at || '暂无' }}</span></div>
+            <button v-if="device.status === '已授权'" type="button" @click="revokeAccessDevice(device)">撤权</button>
+          </div>
+        </div>
       </section>
     </div>
     <div class="agent-float" :class="{ 'is-open': agentOpen }">
@@ -419,6 +502,22 @@ onMounted(loadAccessInfo)
   touch-action: manipulation;
 }
 .access-button:active { transform: scale(.97); }
+.device-logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 7px 0 7px 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.68);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.device-logout-button:active { transform: scale(.97); }
 .update-button {
   display: inline-flex;
   align-items: center;
@@ -459,6 +558,22 @@ onMounted(loadAccessInfo)
   box-shadow: 0 24px 70px rgba(21, 28, 58, .22);
   animation: access-dialog-in 250ms cubic-bezier(.16, 1, .3, 1);
 }
+.access-blocked-scrim { z-index: 900; }
+.access-blocked-card {
+  display: grid;
+  justify-items: center;
+  width: min(340px, 100%);
+  box-sizing: border-box;
+  padding: 28px 24px 24px;
+  border: 1px solid rgba(255,255,255,.72);
+  border-radius: 24px;
+  background: rgba(255,255,255,.97);
+  box-shadow: 0 24px 70px rgba(21,28,58,.22);
+  text-align: center;
+}
+.access-blocked-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 14px; border-radius: 15px; background: var(--primary-bg); color: var(--primary); }
+.access-blocked-card p { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.access-blocked-card .btn { margin-top: 18px; }
 .access-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .access-title { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
 .access-subtitle { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }
@@ -471,6 +586,15 @@ onMounted(loadAccessInfo)
 .access-url { padding: 10px 12px; border-radius: 10px; background: var(--bg); color: var(--text); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; user-select: text; }
 .access-copy { width: 100%; justify-content: center; margin-top: 12px; }
 .access-warning { margin-top: 12px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; text-align: center; }
+.access-error { margin-top: 10px; color: var(--danger); font-size: 12px; text-align: center; }
+.access-device-head { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; }
+.access-device-head button, .access-device-row > button { border: 0; background: transparent; color: var(--danger); font: inherit; font-size: 11px; cursor: pointer; }
+.access-devices { max-height: 150px; overflow-y: auto; }
+.access-device-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); text-align: left; }
+.access-device-row > div { min-width: 0; display: grid; gap: 2px; }
+.access-device-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.access-device-row span, .access-device-empty { color: var(--text-secondary); font-size: 10px; }
+.access-device-empty { padding: 12px 0 2px; text-align: center; }
 @keyframes access-dialog-in { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: none; } }
 
 .agent-float { position: fixed; right: 20px; bottom: 20px; z-index: 400; }
@@ -569,6 +693,8 @@ onMounted(loadAccessInfo)
   .search-popover { position: fixed; top: 96px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
   .access-button { margin-left: auto; padding: 0 10px; }
   .access-button span { display: none; }
+  .device-logout-button { margin-left: auto; padding: 0 10px; }
+  .device-logout-button span { display: none; }
   .update-button { margin-left: 6px; padding: 0 10px; }
   .update-button span { display: none; }
   .access-scrim { align-items: end; padding: 0; }

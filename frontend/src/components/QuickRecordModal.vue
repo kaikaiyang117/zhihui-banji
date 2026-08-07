@@ -28,6 +28,8 @@ const form = reactive({
   needs_followup: false,
   followup_due: '',
   title: '',
+  owner: '班主任',
+  scheduled_at: '',
   due_at: '',
   priority: '普通',
   notes: '',
@@ -67,7 +69,8 @@ async function submit() {
     let body = { ...form, student_id: form.student_id ? Number(form.student_id) : null }
     if (props.mode === 'task') {
       url = '/api/tasks'
-      body = { title: form.title, student_id: body.student_id, due_at: form.due_at,
+      body = { title: form.title, student_id: body.student_id, owner: form.owner,
+        scheduled_at: form.scheduled_at, due_at: form.due_at,
         priority: form.priority, notes: form.notes }
     } else if (props.mode === 'comm') {
       url = '/api/communications'
@@ -124,7 +127,11 @@ async function submit() {
         <template v-else-if="mode === 'task'">
           <div class="form-group"><label>事项</label><input class="form-input" v-model="form.title" placeholder="例如：周五复查近期迟到情况"></div>
           <div class="form-row">
+            <div class="form-group"><label>计划日期</label><input class="form-input" type="date" v-model="form.scheduled_at"></div>
             <div class="form-group"><label>截止日期</label><input class="form-input" type="date" v-model="form.due_at"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>负责人</label><input class="form-input" v-model="form.owner"></div>
             <div class="form-group"><label>优先级</label><select class="form-select" v-model="form.priority"><option>普通</option><option>重要</option><option>紧急</option></select></div>
           </div>
           <div class="form-group"><label>备注</label><textarea class="form-textarea" v-model="form.notes"></textarea></div>
