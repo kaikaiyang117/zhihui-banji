@@ -14,7 +14,7 @@ from app import db
 from app.routers.p0 import EventBody, create_event, list_events
 from app.routers.p1 import AttendanceRuleBody, ExamRecord, create_attendance_rule, list_attendance_rules, upsert_exam_record
 from app.routers.students import StudentBody, create_student, list_students
-from app.services import class_context, scores
+from app.services import class_context, duty, class_tasks, scores
 
 
 class ClassContextTest(unittest.TestCase):
@@ -86,6 +86,11 @@ class ClassContextTest(unittest.TestCase):
         scores.create_rule(
             name='语文退步提醒', metric='单科下降', subject_id=subject_id,
             threshold=5)
+        class_tasks.create_template(
+            name='家长回执', material_name='回执', default_due_days=5)
+        duty.create_rotation_rule(
+            name='卫生轮换', area='教室', start_date='2026-08-10',
+            end_date='2026-08-14', student_ids=[student_id])
         result = class_context.rollover_term(
             self.default_scope['term_id'], '下一学期', '2027-02-01', '2027-07-01')
 
@@ -102,6 +107,8 @@ class ClassContextTest(unittest.TestCase):
             self.assertEqual(score_rules[0]['name'], '语文退步提醒')
             self.assertEqual(score_rules[0]['subject_name'], '语文')
             self.assertEqual(scores.list_records(), [])
+            self.assertEqual([item['name'] for item in class_tasks.list_templates()], ['家长回执'])
+            self.assertEqual([item['name'] for item in duty.list_rotation_rules()], ['卫生轮换'])
         finally:
             class_context.reset_request_scope(token)
 

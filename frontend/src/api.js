@@ -66,8 +66,12 @@ async function parse(res) {
   let data = null
   try { data = await res.json() } catch (e) { /* 空响应 */ }
   if (!res.ok) {
-    const msg = data?.detail || data?.error || `请求失败 (${res.status})`
+    const detail = data?.detail
+    const msg = typeof detail === 'string'
+      ? detail
+      : detail?.message || data?.error || `请求失败 (${res.status})`
     const error = new Error(msg)
+    error.detail = detail
     error.status = res.status
     throw error
   }

@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -688,6 +688,100 @@ def _migration_11(conn: sqlite3.Connection):
         SELECT class_id, term_id, subject, MIN(id)
         FROM exam_records GROUP BY class_id, term_id, subject;
     ''')
+
+
+def _migration_12(conn: sqlite3.Connection):
+    """补齐班级任务、材料收集和值日的业务闭环数据。"""
+    for column, definition in (
+        ('template_id', 'INTEGER REFERENCES class_task_templates(id) ON DELETE SET NULL'),
+        ('completed_at', "TEXT NOT NULL DEFAULT ''"),
+        ('completion_result', "TEXT NOT NULL DEFAULT ''"),
+        ('closed_with_missing_count', 'INTEGER NOT NULL DEFAULT 0'),
+    ):
+        _add_column(conn, 'class_tasks', column, definition)
+    for column, definition in (
+        ('reminder_count', 'INTEGER NOT NULL DEFAULT 0'),
+        ('last_reminded_at', "TEXT NOT NULL DEFAULT ''"),
+        ('updated_at', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        _add_column(conn, 'class_task_items', column, definition)
+    for column, definition in (
+        ('rotation_rule_id', 'INTEGER REFERENCES duty_rotation_rules(id) ON DELETE SET NULL'),
+        ('rotation_index', 'INTEGER'),
+        ('completed_at', "TEXT NOT NULL DEFAULT ''"),
+        ('completion_result', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        _add_column(conn, 'duty_assignments', column, definition)
+
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS class_task_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            task_type TEXT NOT NULL DEFAULT '材料收集',
+            material_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            default_due_days INTEGER NOT NULL DEFAULT 7,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS class_task_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL REFERENCES class_tasks(id) ON DELETE CASCADE,
+            item_id INTEGER NOT NULL REFERENCES class_task_items(id) ON DELETE CASCADE,
+            original_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(item_id, stored_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS duty_rotation_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            area TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL DEFAULT '',
+            weekday_mask INTEGER NOT NULL DEFAULT 31,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS duty_rotation_members (
+            rule_id INTEGER NOT NULL REFERENCES duty_rotation_rules(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY(rule_id, student_id),
+            UNIQUE(rule_id, position)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_class_task_templates_scope
+            ON class_task_templates(class_id, term_id, enabled, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_class_task_attachments_task
+            ON class_task_attachments(task_id, item_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_duty_rotation_scope
+            ON duty_rotation_rules(class_id, term_id, enabled, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_duty_rotation_members
+            ON duty_rotation_members(rule_id, position, student_id);
+        CREATE INDEX IF NOT EXISTS idx_duty_assignment_student_date
+            ON duty_assignments(class_id, term_id, student_id, duty_date, deleted_at);
+    ''')
     for column, definition in (
         ('exam_id', 'INTEGER REFERENCES score_exams(id)'),
         ('subject_id', 'INTEGER REFERENCES score_subjects(id)'),
@@ -809,6 +903,7 @@ MIGRATIONS = {
     9: _migration_9,
     10: _migration_10,
     11: _migration_11,
+    12: _migration_12,
 }
 
 

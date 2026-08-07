@@ -6,11 +6,19 @@ import io
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..services import attendance as attendance_service, class_context, scores as scores_service, work_items
+from ..services import (
+    attendance as attendance_service,
+    class_context,
+    class_tasks as class_tasks_service,
+    duty as duty_service,
+    scores as scores_service,
+    work_items,
+)
 
 router = APIRouter(prefix='/api')
 
@@ -288,12 +296,17 @@ class ClassTaskBody(BaseModel):
     due_at: str = ''
     material_name: str = ''
     description: str = ''
-    student_ids: list[int] = []
+    student_ids: list[int] = Field(default_factory=list)
+    template_id: Optional[int] = None
 
 
 class ClassTaskUpdate(BaseModel):
     status: Optional[str] = None
     description: Optional[str] = None
+    start_at: Optional[str] = None
+    due_at: Optional[str] = None
+    completion_result: Optional[str] = None
+    confirm_incomplete: bool = False
 
 
 class ClassTaskItemUpdate(BaseModel):
@@ -301,91 +314,124 @@ class ClassTaskItemUpdate(BaseModel):
     note: str = ''
 
 
-def _class_task(task_id: int) -> dict:
-    class_id, term_id = _scope()
-    row = db.get_conn().execute(
-        "SELECT * FROM class_tasks WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
-        (task_id, class_id, term_id)).fetchone()
-    if not row:
-        raise HTTPException(404, '班级任务不存在')
-    return dict(row)
+class ClassTaskReminderBody(BaseModel):
+    student_ids: Optional[list[int]] = None
 
 
-def _task_with_items(task: dict) -> dict:
-    items = _rows('SELECT i.*, s.学号, s.姓名 FROM class_task_items i JOIN students s ON s.id=i.student_id WHERE i.task_id=? ORDER BY s.学号', (task['id'],))
-    task['items'] = items
-    task['total'] = len(items)
-    task['submitted'] = sum(1 for item in items if item['status'] == '已提交')
-    return task
+class ClassTaskTemplateBody(BaseModel):
+    name: str = Field(min_length=1)
+    task_type: str = '材料收集'
+    material_name: str = ''
+    description: str = ''
+    default_due_days: int = Field(default=7, ge=0, le=366)
+    enabled: bool = True
+
+
+class ClassTaskTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    task_type: Optional[str] = None
+    material_name: Optional[str] = None
+    description: Optional[str] = None
+    default_due_days: Optional[int] = Field(default=None, ge=0, le=366)
+    enabled: Optional[bool] = None
 
 
 @router.get('/class-tasks')
-def list_class_tasks(status: Optional[str] = None, source_id: Optional[int] = None):
-    class_id, term_id = _scope()
-    sql, params = "SELECT * FROM class_tasks WHERE class_id=? AND term_id=? AND deleted_at=''", [class_id, term_id]
-    if status:
-        sql += ' AND status=?'
-        params.append(status)
-    if source_id:
-        sql += ' AND id=?'
-        params.append(source_id)
-    tasks = [_task_with_items(row) for row in _rows(sql + ' ORDER BY due_at, id DESC', tuple(params))]
-    return {'tasks': tasks}
+def list_class_tasks(status: Optional[str] = None, timing_state: str = '', source_id: Optional[int] = None):
+    try:
+        return {'tasks': class_tasks_service.list_tasks(
+            status=status or '', timing_state=timing_state, source_id=source_id)}
+    except class_tasks_service.ClassTaskError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get('/class-task-templates')
+def list_class_task_templates(include_disabled: bool = False):
+    try:
+        return {'templates': class_tasks_service.list_templates(include_disabled=include_disabled)}
+    except class_tasks_service.ClassTaskError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/class-task-templates')
+def create_class_task_template(body: ClassTaskTemplateBody):
+    try:
+        return {'ok': True, 'template': class_tasks_service.create_template(**body.model_dump())}
+    except class_tasks_service.ClassTaskError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put('/class-task-templates/{template_id}')
+def update_class_task_template(template_id: int, body: ClassTaskTemplateUpdate):
+    try:
+        return {'ok': True, 'template': class_tasks_service.update_template(
+            template_id, **body.model_dump(exclude_none=True))}
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
 
 
 @router.post('/class-tasks')
 def create_class_task(body: ClassTaskBody):
-    conn = db.get_conn()
-    class_id, term_id = _scope(write=True)
-    for student_id in body.student_ids:
-        _student(student_id, write=True)
-    cur = conn.execute(
-        'INSERT INTO class_tasks(title, task_type, start_at, due_at, material_name, description, class_id, term_id) '
-        'VALUES(?,?,?,?,?,?,?,?)',
-        (body.title, body.task_type, body.start_at, body.due_at,
-         body.material_name, body.description, class_id, term_id))
-    task_id = cur.lastrowid
-    for student_id in body.student_ids:
-        conn.execute('INSERT INTO class_task_items(task_id, student_id) VALUES(?,?)', (task_id, student_id))
-    work_items.ensure_source_work_item(
-        title=body.title, source_type='class_task', source_id=task_id,
-        scheduled_at=body.start_at, due_at=body.due_at,
-        notes=body.description, conn=conn, commit=False)
-    conn.commit()
-    return {'ok': True, 'task_id': task_id}
+    try:
+        task = class_tasks_service.create_task(**body.model_dump())
+        return {'ok': True, 'task_id': task['id'], 'task': task}
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '学生' in str(exc) and '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
 
 
 @router.put('/class-tasks/{task_id}')
 def update_class_task(task_id: int, body: ClassTaskUpdate):
-    class_id, term_id = _scope(write=True)
-    _class_task(task_id)
-    fields, params = [], []
-    for key in ('status', 'description'):
-        value = getattr(body, key)
-        if value is not None:
-            fields.append(f'{key}=?')
-            params.append(value)
-    if fields:
-        params.extend((task_id, class_id, term_id))
-        db.get_conn().execute(
-            f"UPDATE class_tasks SET {', '.join(fields)}, updated_at=datetime('now','localtime') "
-            'WHERE id=? AND class_id=? AND term_id=?', params)
-        db.get_conn().commit()
-    return {'ok': True}
+    try:
+        return {'ok': True, 'task': class_tasks_service.update_task(
+            task_id, **body.model_dump(exclude_none=True))}
+    except class_tasks_service.IncompleteTaskError as exc:
+        raise HTTPException(409, {'message': str(exc), 'missing_students': exc.missing}) from exc
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
 
 
 @router.put('/class-tasks/{task_id}/items/{student_id}')
 def update_class_task_item(task_id: int, student_id: int, body: ClassTaskItemUpdate):
-    _scope(write=True)
-    _class_task(task_id)
-    _student(student_id, write=True)
-    cur = db.get_conn().execute(
-        "UPDATE class_task_items SET status=?, note=?, submitted_at=CASE WHEN ?='已提交' THEN datetime('now','localtime') ELSE '' END WHERE task_id=? AND student_id=?",
-        (body.status, body.note, body.status, task_id, student_id))
-    db.get_conn().commit()
-    if not cur.rowcount:
-        raise HTTPException(404, '任务中没有该学生')
-    return {'ok': True}
+    try:
+        return {'ok': True, 'task': class_tasks_service.update_item(
+            task_id, student_id, status=body.status, note=body.note)}
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '没有该学生' in str(exc) or '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.post('/class-tasks/{task_id}/remind')
+def remind_class_task(task_id: int, body: ClassTaskReminderBody | None = None):
+    try:
+        return class_tasks_service.remind(task_id, body.student_ids if body else None)
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.post('/class-tasks/{task_id}/attachments/{student_id}')
+async def upload_class_task_attachment(task_id: int, student_id: int, file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        attachment = class_tasks_service.save_attachment(
+            task_id, student_id, original_name=file.filename or '附件',
+            content_type=file.content_type or 'application/octet-stream', content=content)
+        return {'ok': True, 'attachment': attachment}
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.get('/class-tasks/attachments/{attachment_id}')
+def download_class_task_attachment(attachment_id: int):
+    try:
+        attachment, path = class_tasks_service.attachment_file(attachment_id)
+    except class_tasks_service.ClassTaskError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(path, media_type=attachment['content_type'], filename=attachment['original_name'])
 
 
 class DutyBody(BaseModel):
@@ -394,69 +440,91 @@ class DutyBody(BaseModel):
     student_id: int
     status: str = '待完成'
     note: str = ''
+    completion_result: str = ''
 
 
 @router.get('/duty')
-def list_duty(duty_date: Optional[str] = None, source_id: Optional[int] = None):
-    class_id, term_id = _scope()
-    if source_id:
-        rows = _rows(
-            'SELECT d.*, s.学号, s.姓名 FROM duty_assignments d JOIN students s ON s.id=d.student_id '
-            "WHERE d.class_id=? AND d.term_id=? AND d.id=? AND d.deleted_at='' AND s.deleted_at=''",
-            (class_id, term_id, source_id))
-        return {'assignments': rows}
-    if duty_date:
-        rows = _rows(
-            'SELECT d.*, s.学号, s.姓名 FROM duty_assignments d JOIN students s ON s.id=d.student_id '
-            "WHERE d.class_id=? AND d.term_id=? AND duty_date=? AND d.deleted_at='' AND s.deleted_at='' ORDER BY area, s.学号",
-            (class_id, term_id, duty_date))
-    else:
-        rows = _rows(
-            'SELECT d.*, s.学号, s.姓名 FROM duty_assignments d JOIN students s ON s.id=d.student_id '
-            "WHERE d.class_id=? AND d.term_id=? AND d.deleted_at='' AND s.deleted_at='' ORDER BY duty_date DESC, area, s.学号",
-            (class_id, term_id))
-    return {'assignments': rows}
+def list_duty(duty_date: Optional[str] = None, date_from: str = '', date_to: str = '', source_id: Optional[int] = None):
+    try:
+        return {'assignments': duty_service.list_assignments(
+            duty_date=duty_date or '', date_from=date_from, date_to=date_to, source_id=source_id)}
+    except duty_service.DutyError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post('/duty')
 def create_duty(body: DutyBody):
-    _student(body.student_id, write=True)
-    conn = db.get_conn()
-    class_id, term_id = _scope(write=True)
-    conn.execute(
-        'INSERT INTO duty_assignments(duty_date, area, student_id, class_id, term_id, status, note) VALUES(?,?,?,?,?,?,?) '
-        "ON CONFLICT(class_id, term_id, duty_date, area, student_id) DO UPDATE SET "
-        "status=excluded.status, note=excluded.note, updated_at=datetime('now','localtime')",
-        (body.duty_date, body.area, body.student_id, class_id, term_id, body.status, body.note))
-    conn.commit()
-    row = conn.execute(
-        'SELECT id FROM duty_assignments WHERE class_id=? AND term_id=? AND duty_date=? AND area=? AND student_id=?',
-        (class_id, term_id, body.duty_date, body.area, body.student_id)).fetchone()
-    if body.status != '已完成':
-        work_items.ensure_source_work_item(
-            title=f'值日 · {body.area}', student_id=body.student_id,
-            source_type='duty_assignment', source_id=row['id'],
-            scheduled_at=body.duty_date, due_at=body.duty_date,
-            status='待处理', notes=body.note)
-    return {'ok': True, 'assignment_id': row['id']}
+    try:
+        assignment = duty_service.create_assignment(**body.model_dump())
+        return {'ok': True, 'assignment_id': assignment['id'], 'assignment': assignment}
+    except duty_service.DutyConflictError as exc:
+        raise HTTPException(409, {'message': str(exc), 'conflicts': exc.conflicts}) from exc
+    except duty_service.DutyError as exc:
+        status_code = 404 if '学生' in str(exc) and '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
 
 
 class DutyUpdate(BaseModel):
     status: str
     note: str = ''
+    completion_result: str = ''
+
+
+class DutyRotationRuleBody(BaseModel):
+    name: str = Field(min_length=1)
+    area: str = Field(min_length=1)
+    start_date: str = Field(min_length=10)
+    end_date: str = ''
+    weekday_mask: int = Field(default=31, ge=1, le=127)
+    student_ids: list[int] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class DutyGenerateBody(BaseModel):
+    date_from: str = ''
+    date_to: str = ''
+    confirm: bool = False
 
 
 @router.put('/duty/{assignment_id}')
 def update_duty(assignment_id: int, body: DutyUpdate):
-    class_id, term_id = _scope(write=True)
-    cur = db.get_conn().execute(
-        "UPDATE duty_assignments SET status=?, note=?, updated_at=datetime('now','localtime') "
-        'WHERE id=? AND class_id=? AND term_id=?',
-        (body.status, body.note, assignment_id, class_id, term_id))
-    db.get_conn().commit()
-    if not cur.rowcount:
-        raise HTTPException(404, '值日安排不存在')
-    return {'ok': True}
+    try:
+        return {'ok': True, 'assignment': duty_service.update_assignment(
+            assignment_id, status=body.status, note=body.note,
+            completion_result=body.completion_result)}
+    except duty_service.DutyError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.get('/duty/rotation-rules')
+def list_duty_rotation_rules(include_disabled: bool = False):
+    try:
+        return {'rules': duty_service.list_rotation_rules(include_disabled=include_disabled)}
+    except duty_service.DutyError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/duty/rotation-rules')
+def create_duty_rotation_rule(body: DutyRotationRuleBody):
+    try:
+        return {'ok': True, 'rule': duty_service.create_rotation_rule(**body.model_dump())}
+    except duty_service.DutyError as exc:
+        status_code = 404 if '学生' in str(exc) and '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.post('/duty/rotation-rules/{rule_id}/generate')
+def generate_duty_rotation(rule_id: int, body: DutyGenerateBody | None = None):
+    body = body or DutyGenerateBody()
+    try:
+        return duty_service.generate_rotation(
+            rule_id, date_from=body.date_from, date_to=body.date_to, confirm=body.confirm)
+    except duty_service.DutyConflictError as exc:
+        raise HTTPException(409, {'message': str(exc), 'conflicts': exc.conflicts}) from exc
+    except duty_service.DutyError as exc:
+        status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
 
 
 @router.get('/search')

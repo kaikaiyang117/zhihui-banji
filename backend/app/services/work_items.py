@@ -284,6 +284,7 @@ def update_work_item(
     result: str | None = None,
     conn=None,
     commit: bool = True,
+    sync_source: bool = True,
 ) -> dict:
     conn = conn or db.get_conn()
     class_id, term_id = class_context.scope_ids(write=True, conn=conn)
@@ -344,6 +345,12 @@ def update_work_item(
         elif row['source_type'] == 'score_rule':
             from .scores import on_work_item_transition as on_score_transition
             on_score_transition(conn, dict(row), next_status)
+        elif sync_source and row['source_type'] == 'class_task':
+            from .class_tasks import on_work_item_transition as on_class_task_transition
+            on_class_task_transition(conn, dict(row), next_status, values['result'])
+        elif sync_source and row['source_type'] == 'duty_assignment':
+            from .duty import on_work_item_transition as on_duty_transition
+            on_duty_transition(conn, dict(row), next_status, values['result'])
         audit.record(
             'work_item', item_id, 'update', summary=f"更新工作项：{values['title']}",
             params=values, class_id=class_id, term_id=term_id, conn=conn, commit=False,

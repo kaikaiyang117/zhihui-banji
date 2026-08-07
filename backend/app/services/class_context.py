@@ -424,6 +424,40 @@ def rollover_term(source_term_id: int, name: str, start_date: str = '', end_date
                WHERE r.term_id=? AND r.deleted_at='' ''',
             (term_id, term_id, source_term_id),
         )
+        conn.execute(
+            '''INSERT INTO class_task_templates(
+                   class_id, term_id, name, task_type, material_name,
+                   description, default_due_days, enabled
+               )
+               SELECT class_id, ?, name, task_type, material_name,
+                      description, default_due_days, enabled
+               FROM class_task_templates
+               WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
+            '''INSERT INTO duty_rotation_rules(
+                   class_id, term_id, name, area, start_date, end_date,
+                   weekday_mask, enabled
+               )
+               SELECT class_id, ?, name, area, start_date, end_date,
+                      weekday_mask, enabled
+               FROM duty_rotation_rules
+               WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
+            '''INSERT INTO duty_rotation_members(rule_id, student_id, position, enabled)
+               SELECT next_rule.id, member.student_id, member.position, member.enabled
+               FROM duty_rotation_members member
+               JOIN duty_rotation_rules old_rule ON old_rule.id=member.rule_id
+               JOIN duty_rotation_rules next_rule
+                 ON next_rule.class_id=old_rule.class_id
+                AND next_rule.term_id=?
+                AND next_rule.name=old_rule.name
+               WHERE old_rule.term_id=? AND old_rule.deleted_at='' ''',
+            (term_id, source_term_id),
+        )
         if archive_source:
             conn.execute(
                 "UPDATE terms SET status='已归档', archived_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?",

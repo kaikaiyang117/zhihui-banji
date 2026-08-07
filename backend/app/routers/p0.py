@@ -9,7 +9,13 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..services import attendance as attendance_service, class_context, scores as scores_service, work_items
+from ..services import (
+    attendance as attendance_service,
+    class_context,
+    class_tasks as class_tasks_service,
+    scores as scores_service,
+    work_items,
+)
 
 router = APIRouter(prefix='/api')
 
@@ -444,6 +450,8 @@ def update_task(task_id: int, body: TaskUpdate):
     except work_items.WorkItemError as exc:
         status_code = 404 if '不存在' in str(exc) else 400
         raise HTTPException(status_code, str(exc)) from exc
+    except class_tasks_service.ClassTaskError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return {'ok': True, 'task': item}
 
 
