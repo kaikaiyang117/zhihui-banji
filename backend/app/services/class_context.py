@@ -425,6 +425,17 @@ def rollover_term(source_term_id: int, name: str, start_date: str = '', end_date
             (term_id, term_id, source_term_id),
         )
         conn.execute(
+            '''INSERT INTO point_rules(
+                   class_id, term_id, name, category, metric, threshold,
+                   period_days, priority, enabled
+               )
+               SELECT class_id, ?, name, category, metric, threshold,
+                      period_days, priority, enabled
+               FROM point_rules
+               WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
             '''INSERT INTO class_task_templates(
                    class_id, term_id, name, task_type, material_name,
                    description, default_due_days, enabled

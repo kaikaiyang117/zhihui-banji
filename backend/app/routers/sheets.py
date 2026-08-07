@@ -60,6 +60,8 @@ def append_row(name: str, body: AppendBody):
         raise HTTPException(404, f'工作表 "{name}" 不存在')
     if name == '考勤管理':
         raise HTTPException(409, '考勤已升级为结构化记录，请使用考勤管理页面批量保存')
+    if name == '日常行为积分':
+        raise HTTPException(409, '行为积分已升级为结构化流水，请使用行为积分页面新增记录')
     if not body.data:
         raise HTTPException(400, '缺少 data 参数')
     row_no = db.insert_row(name, body.data)
@@ -74,6 +76,8 @@ def update_cell(name: str, body: UpdateBody):
         raise HTTPException(404, f'工作表 "{name}" 不存在')
     if name == '考勤管理':
         raise HTTPException(409, '考勤已升级为结构化记录，请使用考勤管理页面修改')
+    if name == '日常行为积分':
+        raise HTTPException(409, '行为积分已升级为结构化流水，请使用行为积分页面修改或撤销')
     try:
         db.update_cell(name, body.row_no, body.col, body.value)
         audit.record('sheet_row', f'{name}:{body.row_no}', 'update', summary=f'更新{name}记录',
@@ -90,6 +94,8 @@ def delete_row(name: str, row_no: int):
         raise HTTPException(404, f'工作表 "{name}" 不存在')
     if name == '考勤管理':
         raise HTTPException(409, '考勤已升级为结构化记录，请在考勤管理页面重新保存')
+    if name == '日常行为积分':
+        raise HTTPException(409, '行为积分流水不能删除，请使用撤销并填写原因')
     try:
         return recycle.soft_delete_sheet_row(name, row_no)
     except recycle.RecycleError as exc:

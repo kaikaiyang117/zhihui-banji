@@ -13,6 +13,7 @@ from ..services import (
     attendance as attendance_service,
     class_context,
     class_tasks as class_tasks_service,
+    points as points_service,
     scores as scores_service,
     work_items,
 )
@@ -224,14 +225,10 @@ def student_detail(student_id: int):
         'definition': score_data['definition'],
     }
 
-    points_summary = {'total': 0, 'weekly': [], 'updated_at': ''}
-    for row in db.get_rows('日常行为积分'):
-        data = row['data']
-        if len(data) > 0 and str(data[0] or '').strip() == xh:
-            weekly = [data[i] if i < len(data) and isinstance(data[i], (int, float)) else 0 for i in range(2, 10)]
-            points_summary = {'total': data[10] if len(data) > 10 and isinstance(data[10], (int, float)) else sum(weekly),
-                              'weekly': weekly, 'updated_at': row.get('updated_at', '')}
-            break
+    points_summary = points_service.student_summary(student_id, conn=db.get_conn())
+    points_summary['updated_at'] = max(
+        (str(item.get('updated_at') or item.get('created_at') or '')
+         for item in points_summary.get('entries', [])), default='')
 
     timeline = []
     for row in events:

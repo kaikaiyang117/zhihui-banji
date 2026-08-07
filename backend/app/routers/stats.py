@@ -5,7 +5,7 @@ from datetime import datetime
 
 from .. import db
 from ..derived import derive
-from ..services import attendance as attendance_service, scores as scores_service, work_items
+from ..services import attendance as attendance_service, points as points_service, scores as scores_service, work_items
 from ..services.class_context import scope_ids
 
 router = APIRouter(prefix='/api/stats')
@@ -27,9 +27,9 @@ def dashboard(date: str | None = None):
         raise HTTPException(400, '日期格式必须为 YYYY-MM-DD') from exc
     today_att = attendance_service.dashboard_counts(target_date, conn=conn)
 
-    points_rows = derive('日常行为积分', db.get_rows('日常行为积分'))
-    top = [{'name': r['data'][1], 'points': int(r['data'][10] or 0)}
-           for r in points_rows if r['data'][1]][:5]
+    point_summary = points_service.class_summary(reference_date=target_date, conn=conn)
+    top = [{'name': item['name'], 'points': item['total']}
+           for item in point_summary['students'] if item['entry_count']][:5]
 
     fund_rows = derive('班费管理', db.get_rows('班费管理'))
     balance = 0.0
@@ -140,17 +140,4 @@ def scores():
 
 @router.get('/points')
 def points():
-    rows = derive('日常行为积分', db.get_rows('日常行为积分'))
-    students = []
-    for r in rows:
-        d = r['data']
-        name = d[1] if len(d) > 1 else None
-        if not name:
-            continue
-        students.append({
-            'name': str(name),
-            'weekly': [d[i] if i < len(d) and d[i] is not None else 0 for i in range(2, 10)],
-            'total': int(d[10] or 0) if len(d) > 10 else 0,
-        })
-    students.sort(key=lambda x: x['total'], reverse=True)
-    return {'students': students}
+    return points_service.class_summary()

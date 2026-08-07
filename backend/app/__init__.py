@@ -11,9 +11,9 @@ from fastapi.responses import FileResponse
 
 from . import db
 from .config import APP_VERSION, STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export, p0, p1, system, agent, wechat, context, workflow, recycle
+from .routers import sheets, students, seating, stats, knowledge, export, points as points_router, p0, p1, system, agent, wechat, context, workflow, recycle
 from .services.class_context import bind_request_scope, reset_request_scope, ScopeError, ArchivedScopeError
-from .services import attendance, audit, scores
+from .services import attendance, audit, points as points_service, scores
 from .services.audit import bind_actor, reset_actor
 from .services import devices
 from .wechat.service import wechat_service
@@ -85,7 +85,7 @@ async def scope_error_handler(_request: Request, exc: ScopeError):
     return JSONResponse({'detail': str(exc)}, status_code=status)
 
 for r in (sheets.router, students.router, seating.router,
-          stats.router, knowledge.router, export.router, p0.router, p1.router, system.router,
+          stats.router, knowledge.router, export.router, points_router.router, p0.router, p1.router, system.router,
           agent.router, wechat.router, context.router, workflow.router, recycle.router):
     app.include_router(r)
 
@@ -103,6 +103,11 @@ async def startup():
         scores.evaluate_startup()
     except Exception:
         # 与考勤规则一致：失败保留执行记录，但不阻塞工作台启动。
+        pass
+    try:
+        points_service.evaluate_startup()
+    except Exception:
+        # 积分规则失败不能阻塞工作台启动，教师可在行为积分页手动重试。
         pass
     os.makedirs(db.DATA_DIR, exist_ok=True)
     with open(os.path.join(db.DATA_DIR, '.workbench-ready'), 'w', encoding='utf-8') as marker:

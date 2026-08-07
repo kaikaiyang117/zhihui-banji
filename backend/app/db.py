@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -782,6 +782,106 @@ def _migration_12(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_duty_assignment_student_date
             ON duty_assignments(class_id, term_id, student_id, duty_date, deleted_at);
     ''')
+
+
+def _migration_13(conn: sqlite3.Connection):
+    """增加行为积分流水、规则命中和旧快照迁移报告。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS point_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT '日常行为',
+            metric TEXT NOT NULL DEFAULT '周期扣分',
+            threshold REAL NOT NULL DEFAULT 5,
+            period_days INTEGER NOT NULL DEFAULT 7,
+            priority TEXT NOT NULL DEFAULT '重要',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS point_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            rule_id INTEGER REFERENCES point_rules(id) ON DELETE SET NULL,
+            occurred_at TEXT NOT NULL DEFAULT '',
+            period_key TEXT NOT NULL DEFAULT '',
+            amount REAL NOT NULL,
+            category TEXT NOT NULL DEFAULT '日常行为',
+            reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '有效',
+            reversed_at TEXT NOT NULL DEFAULT '',
+            reversal_reason TEXT NOT NULL DEFAULT '',
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '班主任',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS point_rule_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            reference_date TEXT NOT NULL,
+            created_count INTEGER NOT NULL DEFAULT 0,
+            resolved_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS point_rule_hits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL REFERENCES point_rule_runs(id) ON DELETE CASCADE,
+            rule_id INTEGER NOT NULL REFERENCES point_rules(id) ON DELETE CASCADE,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            value REAL NOT NULL DEFAULT 0,
+            threshold REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT '新命中',
+            task_id INTEGER REFERENCES student_tasks(id) ON DELETE SET NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(rule_id, student_id, period_start, period_end)
+        );
+
+        CREATE TABLE IF NOT EXISTS point_migration_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            source_sheet TEXT NOT NULL DEFAULT '日常行为积分',
+            source_version TEXT NOT NULL DEFAULT 'v1',
+            source_rows INTEGER NOT NULL DEFAULT 0,
+            imported_entries INTEGER NOT NULL DEFAULT 0,
+            skipped_entries INTEGER NOT NULL DEFAULT 0,
+            report TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, source_sheet, source_version)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_point_ledger_source_key
+            ON point_ledger(class_id, term_id, source_key)
+            WHERE source_key<>'';
+        CREATE INDEX IF NOT EXISTS idx_point_ledger_scope_date
+            ON point_ledger(class_id, term_id, occurred_at, student_id, status);
+        CREATE INDEX IF NOT EXISTS idx_point_ledger_student
+            ON point_ledger(class_id, term_id, student_id, status, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_point_rules_scope
+            ON point_rules(class_id, term_id, enabled, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_point_rule_hits_scope
+            ON point_rule_hits(class_id, term_id, status, period_end, student_id);
+    ''')
     for column, definition in (
         ('exam_id', 'INTEGER REFERENCES score_exams(id)'),
         ('subject_id', 'INTEGER REFERENCES score_subjects(id)'),
@@ -904,6 +1004,7 @@ MIGRATIONS = {
     10: _migration_10,
     11: _migration_11,
     12: _migration_12,
+    13: _migration_13,
 }
 
 

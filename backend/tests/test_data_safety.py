@@ -38,6 +38,10 @@ class DataSafetyTest(unittest.TestCase):
         'score_rule_runs',
         'score_rule_hits',
     )
+    POINT_TABLES = (
+        'point_rules', 'point_ledger', 'point_rule_runs',
+        'point_rule_hits', 'point_migration_runs',
+    )
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -85,6 +89,7 @@ class DataSafetyTest(unittest.TestCase):
         for table in (
             'attendance_records', 'attendance_rule_runs', 'attendance_rule_hits',
             *self.SCORE_TABLES,
+            *self.POINT_TABLES,
         ):
             self.assertIsNotNone(conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)

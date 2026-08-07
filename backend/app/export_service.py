@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 from .config import STUDENT_COLUMNS
 from .db import get_conn, get_rows, get_sheet_meta
 from .derived import derive
-from .services import attendance, scores
+from .services import attendance, points, scores
 from .services.class_context import scope_ids
 
 HEADER_FILL = PatternFill('solid', fgColor='5B6ABF')
@@ -47,10 +47,26 @@ def export_sheet(sheet: str) -> tuple[io.BytesIO, str]:
         headers = ['日期', '星期', '学号', '姓名', '状态', '到校时间', '离校时间',
                    '原因', '备注', '考勤场景']
         return _sheet_bytes(sheet, headers, [row['data'] for row in rows]), f'{sheet}.xlsx'
+    if sheet == '日常行为积分':
+        return export_points()
     meta = get_sheet_meta(sheet)
     headers = meta['headers'] if meta else []
     rows = derive(sheet, get_rows(sheet))
     return _sheet_bytes(sheet, headers, [r['data'] for r in rows]), f'{sheet}.xlsx'
+
+
+def export_points() -> tuple[io.BytesIO, str]:
+    """导出完整积分流水，保留已撤销记录以便核对；排名只使用有效流水。"""
+    entries = points.list_entries(limit=5_000)
+    headers = ['日期', '周期', '学号', '姓名', '分类', '分值', '原因', '状态',
+               '撤销原因', '来源', '规则']
+    rows = [[
+        item.get('occurred_at') or '历史快照', item.get('period_key', ''),
+        item.get('学号', ''), item.get('student_name', ''), item.get('category', ''),
+        item.get('amount', 0), item.get('reason', ''), item.get('status', ''),
+        item.get('reversal_reason', ''), item.get('source_label', ''), item.get('rule_name', ''),
+    ] for item in entries]
+    return _sheet_bytes('行为积分流水', headers, rows), '行为积分流水.xlsx'
 
 
 def export_seating() -> tuple[io.BytesIO, str]:

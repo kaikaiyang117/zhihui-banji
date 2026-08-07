@@ -22,6 +22,7 @@ SOURCE_LABELS = {
     'score_rule': '成绩规则',
     'class_task': '班级任务',
     'duty_assignment': '值日安排',
+    'point_rule': '积分规则',
 }
 
 SOURCE_PATHS = {
@@ -32,6 +33,7 @@ SOURCE_PATHS = {
     'score_rule': '/scores',
     'class_task': '/class-tasks',
     'duty_assignment': '/duty',
+    'point_rule': '/points',
 }
 
 _write_lock = threading.RLock()
@@ -64,7 +66,7 @@ def _source_key(source_type: str, source_id: int | None, student_id: int | None 
     if source_type == 'manual' or source_id is None:
         return ''
     key = f'{source_type}:{int(source_id)}'
-    if source_type in {'attendance_rule', 'score_rule'} and student_id is not None:
+    if source_type in {'attendance_rule', 'score_rule', 'point_rule'} and student_id is not None:
         key += f':student:{int(student_id)}'
     return key
 
@@ -351,6 +353,9 @@ def update_work_item(
         elif sync_source and row['source_type'] == 'duty_assignment':
             from .duty import on_work_item_transition as on_duty_transition
             on_duty_transition(conn, dict(row), next_status, values['result'])
+        elif sync_source and row['source_type'] == 'point_rule':
+            from .points import on_work_item_transition as on_points_transition
+            on_points_transition(conn, dict(row), next_status, values['result'])
         audit.record(
             'work_item', item_id, 'update', summary=f"更新工作项：{values['title']}",
             params=values, class_id=class_id, term_id=term_id, conn=conn, commit=False,
