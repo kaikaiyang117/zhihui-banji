@@ -436,6 +436,15 @@ def rollover_term(source_term_id: int, name: str, start_date: str = '', end_date
             (term_id, source_term_id),
         )
         conn.execute(
+            '''INSERT INTO fund_categories(
+                   class_id, term_id, name, direction, enabled
+               )
+               SELECT class_id, ?, name, direction, enabled
+               FROM fund_categories
+               WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
             '''INSERT INTO class_task_templates(
                    class_id, term_id, name, task_type, material_name,
                    description, default_due_days, enabled

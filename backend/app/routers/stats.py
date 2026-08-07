@@ -4,8 +4,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime
 
 from .. import db
-from ..derived import derive
-from ..services import attendance as attendance_service, points as points_service, scores as scores_service, work_items
+from ..services import attendance as attendance_service, funds as funds_service, points as points_service, scores as scores_service, work_items
 from ..services.class_context import scope_ids
 
 router = APIRouter(prefix='/api/stats')
@@ -31,11 +30,8 @@ def dashboard(date: str | None = None):
     top = [{'name': item['name'], 'points': item['total']}
            for item in point_summary['students'] if item['entry_count']][:5]
 
-    fund_rows = derive('班费管理', db.get_rows('班费管理'))
-    balance = 0.0
-    for r in fund_rows:
-        if len(r['data']) > 6 and r['data'][6] is not None:
-            balance = r['data'][6]
+    fund_summary = funds_service.class_summary(reference_date=target_date, conn=conn)
+    balance = fund_summary['totals']['balance']
 
     log_rows = db.get_rows('班主任日志')
     logs = [{'date': str(r['data'][0])[:10], 'content': str(r['data'][3])[:50]}
@@ -141,3 +137,8 @@ def scores():
 @router.get('/points')
 def points():
     return points_service.class_summary()
+
+
+@router.get('/fund')
+def fund():
+    return funds_service.class_summary()

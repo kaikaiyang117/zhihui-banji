@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -992,6 +992,113 @@ def _migration_13(conn: sqlite3.Connection):
     ''')
 
 
+def _migration_14(conn: sqlite3.Connection):
+    """增加班费分类账、结算、凭证和旧通用表迁移报告。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS fund_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            direction TEXT NOT NULL DEFAULT '支出',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(class_id, term_id, name, direction)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_settlements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            period_key TEXT NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            opening_balance REAL NOT NULL DEFAULT 0,
+            income_total REAL NOT NULL DEFAULT 0,
+            expense_total REAL NOT NULL DEFAULT 0,
+            closing_balance REAL NOT NULL DEFAULT 0,
+            counted_balance REAL NOT NULL DEFAULT 0,
+            difference REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT '已结算',
+            note TEXT NOT NULL DEFAULT '',
+            settled_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, period_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            occurred_at TEXT NOT NULL DEFAULT '',
+            direction TEXT NOT NULL DEFAULT '支出',
+            amount REAL NOT NULL,
+            category_id INTEGER REFERENCES fund_categories(id) ON DELETE SET NULL,
+            category_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            handler TEXT NOT NULL DEFAULT '',
+            witness TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '有效',
+            settlement_id INTEGER REFERENCES fund_settlements(id) ON DELETE SET NULL,
+            reversed_at TEXT NOT NULL DEFAULT '',
+            reversal_reason TEXT NOT NULL DEFAULT '',
+            reversal_of_id INTEGER REFERENCES fund_ledger(id) ON DELETE SET NULL,
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '班主任',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ledger_id INTEGER NOT NULL REFERENCES fund_ledger(id) ON DELETE CASCADE,
+            original_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(ledger_id, stored_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS fund_migration_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            source_sheet TEXT NOT NULL DEFAULT '班费管理',
+            source_version TEXT NOT NULL DEFAULT 'v1',
+            source_rows INTEGER NOT NULL DEFAULT 0,
+            imported_entries INTEGER NOT NULL DEFAULT 0,
+            skipped_entries INTEGER NOT NULL DEFAULT 0,
+            report TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, source_sheet, source_version)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fund_ledger_source_key
+            ON fund_ledger(class_id, term_id, source_key)
+            WHERE source_key<>'';
+        CREATE INDEX IF NOT EXISTS idx_fund_ledger_scope_date
+            ON fund_ledger(class_id, term_id, occurred_at, status);
+        CREATE INDEX IF NOT EXISTS idx_fund_ledger_settlement
+            ON fund_ledger(class_id, term_id, settlement_id, status);
+        CREATE INDEX IF NOT EXISTS idx_fund_categories_scope
+            ON fund_categories(class_id, term_id, direction, enabled, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_fund_settlements_scope
+            ON fund_settlements(class_id, term_id, period_start, period_end, status);
+        CREATE INDEX IF NOT EXISTS idx_fund_attachments_ledger
+            ON fund_attachments(ledger_id, created_at);
+    ''')
+
+
 MIGRATIONS = {
     2: _migration_2,
     3: _migration_3,
@@ -1005,6 +1112,7 @@ MIGRATIONS = {
     11: _migration_11,
     12: _migration_12,
     13: _migration_13,
+    14: _migration_14,
 }
 
 
