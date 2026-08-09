@@ -40,6 +40,11 @@ def list_school_calendar(
     return _run(lambda: school_calendar.list_calendar(date_from=date_from, date_to=date_to, month=month))
 
 
+@router.get('/school-calendar/term')
+def term_school_calendar():
+    return _run(school_calendar.term_calendar)
+
+
 @router.post('/school-calendar/import/preview')
 async def preview_school_calendar(file: UploadFile = File(...)):
     content = await file.read()

@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
 from app.routers.stats import dashboard
-from app.services import class_context
+from app.services import class_context, dashboard as dashboard_service
 from app.services import work_items
 from backend.tests.helpers import enroll_all_students
 
@@ -152,6 +152,22 @@ class WorkItemsTest(unittest.TestCase):
         self.assertEqual(len(result['rule_hits']), 1)
         self.assertEqual(result['material_tasks'][0]['progress'], 50)
         self.assertEqual(result['review_students'][0]['student_name'], '工作项甲')
+
+    def test_dashboard_calendar_groups_month_and_upcoming_work(self):
+        today = date(2026, 8, 7)
+        work_items.create_work_item(title='今天的日历事项', due_at='2026-08-07')
+        work_items.create_work_item(title='下周的日历事项', due_at='2026-08-11')
+
+        result = dashboard_service.calendar(reference_date=today)
+
+        self.assertEqual(result['month'], '2026-08')
+        self.assertEqual(len(result['days']), 31)
+        today_row = next(day for day in result['days'] if day['date'] == '2026-08-07')
+        self.assertEqual(today_row['task_count'], 1)
+        self.assertTrue(today_row['is_today'])
+        upcoming = next(item for item in result['upcoming'] if item['date'] == '2026-08-11')
+        self.assertEqual(upcoming['item_count'], 1)
+        self.assertEqual(upcoming['items'][0]['title'], '下周的日历事项')
 
 
 if __name__ == '__main__':

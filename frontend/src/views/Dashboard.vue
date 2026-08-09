@@ -1,9 +1,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import {
-  AlertTriangle, ArrowRight, CalendarClock, CheckCircle, ClipboardList,
+  AlertTriangle, ArrowRight, CalendarClock, CalendarDays, CheckCircle, ClipboardList,
   FileText, Phone, Plus, ShieldCheck, Tag, TrendingUp, Upload, UserRound, Users
 } from 'lucide-vue-next'
+import FullCalendar from '@fullcalendar/vue3'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import zhCnLocale from '@fullcalendar/core/locales/zh-cn'
 import { get, post, upload } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 
@@ -12,17 +16,52 @@ const errorMsg = ref('')
 const modalMode = ref(null)
 const fileInput = ref(null)
 const backupMessage = ref('')
+const selectedDate = ref('')
 
 const actionSections = computed(() => stats.value ? [
   { key: 'overdue', title: '已经逾期', hint: '优先处理，避免继续积压', tone: 'danger', items: stats.value.work_sections.overdue },
   { key: 'today', title: '今天要做', hint: '计划或截止日期在今天', tone: 'primary', items: stats.value.work_sections.today },
   { key: 'next7', title: '即将到期', hint: '未来 7 天需要安排', tone: 'neutral', items: stats.value.work_sections.next7 },
 ] : [])
+const calendarData = computed(() => stats.value?.calendar || { days: [], upcoming: [], summary: {} })
+const selectedDay = computed(() => calendarData.value.days.find(day => day.date === selectedDate.value) || calendarData.value.days.find(day => day.is_today) || calendarData.value.days[0] || null)
+const upcomingPlans = computed(() => calendarData.value.upcoming.filter(item => item.item_count))
+function localDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+const calendarOptions = computed(() => ({
+  plugins: [dayGridPlugin, interactionPlugin],
+  locales: [zhCnLocale],
+  locale: 'zh-cn',
+  initialView: 'dayGridMonth',
+  initialDate: stats.value?.date,
+  firstDay: 1,
+  fixedWeekCount: false,
+  height: 'auto',
+  headerToolbar: false,
+  dayMaxEvents: 2,
+  events: calendarData.value.days.flatMap(day => {
+    const events = []
+    const entry = day.school_calendar
+    if (entry && (entry.title || !['上课日', '放假日'].includes(entry.day_type))) {
+      events.push({ id: `calendar-${day.date}`, date: day.date, allDay: true, title: entry.title || entry.day_type, classNames: [entry.is_school_day ? 'dashboard-calendar-school' : 'dashboard-calendar-holiday'], extendedProps: { date: day.date } })
+    }
+    if (day.task_count) events.push({ id: `tasks-${day.date}`, date: day.date, allDay: true, title: `${day.task_count} 项待办`, classNames: ['dashboard-calendar-task'], extendedProps: { date: day.date } })
+    return events
+  }),
+  dateClick: ({ dateStr }) => { selectedDate.value = dateStr },
+  eventClick: ({ event }) => { selectedDate.value = event.extendedProps.date },
+  dayCellClassNames: ({ date }) => {
+    const day = calendarData.value.days.find(item => item.date === localDate(date))
+    return day?.school_calendar && !day.school_calendar.is_school_day ? ['dashboard-calendar-holiday-cell'] : []
+  },
+}))
 
 async function load() {
   errorMsg.value = ''
   try {
     stats.value = await get('/api/stats/dashboard')
+    selectedDate.value = stats.value.date
   } catch (error) {
     errorMsg.value = error.message
   }
@@ -134,6 +173,33 @@ onMounted(load)
       </div>
     </section>
 
+    <section class="card dashboard-calendar-card" aria-labelledby="dashboard-calendar-title">
+      <div class="section-heading dashboard-calendar-heading">
+        <div><h2 id="dashboard-calendar-title"><CalendarDays :size="17" /> 本月安排</h2><p>查看本月校历和待办，点击日期查看当天详情</p></div>
+        <router-link to="/school-calendar">管理完整校历 <ArrowRight :size="13" /></router-link>
+      </div>
+      <div class="dashboard-calendar-layout">
+        <div class="dashboard-calendar-month">
+          <FullCalendar v-if="stats" class="dashboard-calendar-component" :options="calendarOptions" />
+        </div>
+        <aside v-if="selectedDay" class="dashboard-day-detail">
+          <div class="dashboard-day-title"><strong>{{ selectedDay.date }}</strong><span>{{ selectedDay.weekday_label }}</span></div>
+          <div v-if="selectedDay.school_calendar" class="dashboard-day-school" :class="{ holiday: !selectedDay.school_calendar.is_school_day }"><span>{{ selectedDay.school_calendar.title || selectedDay.school_calendar.day_type }}</span><small>{{ selectedDay.school_calendar.is_school_day ? '上课日' : '非上课日' }}</small></div>
+          <div v-if="!selectedDay.school_calendar && !selectedDay.task_count" class="empty-state compact-empty">当天没有校历或待办安排</div>
+          <router-link v-for="task in selectedDay.tasks" :key="task.id" :to="taskRoute(task, 'edit', 'open')" class="dashboard-day-task"><span>{{ task.title }}</span><small>{{ task.student_name || task.source_label || '班级事务' }}</small><ArrowRight :size="13" /></router-link>
+        </aside>
+      </div>
+      <div class="dashboard-upcoming">
+        <div class="dashboard-upcoming-title"><strong>未来 7 天</strong><span>{{ calendarData.summary.upcoming_items || 0 }} 项安排</span></div>
+        <div v-if="!upcomingPlans.length" class="empty-state compact-empty">未来 7 天没有已安排的校历事项或待办</div>
+        <router-link v-for="item in upcomingPlans" :key="item.date" :to="item.tasks[0] ? taskRoute(item.tasks[0], 'edit', 'open') : '/school-calendar'" class="dashboard-upcoming-row">
+          <span class="dashboard-upcoming-date"><strong>{{ item.day }}</strong><small>{{ item.weekday_label }}</small></span>
+          <span class="dashboard-upcoming-copy"><strong>{{ item.items[0]?.title || '当天有安排' }}</strong><small>{{ item.item_count > 1 ? `还有 ${item.item_count - 1} 项安排` : item.items[0]?.meta }}</small></span>
+          <ArrowRight :size="13" />
+        </router-link>
+      </div>
+    </section>
+
     <div class="dashboard-grid operational-grid">
       <section class="card operational-card">
         <div class="card-title"><AlertTriangle :size="16" /> 考勤规则命中 <span class="count">{{ stats.rule_hit_count }}</span><router-link to="/attendance" class="card-action">查看规则 <ArrowRight :size="13" /></router-link></div>
@@ -206,7 +272,30 @@ onMounted(load)
 .dashboard-page { display: grid; gap: 16px; }
 .dashboard-toolbar { margin-bottom: 0; }
 .dashboard-page .card { box-shadow: none; }
-.dashboard-page > section.card { padding: 2px 0; border: 0; margin-bottom: 0; background: transparent; }
+.dashboard-calendar-card { padding: 16px; border: 1px solid var(--border); background: var(--surface); }
+.dashboard-calendar-heading { align-items: center; margin-bottom: 12px; }
+.dashboard-calendar-heading h2 { display: flex; align-items: center; gap: 7px; }
+.dashboard-calendar-heading > a { display: inline-flex; align-items: center; gap: 4px; color: var(--primary); font-size: 12px; text-decoration: none; }
+.dashboard-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(220px, .55fr); gap: 16px; }
+.dashboard-calendar-month { min-width: 0; }
+.dashboard-calendar-component :deep(.fc) { --fc-border-color: var(--border-light); --fc-today-bg-color: rgba(91, 106, 191, .055); color: var(--text); font-size: 12px; }
+.dashboard-calendar-component :deep(.fc-scrollgrid) { border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
+.dashboard-calendar-component :deep(.fc-col-header-cell) { background: var(--surface-subtle, #f8f8fa); }
+.dashboard-calendar-component :deep(.fc-col-header-cell-cushion) { padding: 8px 4px; color: var(--text-tertiary); font-size: 11px; text-decoration: none; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-frame) { min-height: 76px; padding: 3px; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-number) { padding: 4px 5px; color: var(--text-secondary); font-size: 11px; text-decoration: none; }
+.dashboard-calendar-component :deep(.fc-day-today .fc-daygrid-day-number) { color: var(--primary); font-weight: 700; }
+.dashboard-calendar-component :deep(.fc-daygrid-event) { margin: 2px 3px; padding: 2px 4px; border: 0; border-radius: 5px; font-size: 10px; line-height: 1.25; cursor: pointer; }
+.dashboard-calendar-component :deep(.dashboard-calendar-school) { background: var(--primary-bg); color: var(--primary); }
+.dashboard-calendar-component :deep(.dashboard-calendar-holiday) { background: rgba(235, 90, 105, .12); color: #b5465a; }
+.dashboard-calendar-component :deep(.dashboard-calendar-task) { background: rgba(45, 180, 95, .12); color: #26834b; }
+.dashboard-calendar-component :deep(.dashboard-calendar-holiday-cell) { background: rgba(235, 90, 105, .025); }
+.dashboard-day-detail { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border-light); border-radius: 11px; background: var(--bg); }
+.dashboard-day-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }.dashboard-day-title strong { font-size: 14px; }.dashboard-day-title span { color: var(--text-secondary); font-size: 11px; }
+.dashboard-day-school { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px; border-radius: 8px; background: var(--primary-bg); color: var(--primary); font-size: 12px; }.dashboard-day-school.holiday { background: rgba(235, 90, 105, .1); color: #b5465a; }.dashboard-day-school small { font-size: 10px; }
+.dashboard-day-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; padding: 8px 0; border-top: 1px solid var(--border); color: var(--text); text-decoration: none; }.dashboard-day-task span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.dashboard-day-task small { color: var(--text-secondary); font-size: 10px; }.dashboard-day-task svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--primary); }
+.dashboard-upcoming { display: grid; gap: 7px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border); }.dashboard-upcoming-title { display: flex; align-items: center; gap: 7px; }.dashboard-upcoming-title span { color: var(--text-secondary); font-size: 11px; }.dashboard-upcoming-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 9px; border: 1px solid var(--border-light); border-radius: 8px; color: var(--text); text-decoration: none; }.dashboard-upcoming-row:hover { border-color: rgba(91, 106, 191, .35); background: var(--primary-bg); }.dashboard-upcoming-date { display: grid; justify-items: center; gap: 2px; color: var(--primary); }.dashboard-upcoming-date strong { font-size: 15px; line-height: 1; }.dashboard-upcoming-date small, .dashboard-upcoming-copy small { color: var(--text-secondary); font-size: 10px; }.dashboard-upcoming-copy { display: grid; gap: 3px; min-width: 0; }.dashboard-upcoming-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.dashboard-upcoming-row > svg { color: var(--primary); }
+.dashboard-page > section.card:not(.dashboard-calendar-card) { padding: 2px 0; border: 0; margin-bottom: 0; background: transparent; }
 .action-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .action-summary-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 5px 9px; min-height: 86px; padding: 15px 16px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); color: var(--text-secondary); text-decoration: none; box-shadow: var(--shadow-sm); }
 .action-summary-card > svg { grid-row: 1 / span 2; color: var(--primary); }
@@ -259,6 +348,7 @@ onMounted(load)
 @media (max-width: 900px) {
   .action-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .action-columns { grid-template-columns: 1fr; }
+  .dashboard-calendar-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .dashboard-toolbar { width: 100%; }
@@ -270,5 +360,7 @@ onMounted(load)
   .section-heading { align-items: center; }
   .section-heading p { display: none; }
   .material-row { grid-template-columns: minmax(0, 1fr) 60px 30px; }
+  .dashboard-calendar-card { padding: 12px; }
+  .dashboard-calendar-component :deep(.fc-daygrid-day-frame) { min-height: 62px; }
 }
 </style>

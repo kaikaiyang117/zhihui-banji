@@ -449,6 +449,105 @@ def list_calendar(date_from: str = '', date_to: str = '', month: str = '') -> di
     }
 
 
+def term_calendar() -> dict:
+    """返回当前学期的完整周次视图，未录入日期不会写回数据库。"""
+    conn = db.get_conn()
+    class_id, term_id, scope = _scope(conn=conn)
+    rows = [dict(row) for row in conn.execute(
+        '''SELECT * FROM school_calendar_days
+           WHERE class_id=? AND term_id=? ORDER BY calendar_date''',
+        (class_id, term_id),
+    ).fetchall()]
+    for row in rows:
+        row['is_school_day'] = bool(row['is_school_day'])
+
+    start, end = _term_bounds(scope)
+    if not start or not end:
+        if rows:
+            start = date.fromisoformat(rows[0]['calendar_date'])
+            end = date.fromisoformat(rows[-1]['calendar_date'])
+        else:
+            return {
+                'scope': {'class_id': class_id, 'term_id': term_id, 'term_name': scope['term_name'],
+                          'start_date': scope['start_date'], 'end_date': scope['end_date']},
+                'weeks': [], 'entries': [], 'summary': {
+                    'total': 0, 'recorded': 0, 'unrecorded': 0, 'school_days': 0,
+                    'non_school_days': 0, 'special_days': 0, 'week_count': 0,
+                    'current_week': 0,
+                },
+            }
+    if end < start:
+        raise CalendarError('当前学期的结束日期不能早于开始日期')
+    scope_view = {
+        'class_id': class_id, 'term_id': term_id, 'term_name': scope['term_name'],
+        'start_date': start.isoformat(), 'end_date': end.isoformat(),
+    }
+
+    by_date = {row['calendar_date']: row for row in rows}
+    first_monday = start - timedelta(days=start.weekday())
+    last_sunday = end + timedelta(days=6 - end.weekday())
+    today = clock.today()
+    weeks = []
+    days = []
+    cursor = first_monday
+    week_no = 1
+    while cursor <= last_sunday:
+        week_days = []
+        for offset in range(7):
+            current = cursor + timedelta(days=offset)
+            iso = current.isoformat()
+            in_term = start <= current <= end
+            entry = by_date.get(iso)
+            day = {
+                'date': iso,
+                'day': current.day,
+                'weekday': current.weekday(),
+                'weekday_label': WEEKDAY_COLUMNS[current.weekday()],
+                'week_no': week_no,
+                'in_term': in_term,
+                'is_today': current == today,
+                'recorded': bool(entry),
+                'day_type': entry['day_type'] if entry else ('周末' if current.weekday() >= 5 else '未设置'),
+                'title': entry.get('title', '') if entry else '',
+                'note': entry.get('note', '') if entry else '',
+                'is_school_day': entry['is_school_day'] if entry else False,
+                'entry': entry,
+            }
+            week_days.append(day)
+            if in_term:
+                days.append(day)
+        week_end = cursor + timedelta(days=6)
+        weeks.append({
+            'week_no': week_no,
+            'start_date': max(cursor, start).isoformat(),
+            'end_date': min(week_end, end).isoformat(),
+            'is_current': start <= today <= end and cursor <= today <= week_end,
+            'days': week_days,
+        })
+        cursor += timedelta(days=7)
+        week_no += 1
+
+    special_days = [day for day in days if day['recorded'] and (
+        day['title'] or day['day_type'] not in {'上课日', '放假日'}
+    )]
+    current_week = next((week['week_no'] for week in weeks if week['is_current']), 0)
+    return {
+        'scope': scope_view,
+        'weeks': weeks,
+        'entries': rows,
+        'summary': {
+            'total': len(days),
+            'recorded': sum(1 for day in days if day['recorded']),
+            'unrecorded': sum(1 for day in days if not day['recorded']),
+            'school_days': sum(1 for day in days if day['recorded'] and day['is_school_day']),
+            'non_school_days': sum(1 for day in days if day['recorded'] and not day['is_school_day']),
+            'special_days': len(special_days),
+            'week_count': len(weeks),
+            'current_week': current_week,
+        },
+    }
+
+
 def create_entry(calendar_date: str, day_type: str = '上课日', title: str = '', is_school_day: bool = True,
                  note: str = '') -> dict:
     return _save_entry(None, calendar_date, day_type, title, is_school_day, note)

@@ -168,16 +168,35 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); if (c
     </div>
     <div v-if="message" class="inline-message">{{ message }}</div>
 
-    <div class="overview-grid fund-overview">
-      <div class="overview-card"><span class="overview-label">当前余额</span><strong class="overview-value" :class="balanceTone">¥ {{ money(summary.totals.balance) }}</strong><small>累计 {{ summary.totals.count }} 笔有效账务</small></div>
-      <div class="overview-card"><span class="overview-label">本月收入</span><strong class="overview-value positive">¥ {{ money(summary.current_period.收入) }}</strong><small>{{ summary.current_period.month || '本月' }}</small></div>
-      <div class="overview-card"><span class="overview-label">本月支出</span><strong class="overview-value negative">¥ {{ money(summary.current_period.支出) }}</strong><small>{{ summary.current_period.count }} 笔流水</small></div>
-      <div class="overview-card"><span class="overview-label">待复核结算</span><strong class="overview-value" :class="unsettledCount ? 'negative' : 'positive'">{{ unsettledCount }}</strong><small>{{ unsettledCount ? '存在账面差异' : '账目状态正常' }}</small></div>
+    <div class="fund-overview">
+      <div class="fund-balance-card">
+        <div class="fund-balance-main">
+          <span class="fund-overview-label">当前余额</span>
+          <strong :class="balanceTone">¥ {{ money(summary.totals.balance) }}</strong>
+          <small>累计 {{ summary.totals.count }} 笔有效账务</small>
+        </div>
+        <span class="fund-health-pill" :class="unsettledCount ? 'warning' : 'ok'">{{ unsettledCount ? '需要复核' : '账目正常' }}</span>
+      </div>
+      <div class="fund-stat-card">
+        <span class="fund-overview-label">本月收入</span>
+        <strong class="positive">¥ {{ money(summary.current_period.收入) }}</strong>
+        <small>{{ summary.current_period.month || '本月' }}</small>
+      </div>
+      <div class="fund-stat-card">
+        <span class="fund-overview-label">本月支出</span>
+        <strong class="negative">¥ {{ money(summary.current_period.支出) }}</strong>
+        <small>{{ summary.current_period.count }} 笔流水</small>
+      </div>
+      <div class="fund-stat-card">
+        <span class="fund-overview-label">待复核结算</span>
+        <strong :class="unsettledCount ? 'negative' : 'positive'">{{ unsettledCount }}</strong>
+        <small>{{ unsettledCount ? '存在账面差异' : '账目状态正常' }}</small>
+      </div>
     </div>
 
     <div class="fund-dashboard-grid">
       <div class="card"><div class="card-title">月度收支趋势</div><div ref="chartEl" class="chart-box fund-chart" role="img" aria-label="月度班费收支趋势"></div></div>
-      <div class="card"><div class="card-title">分类汇总</div><div v-if="summary.categories.length" class="fund-category-list"><div v-for="item in summary.categories.slice(0, 8)" :key="`${item.direction}-${item.category}`" class="fund-category-row"><span><i :class="item.direction === '收入' ? 'fund-dot income' : 'fund-dot expense'"></i>{{ item.category }}<small>{{ item.count }} 笔</small></span><strong :class="item.direction === '收入' ? 'positive' : 'negative'">{{ item.direction === '收入' ? '+' : '-' }}¥ {{ money(item.total) }}</strong></div></div><div v-else class="empty-state compact-empty">暂无分类数据</div></div>
+      <div class="card fund-category-card"><div class="card-title">分类汇总</div><div v-if="summary.categories.length" class="fund-category-list"><div v-for="item in summary.categories.slice(0, 8)" :key="`${item.direction}-${item.category}`" class="fund-category-row"><span><i :class="item.direction === '收入' ? 'fund-dot income' : 'fund-dot expense'"></i>{{ item.category }}<small>{{ item.count }} 笔</small></span><strong :class="item.direction === '收入' ? 'positive' : 'negative'">{{ item.direction === '收入' ? '+' : '-' }}¥ {{ money(item.total) }}</strong></div></div><div v-else class="empty-state compact-empty">暂无分类数据</div></div>
     </div>
 
     <div class="card"><div class="card-title">月度结算 <span class="count">{{ summary.settlements.length }} 期</span></div><div v-if="summary.settlements.length" class="fund-settlement-list"><div v-for="item in summary.settlements" :key="item.id" class="fund-settlement-row"><div><strong>{{ item.period_key }}</strong><span>账面结余 ¥ {{ money(item.closing_balance) }} · 盘点 ¥ {{ money(item.counted_balance) }}</span></div><span class="tag" :class="item.status_display === '已结算' ? 'tag-green' : 'tag-orange'">{{ item.status_display }}</span><button class="btn btn-sm btn-outline" @click="openReconcile(item)">复核</button></div></div><div v-else class="empty-state compact-empty">尚未建立月度结算</div></div>

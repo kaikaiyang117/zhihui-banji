@@ -18,7 +18,7 @@
 
 | 功能 | 说明 |
 |------|------|
-| 今日工作台 | 逾期/今日/未来行动、考勤规则命中、材料进度、待复查学生和完成/延期直达 |
+| 今日工作台 | 逾期/今日/未来行动、本月日历、未来 7 天安排、考勤规则命中、材料进度、待复查学生和完成/延期直达 |
 | 学生信息 | 学生总表 + 搜索 + **Excel 批量导入（按学号合并去重）** + 导出 |
 | 特殊学生档案 | 重点关注学生档案管理 |
 | 评语管理 | 模板变量、缺失值预览、批量生成草稿、人工保护、审核交付、版本历史与打印导出 |
@@ -224,8 +224,10 @@ Planner → Runner → 工具注册与权限/审计 → 业务 Services → SQLi
 | POST | `/api/exams/import/commit` | 再次校验并原子提交预览中的有效成绩 |
 | GET | `/api/exams/summary` | 查询班级与学生成绩、排名、分层和变化统计 |
 | GET/POST/PUT | `/api/school-calendar` | 查询、手工维护当前学期校历日期 |
+| GET | `/api/school-calendar/term` | 返回当前班级/学期的完整周次校历视图 |
 | POST | `/api/school-calendar/import/preview` | 预览学校行事历矩阵或日期明细 Excel，不写入数据库 |
 | POST | `/api/school-calendar/import/commit` | 再次校验并原子提交校历预览中的有效日期 |
+| GET | `/api/stats/calendar` | 返回个人工作台当前月份和未来 7 天的校历/待办聚合 |
 | GET/POST/PUT | `/api/comments/*` | 评语模板、批量预览/生成、人工草稿、审核流转、版本历史 |
 | GET | `/api/comments/print` | 当前班级/学期评语打印页，支持学生、类型和状态筛选 |
 | GET/POST | `/api/score-rules` | 查询或创建成绩异常跟进规则 |

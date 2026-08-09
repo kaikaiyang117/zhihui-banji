@@ -69,6 +69,25 @@ class SchoolCalendarTest(unittest.TestCase):
         self.assertEqual(updated['day_type'], '调休上课')
         self.assertEqual(updated['source'], 'manual')
 
+    def test_term_calendar_returns_complete_week_grid(self):
+        preview = school_calendar.preview_import(self.matrix_file(), 'calendar.xlsx')
+        rows = [row for row in preview['rows'] if row['valid'] and row['action'] != '跳过']
+        school_calendar.commit_import(rows, 'calendar.xlsx', 'calendar-term-view')
+
+        result = school_calendar.term_calendar()
+
+        self.assertEqual(result['scope']['start_date'], '2026-03-01')
+        self.assertEqual(result['scope']['end_date'], '2026-07-19')
+        self.assertEqual(result['summary']['total'], 141)
+        self.assertGreater(result['summary']['recorded'], 0)
+        self.assertEqual(result['summary']['week_count'], len(result['weeks']))
+        self.assertEqual(len(result['weeks'][0]['days']), 7)
+        self.assertEqual(result['weeks'][0]['days'][0]['date'], '2026-02-23')
+        self.assertEqual(
+            next(day for day in result['weeks'][1]['days'] if day['date'] == '2026-03-04')['title'],
+            '报名',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

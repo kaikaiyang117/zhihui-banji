@@ -5,10 +5,18 @@ from datetime import datetime
 
 from .. import clock
 from .. import db
-from ..services import attendance as attendance_service, funds as funds_service, points as points_service, scores as scores_service, work_items
+from ..services import attendance as attendance_service, dashboard as dashboard_service, funds as funds_service, points as points_service, scores as scores_service, work_items
 from ..services.class_context import scope_ids
 
 router = APIRouter(prefix='/api/stats')
+
+
+@router.get('/calendar')
+def dashboard_calendar(month: str = ''):
+    try:
+        return dashboard_service.calendar(month=month)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get('/dashboard')
@@ -100,6 +108,7 @@ def dashboard(date: str | None = None):
            ORDER BY f.next_review_at, f.id DESC''',
         (class_id, term_id, target_date),
     ).fetchall()]
+    calendar_data = dashboard_service.calendar(reference_date=reference_date, conn=conn)
 
     return {'date': target_date,
             'total_students': total_students,
@@ -118,7 +127,8 @@ def dashboard(date: str | None = None):
             'review_student_count': len(review_students),
             'focus': focus,
             'recent_events': recent_events,
-            'pending_communications': pending_communications}
+            'pending_communications': pending_communications,
+            'calendar': calendar_data}
 
 
 @router.get('/attendance')
