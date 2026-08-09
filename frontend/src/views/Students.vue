@@ -14,6 +14,8 @@ const editId = ref(null)
 const editData = ref(null)
 const keyword = ref('')
 const router = useRouter()
+const studentHeaders = ['学号', '姓名', '性别', '出生年月', '民族', '是否住校', '班级任职', '监护人']
+const studentColWidths = [72, 76, 48, 86, 58, 72, 88, 100]
 
 async function load() {
   loading.value = true
@@ -36,25 +38,35 @@ function openStudent(row) {
   if (student) router.push(`/student/${student.id}`)
 }
 
-function startEdit(rowNo, data) {
+function guardianSummary(student) {
+  const guardians = [
+    ['监护人姓名', '监护人电话'],
+    ['监护人2姓名', '监护人2电话']
+  ].filter(fields => fields.some(field => student[field]))
+  return guardians.length ? `${guardians.length} 人已登记` : '未登记'
+}
+
+function startEdit(rowNo) {
+  const student = students.value.find(item => item.id === rowNo)
+  if (!student) return
   editId.value = rowNo
   editData.value = {
-    '学号': data[0] ?? '',
-    '姓名': data[1] ?? '',
-    '性别': data[2] ?? '',
-    '出生年月': data[3] ?? '',
-    '民族': data[4] ?? '',
-    '家庭住址': data[5] ?? '',
-    '监护人姓名': data[6] ?? '',
-    '监护人电话': data[7] ?? '',
-    '监护人职业': data[8] ?? '',
-    '是否住校': data[9] ?? '',
-    '特长': data[10] ?? '',
-    '班级任职': data[11] ?? '',
-    '备注': data[12] ?? '',
-    '监护人2姓名': data[13] ?? '',
-    '监护人2电话': data[14] ?? '',
-    '监护人2关系': data[15] ?? '',
+    '学号': student['学号'] ?? '',
+    '姓名': student['姓名'] ?? '',
+    '性别': student['性别'] ?? '',
+    '出生年月': student['出生年月'] ?? '',
+    '民族': student['民族'] ?? '',
+    '家庭住址': student['家庭住址'] ?? '',
+    '监护人姓名': student['监护人姓名'] ?? '',
+    '监护人电话': student['监护人电话'] ?? '',
+    '监护人职业': student['监护人职业'] ?? '',
+    '是否住校': student['是否住校'] ?? '',
+    '特长': student['特长'] ?? '',
+    '班级任职': student['班级任职'] ?? '',
+    '备注': student['备注'] ?? '',
+    '监护人2姓名': student['监护人2姓名'] ?? '',
+    '监护人2电话': student['监护人2电话'] ?? '',
+    '监护人2关系': student['监护人2关系'] ?? '',
   }
   showModal.value = true
 }
@@ -81,7 +93,7 @@ onMounted(load)
     </div>
 
     <div class="card">
-      <div class="card-title">学生信息总表 <span class="count">共 {{ students.length }} 人</span></div>
+      <div class="card-title">学生信息总表 <span class="count">共 {{ students.length }} 人 · 点击学生行查看完整档案</span></div>
       <div class="toolbar">
         <div class="search-box">
           <input type="text" placeholder="搜索学号或姓名..." v-model="keyword" @keyup.enter="load">
@@ -89,12 +101,12 @@ onMounted(load)
         </div>
       </div>
       <div v-if="loading" class="loading">加载中...</div>
-      <DataTable v-else :headers="['学号','姓名','性别','出生年月','民族','家庭住址','监护人1姓名','监护人1电话','监护人1职业','监护人2姓名','监护人2电话','监护人2关系','是否住校','特长','班级任职','备注']"
-        :rows="students.map((s, i) => ({ row_no: s.id, data: [s['学号'], s['姓名'], s['性别'], s['出生年月'], s['民族'], s['家庭住址'], s['监护人姓名'], s['监护人电话'], s['监护人职业'], s['监护人2姓名']||'', s['监护人2电话']||'', s['监护人2关系']||'', s['是否住校'], s['特长'], s['班级任职'], s['备注']] }))"
-        :col-widths="[64, 68, 46, 80, 54, 148, 76, 116, 60, 76, 116, 60, 56, 76, 76, 100]"
+      <DataTable v-else :headers="studentHeaders"
+        :rows="students.map(s => ({ row_no: s.id, data: [s['学号'], s['姓名'], s['性别'], s['出生年月'], s['民族'], s['是否住校'], s['班级任职'], guardianSummary(s)] }))"
+        :col-widths="studentColWidths"
         :show-edit="true" :show-delete="true"
         @delete="rowNo => removeStudent(rowNo)"
-        @edit="(rowNo, data) => startEdit(rowNo, data)"
+        @edit="rowNo => startEdit(rowNo)"
         @row-click="openStudent" />
     </div>
 

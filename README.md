@@ -21,16 +21,18 @@
 | 今日工作台 | 逾期/今日/未来行动、考勤规则命中、材料进度、待复查学生和完成/延期直达 |
 | 学生信息 | 学生总表 + 搜索 + **Excel 批量导入（按学号合并去重）** + 导出 |
 | 特殊学生档案 | 重点关注学生档案管理 |
-| 评语管理 | 学期/毕业/日常评语 |
+| 评语管理 | 模板变量、缺失值预览、批量生成草稿、人工保护、审核交付、版本历史与打印导出 |
 | 考勤管理 | 五类点名场景、出勤/迟到/请假/早退/缺勤、批量备注、学生/月/周统计、异常规则自动跟进 + **日期筛选汇总报表导出** |
 | 成绩跟踪 | 科目/考试配置、长宽表预览导入、缺考口径、班级均值/排名/分层、个人变化、异常跟进 + **单次考试汇总报表导出** |
 | 行为积分 | 结构化加扣分流水 + 排行榜 + 周期趋势 + 异常规则 |
 | 座位表 | 可视化班级座位网格（讲台/过道特殊标识） |
 | 家校沟通 | 电话/微信/面谈/家访记录与跟进状态 |
-| 班会记录 | 班会主题、形式、效果评估 |
+| 班会记录 | 结构化班会、模板、参与学生、结论、行动项和统一工作项 |
 | 班费管理 | 分类账、余额重算、月度结算、凭证与冲正 |
-| 班主任日志 | 每日记事 + 待办 |
-| 班级活动 | 活动类型、预算、总结 |
+| 班主任日志 | 月历日志、学生/事件/待办/班会/活动关联 |
+| 班级活动 | 参与学生、预算、附件、结果、复盘和跟进工作项 |
+| 报告与学期档案 | 周报、月报、学生成长报告、学期档案、来源追溯、只读归档和 Excel 导出 |
+| 凯凯小兵 Agent | 网页/微信 iLink 查询、规划、会话管理、统计，以及确认后低风险写入 |
 | 回收站与审计 | 核心记录软删除、原位恢复、操作追踪、脱敏日志和本机确认永久删除 |
 | Excel 导出 | **每个工作表 + 成绩/考勤汇总报表**一键下载 xlsx |
 
@@ -38,9 +40,9 @@
 
 | 功能 | 说明 |
 |------|------|
-| 健康追踪 | 体重趋势图（目标线）、运动记录、睡眠记录 |
-| 考研备考 | 预留页面 |
-| 知识库 | Obsidian 集成 Markdown 笔记、6 种模板、分类浏览 |
+| 健康追踪 | 可编辑目标、体重/运动/睡眠/饮食记录、周期汇总、复盘、提醒和汇总导出 |
+| 考研备考 | 入口保留，当前暂缓开发 |
+| 知识库 | 站内 Markdown 创建、搜索、标签、编辑预览、来源关联和 Obsidian 集成 |
 
 ---
 
@@ -63,8 +65,14 @@
 美美大王工作台/
 ├── 启动工作台.bat
 ├── 启动工作台.command
-├── docs/                           # 用户手册、发布检查和适配记录
-│   ├── 用户手册.md
+├── docs/                           # 用户手册、开发计划、Agent 和发布文档
+│   ├── 用户手册.md                 # 教师、个人工作台和 Agent 使用说明
+│   ├── 系统功能开发计划.md         # 系统业务能力的工作包与收口状态
+│   ├── Agent能力矩阵.md             # Agent 工具、参数、权限与测试登记
+│   ├── Agent与微信接入配置.md       # 模型、网页 Agent 和微信 iLink 配置
+│   ├── Agent代理清单.md             # Agent 已完成能力与预留方向
+│   ├── Agent回归报告.md             # 固定样例和自动回归基线
+│   ├── 移动端适配-TODO.md           # 响应式实现与真实设备验收项
 │   ├── 开发与发布流程.md
 │   └── 发布检查清单.md
 ├── backend/                        # 后端
@@ -81,6 +89,9 @@
 │       ├── derived.py              # 旧通用工作表兼容派生列
 │       ├── export_service.py       # xlsx 导出（含座位表特例）
 │       ├── import_service.py       # 学生 Excel 导入（模板生成 + 解析 + 按学号合并）
+│       ├── agent/                   # Agent 规划、执行、模型、会话和写入确认
+│       ├── wechat/                  # 微信 iLink 凭证、消息循环和渠道适配
+│       ├── services/                # 可由页面和 Agent 共用的业务服务
 │       └── routers/
 │           ├── sheets.py           # /api/sheets, /api/sheet/<name>
 │           ├── students.py         # /api/students (CRUD + 导入/导出/模板)
@@ -90,6 +101,12 @@
 │           ├── export.py           # /api/export/* (工作表导出+汇总报表)
 │           ├── p0.py               # 学生详情/事件/待办/关注/沟通/批量考勤
 │           ├── p1.py               # 搜索/成绩/考勤规则/班级任务/值日
+│           ├── comments.py         # 评语管理
+│           ├── education.py        # 班会/活动/日志
+│           ├── reports.py          # 报告和学期档案
+│           ├── health.py           # 个人健康
+│           ├── agent.py            # Agent 会话、流式对话和确认写入
+│           ├── wechat.py           # 微信 iLink 配置、登录和消息循环
 │           └── system.py           # 本地备份与恢复
 ├── scripts/                        # 开发环境、UI 冒烟测试脚本
 ├── backend/tests/                  # 隔离 SQLite 后端测试与测试数据
@@ -132,12 +149,23 @@ Uvicorn :: FastAPI
       ▼
    Services
    ├── 导入/导出（openpyxl）
-   ├── 结构化业务服务（成绩/考勤/积分/班费）
+   ├── 结构化业务服务（学生/成绩/考勤/任务/评语/班费等）
    ├── 旧通用工作表兼容派生计算（成绩/积分/余额/腰臀比）
    └── 知识库（文件系统）
       │
       ▼
    SQLite (WAL, per-thread connections, atomic commit)
+
+Agent 请求路径：
+
+```
+网页 Agent / 微信 iLink
+          │
+          ▼
+Planner → Runner → 工具注册与权限/审计 → 业务 Services → SQLite
+```
+
+网页和微信渠道共享 Agent 核心，但使用独立会话命名空间；微信当前按微信用户维持一个主会话，写入工具必须经过预览和明确确认。
 ```
 
 **核心理念**：SQLite 存结构化核心业务数据和仍在过渡期的通用 JSON 行；Excel 仅作为“导入模板 + 导出报表”的外部交换格式，不再用作运行时数据库。
@@ -195,6 +223,11 @@ Uvicorn :: FastAPI
 | POST | `/api/exams/import/preview` | 预览长表或宽表成绩文件，不写入数据库 |
 | POST | `/api/exams/import/commit` | 再次校验并原子提交预览中的有效成绩 |
 | GET | `/api/exams/summary` | 查询班级与学生成绩、排名、分层和变化统计 |
+| GET/POST/PUT | `/api/school-calendar` | 查询、手工维护当前学期校历日期 |
+| POST | `/api/school-calendar/import/preview` | 预览学校行事历矩阵或日期明细 Excel，不写入数据库 |
+| POST | `/api/school-calendar/import/commit` | 再次校验并原子提交校历预览中的有效日期 |
+| GET/POST/PUT | `/api/comments/*` | 评语模板、批量预览/生成、人工草稿、审核流转、版本历史 |
+| GET | `/api/comments/print` | 当前班级/学期评语打印页，支持学生、类型和状态筛选 |
 | GET/POST | `/api/score-rules` | 查询或创建成绩异常跟进规则 |
 | POST | `/api/score-rules/evaluate` | 手工重新评估成绩异常规则 |
 | GET | `/api/export/sheet/<name>` | **导出任意工作表 xlsx** |
@@ -203,6 +236,12 @@ Uvicorn :: FastAPI
 | GET | `/api/seating` | 座位表 |
 | GET | `/api/stats/*` | 仪表盘/考勤统计/成绩统计/积分统计 |
 | GET/POST | `/api/knowledge/*` | 知识库笔记 |
+| GET/POST/PUT/DELETE | `/api/education/meetings`、`/api/education/activities`、`/api/education/diary` | 班会、活动、日志与行动关联 |
+| GET/POST | `/api/reports/preview`、`/api/reports/archives*` | 周报、月报、成长报告和学期档案预览、归档与导出 |
+| GET/POST/PUT | `/api/health/*` | 个人健康目标、周期汇总、复盘、提醒和汇总导出 |
+| GET/POST | `/api/agent/chat`、`/api/agent/chat/stream` | Agent 普通和 SSE 流式对话 |
+| GET/POST/PUT/DELETE | `/api/agent/sessions*`、`/api/agent/usage`、`/api/agent/actions*` | Agent 会话管理、使用统计和确认写入 |
+| GET/PUT/POST | `/api/agent/config`、`/api/wechat/*` | 模型配置、微信 iLink 登录、状态和消息循环 |
 
 ### P0 学生管理闭环
 
@@ -217,9 +256,12 @@ Uvicorn :: FastAPI
 - `/api/stats/attendance`：按日期范围和场景统计学生、月份、周次及异常名单
 - `/api/score-config`、`/api/exams/*`：配置考试科目、预览并提交成绩、查询结构化统计
 - `/api/score-rules`：管理成绩下降规则，幂等生成工作项并联动学生时间线
+- `/api/comments`：评语模板、缺失变量确认、批量生成、人工修改保护、审核交付和版本回溯
 - `/api/system/backup`、`/api/system/restore`：本地数据库备份与恢复
 
 ## 开发测试
+
+开发启动脚本默认将业务日期设为 `2026-04-15`（春季学期内的正常上课日），用于验证今日工作台、待办、考勤和 Agent 日期判断。它不修改电脑系统时间或数据库真实时间；设置 `WORKBENCH_BUSINESS_DATE=` 可恢复使用系统日期。
 
 后端 P0 工作流使用隔离 SQLite 测试数据，不会修改 `data/workbench.db`：
 
@@ -240,7 +282,16 @@ npm run build
 bash scripts/smoke-ui.sh
 ```
 
-当前基线包含 101 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
+当前基线包含 122 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
+
+### 文档分工
+
+- `README.md`：项目定位、架构、目录和快速开始。
+- `功能清单.md`：按系统功能盘点当前实现和后续缺口。
+- `docs/系统功能开发计划.md`：系统业务能力的工作包、依赖和验收状态。
+- `docs/Agent能力矩阵.md`：Agent 工具的参数、权限、渠道和测试登记，是工具能力的单一事实来源。
+- `docs/Agent与微信接入配置.md`：模型、网页 Agent、微信 iLink 和写入确认的配置说明。
+- `docs/用户手册.md`：面向教师的日常使用说明；`docs/发布检查清单.md` 保留尚未完成的实机验收项。
 
 ---
 
@@ -342,7 +393,7 @@ bash scripts/smoke-ui.sh
 
 ## 7. 已知边界
 
-- **考研备考**：预留页面，待实现
+- **考研备考**：入口保留但当前明确暂缓；若未来确认有持续使用场景，另建独立需求和执行计划
 - **单元格编辑**：前端目前通过添加/删除管理数据，无单元格直接编辑 UI（可扩展）
 - **学生导入告警**：含缺学号行提示、合并/新增计数
 - **默认监听 `0.0.0.0` 以支持局域网访问**，数据不会上传云端；请勿做端口映射或在不可信网络中启动

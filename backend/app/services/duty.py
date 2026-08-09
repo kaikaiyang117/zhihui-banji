@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 import threading
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -60,7 +60,7 @@ def _assignment_row(assignment_id: int, *, write: bool = False, conn=None) -> di
 
 def _decorate(row: dict) -> dict:
     result = dict(row)
-    result['is_overdue'] = result['status'] == '待完成' and result['duty_date'] < date.today().isoformat()
+    result['is_overdue'] = result['status'] == '待完成' and result['duty_date'] < clock.today().isoformat()
     return result
 
 

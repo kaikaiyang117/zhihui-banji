@@ -9,7 +9,7 @@ from pathlib import Path
 import threading
 from uuid import uuid4
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -96,7 +96,7 @@ def _item_rows(task_id: int, *, conn=None) -> list[dict]:
 def _timing_state(task: dict, *, today: date | None = None) -> str:
     if task['status'] in {'已完成', '已取消'}:
         return task['status']
-    today_text = (today or date.today()).isoformat()
+    today_text = (today or clock.today()).isoformat()
     due = _text(task.get('due_at'))[:10]
     start = _text(task.get('start_at'))[:10]
     if due and due < today_text:

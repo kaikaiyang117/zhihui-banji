@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from functools import wraps
 import threading
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 STATUSES = {'待处理', '处理中', '待复查', '已完成', '已取消'}
@@ -23,6 +23,9 @@ SOURCE_LABELS = {
     'class_task': '班级任务',
     'duty_assignment': '值日安排',
     'point_rule': '积分规则',
+    'meeting_action': '班会行动项',
+    'activity': '班级活动',
+    'agent_action': 'Agent 创建',
 }
 
 SOURCE_PATHS = {
@@ -34,6 +37,8 @@ SOURCE_PATHS = {
     'class_task': '/class-tasks',
     'duty_assignment': '/duty',
     'point_rule': '/points',
+    'meeting_action': '/meetings',
+    'activity': '/activities',
 }
 
 _write_lock = threading.RLock()
@@ -72,7 +77,7 @@ def _source_key(source_type: str, source_id: int | None, student_id: int | None 
 
 
 def _decorate(row: dict, today: date | None = None) -> dict:
-    today = today or date.today()
+    today = today or clock.today()
     item = dict(row)
     item['source_label'] = SOURCE_LABELS.get(item.get('source_type'), item.get('source') or '其他')
     path = SOURCE_PATHS.get(item.get('source_type'), '')
@@ -205,7 +210,7 @@ def list_work_items(
 ) -> list[dict]:
     conn = conn or db.get_conn()
     class_id, term_id = class_context.scope_ids(conn=conn)
-    today = reference_date or date.today()
+    today = reference_date or clock.today()
     action_date = "substr(COALESCE(NULLIF(t.scheduled_at,''), NULLIF(t.due_at,''), ''),1,10)"
     where = ["t.class_id=?", "t.term_id=?", "t.deleted_at=''",
              "(t.student_id IS NULL OR COALESCE(s.deleted_at, '')='')"]

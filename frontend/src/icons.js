@@ -1,5 +1,6 @@
 import {
-  School, User, LayoutDashboard, Users, Tag, Pencil, ClipboardList,
+  School, User, LayoutDashboard, Users, Tag, Pencil, ClipboardList, ClipboardCheck,
+  FolderCheck,
   TrendingUp, Star, LayoutGrid, Phone, Presentation, DollarSign, FileText,
   CalendarDays, Activity, BookOpen, Brain, Plus, Download, Upload,
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,
@@ -9,7 +10,8 @@ import {
 } from 'lucide-vue-next'
 
 export const ICONS = {
-  School, User, LayoutDashboard, Users, Tag, Pencil, ClipboardList,
+  School, User, LayoutDashboard, Users, Tag, Pencil, ClipboardList, ClipboardCheck,
+  FolderCheck,
   TrendingUp, Star, LayoutGrid, Phone, Presentation, DollarSign, FileText,
   CalendarDays, Activity, BookOpen, Brain, Plus, Download, Upload,
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,

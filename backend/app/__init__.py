@@ -10,10 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from . import db
+from . import clock
 from .config import APP_VERSION, STATIC_DIR
-from .routers import sheets, students, seating, stats, knowledge, export, points as points_router, funds as funds_router, comments as comments_router, p0, p1, system, agent, wechat, context, workflow, recycle
+from .routers import sheets, students, seating, stats, knowledge, education, reports, health, export, points as points_router, funds as funds_router, comments as comments_router, p0, p1, school_calendar, system, agent, wechat, context, workflow, recycle
 from .services.class_context import bind_request_scope, reset_request_scope, ScopeError, ArchivedScopeError
-from .services import attendance, audit, comments as comments_service, funds as funds_service, points as points_service, scores
+from .services import attendance, audit, comments as comments_service, education as education_service, funds as funds_service, points as points_service, scores
 from .services.audit import bind_actor, reset_actor
 from .services import devices
 from .wechat.service import wechat_service
@@ -85,13 +86,14 @@ async def scope_error_handler(_request: Request, exc: ScopeError):
     return JSONResponse({'detail': str(exc)}, status_code=status)
 
 for r in (sheets.router, students.router, seating.router,
-          stats.router, knowledge.router, export.router, points_router.router, funds_router.router, comments_router.router, p0.router, p1.router, system.router,
+          stats.router, knowledge.router, education.router, reports.router, health.router, export.router, points_router.router, funds_router.router, comments_router.router, p0.router, p1.router, school_calendar.router, system.router,
           agent.router, wechat.router, context.router, workflow.router, recycle.router):
     app.include_router(r)
 
 
 @app.on_event('startup')
 async def startup():
+    clock.today()  # 校验开发/测试业务日期，避免启动后才发现配置错误。
     db.get_conn()
     p0.migrate_legacy_core_rows()
     try:
@@ -118,6 +120,11 @@ async def startup():
         comments_service.evaluate_startup()
     except Exception:
         # 旧评语迁移失败不阻塞启动，教师可进入评语页检查迁移报告。
+        pass
+    try:
+        education_service.evaluate_startup()
+    except Exception:
+        # 旧班会、活动和日志迁移失败不阻塞启动，原通用表仍然保留。
         pass
     os.makedirs(db.DATA_DIR, exist_ok=True)
     with open(os.path.join(db.DATA_DIR, '.workbench-ready'), 'w', encoding='utf-8') as marker:

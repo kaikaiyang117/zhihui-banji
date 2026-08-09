@@ -47,6 +47,11 @@ class CommentWorkflowTest(unittest.TestCase):
         self.assertEqual(result['created'], 2)
         self.assertEqual(result['missing'], 1)
 
+    def test_template_name_is_unique_with_a_user_facing_error(self):
+        comments.create_template(name='唯一模板', content='{{姓名}}')
+        with self.assertRaisesRegex(comments.CommentError, '同名评语模板'):
+            comments.create_template(name='唯一模板', content='{{姓名}}的另一种写法')
+
     def test_regeneration_never_overwrites_manually_edited_draft(self):
         template = comments.create_template(
             name='学习表现', content='{{姓名}}同学本学期表现良好。')

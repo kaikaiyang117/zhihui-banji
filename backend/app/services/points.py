@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 import json
 import threading
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -50,7 +50,7 @@ def _amount(value):
 
 
 def _date(value: str, label: str = '日期', default_today: bool = False) -> str:
-    text = _text(value)[:10] or (date.today().isoformat() if default_today else '')
+    text = _text(value)[:10] or (clock.today().isoformat() if default_today else '')
     try:
         return date.fromisoformat(text).isoformat()
     except (TypeError, ValueError) as exc:

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "班级人数",
+    "kind": "tool",
+    "tool": "class_student_count",
+    "arguments": {},
+    "required_keys": ["student_count"]
+  },
+  {
+    "name": "学生搜索",
+    "kind": "tool",
+    "tool": "students_search",
+    "arguments": {"keyword": "张"},
+    "expected_first_name": "张三"
+  },
+  {
+    "name": "批量学生查询",
+    "kind": "tool",
+    "tool": "students_query",
+    "arguments": {
+      "fields": ["student_no", "student_name", "guardian_occupation"]
+    },
+    "required_keys": ["students", "fields", "total_count"]
+  },
+  {
+    "name": "学生职业聚合",
+    "kind": "tool",
+    "tool": "students_aggregate",
+    "arguments": {
+      "group_by": "guardian_occupation",
+      "include_empty": true
+    },
+    "required_keys": ["groups", "student_count", "empty_count"]
+  },
+  {
+    "name": "微信敏感档案保护",
+    "kind": "denied",
+    "tool": "student_get_profile",
+    "arguments": {"student_id": 1},
+    "channel": "wechat",
+    "expected_code": "permission_denied"
+  },
+  {
+    "name": "工具参数错误",
+    "kind": "invalid_arguments",
+    "tool": "students_search",
+    "raw_arguments": "{not-json",
+    "expected_code": "invalid_arguments"
+  }
+]

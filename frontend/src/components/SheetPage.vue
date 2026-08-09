@@ -60,7 +60,7 @@ onMounted(load)
       <div class="card-title">{{ title }}</div>
       <div v-if="loading" class="loading">加载中...</div>
       <DataTable v-else :headers="headers" :rows="rows" :searchable="searchable"
-        :max-height="500" :highlight="highlight" :show-delete="showDelete" @delete="removeRow" />
+        :highlight="highlight" :show-delete="showDelete" @delete="removeRow" />
     </div>
 
     <AddModal v-if="showModal" :title="addTitle"

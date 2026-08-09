@@ -6,6 +6,8 @@ from contextvars import ContextVar, Token
 from datetime import datetime
 from typing import Optional
 
+from .. import clock
+
 
 class ScopeError(ValueError):
     pass
@@ -252,7 +254,7 @@ def enroll_student(student_id: int, class_id: int | None = None, term_id: int | 
              joined_at=CASE WHEN student_enrollments.joined_at='' THEN excluded.joined_at ELSE student_enrollments.joined_at END,
              left_at=excluded.left_at,
              updated_at=datetime('now','localtime')''',
-        (student_id, class_id, term_id, status, '' if status == '在读' else datetime.now().date().isoformat()),
+             (student_id, class_id, term_id, status, '' if status == '在读' else clock.today().isoformat()),
     )
     if commit:
         conn.commit()
@@ -279,7 +281,7 @@ def update_enrollment(enrollment_id: int, status: str, conn=None):
         raise ArchivedScopeError('已归档学期不能修改在班状态')
     conn.execute(
         "UPDATE student_enrollments SET status=?, left_at=?, updated_at=datetime('now','localtime') WHERE id=?",
-        (status, '' if status == '在读' else datetime.now().date().isoformat(), enrollment_id),
+        (status, '' if status == '在读' else clock.today().isoformat(), enrollment_id),
     )
     conn.commit()
 
@@ -307,7 +309,7 @@ def transfer_enrollment(enrollment_id: int, target_class_id: int, target_term_id
         raise ScopeError('目标班级或学期不存在，或已经归档')
     if target_class_id == source_class_id and target_term_id == source_term_id:
         raise ScopeError('目标班级和学期不能与当前相同')
-    today = datetime.now().date().isoformat()
+    today = clock.today().isoformat()
     try:
         conn.execute(
             "UPDATE student_enrollments SET status='转出', left_at=?, updated_at=datetime('now','localtime') WHERE id=?",
@@ -451,6 +453,24 @@ def rollover_term(source_term_id: int, name: str, start_date: str = '', end_date
                SELECT class_id, ?, name, comment_type, content, enabled
                FROM comment_templates
                WHERE term_id=? AND deleted_at='' ''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
+            '''INSERT INTO meeting_templates(
+                   class_id, term_id, name, format, content, enabled
+               )
+               SELECT class_id, ?, name, format, content, enabled
+               FROM meeting_templates
+               WHERE term_id=?''',
+            (term_id, source_term_id),
+        )
+        conn.execute(
+            '''INSERT INTO activity_templates(
+                   class_id, term_id, name, activity_type, description, enabled
+               )
+               SELECT class_id, ?, name, activity_type, description, enabled
+               FROM activity_templates
+               WHERE term_id=?''',
             (term_id, source_term_id),
         )
         conn.execute(

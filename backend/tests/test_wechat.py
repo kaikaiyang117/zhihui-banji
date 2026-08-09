@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 import httpx
@@ -19,6 +20,7 @@ from app.wechat.message_parser import parse_text_messages
 from app.wechat.config import load_config, save_config
 from app.wechat.models import ILinkCredentials, IncomingText
 from app.wechat.service import WeChatService
+from app.services import work_items
 
 
 class WeChatProtocolTest(unittest.TestCase):
@@ -175,3 +177,22 @@ class WeChatProtocolTest(unittest.TestCase):
 
         self.assertEqual(db.load_agent_session('wechat:wx-user'), [])
         self.assertIn('凯凯小兵', sent[0][2])
+
+    def test_due_reminder_is_sent_once_per_task_and_recipient(self):
+        save_config(['wx-user'], False)
+        work_items.create_work_item(title='提醒提交材料', due_at=date.today().isoformat())
+        sent = []
+
+        class FakeClient:
+            async def send_message(self, user_id, context_token, text):
+                sent.append((user_id, context_token, text))
+
+        service = WeChatService()
+        service.client = FakeClient()
+        service.sender_contexts['wx-user'] = 'ctx'
+        first = asyncio.run(service.send_pending_reminders())
+        second = asyncio.run(service.send_pending_reminders())
+        self.assertEqual(first['sent'], 1)
+        self.assertEqual(second['sent'], 0)
+        self.assertEqual(len(sent), 1)
+        self.assertIn('提醒提交材料', sent[0][2])

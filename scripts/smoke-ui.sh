@@ -22,6 +22,7 @@ command -v npx >/dev/null 2>&1 || { echo '需要 Node.js/npm 才能运行浏览�
 
 cd "$PROJECT_ROOT"
 WORKBENCH_DATA_DIR="$DATA_DIR/data" \
+WORKBENCH_BUSINESS_DATE="${WORKBENCH_BUSINESS_DATE-2026-04-15}" \
 "$PYTHON_BIN" backend/run.py --lan --port "$PORT" --no-browser >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -40,6 +41,7 @@ SNAPSHOT="$("${PWCLI[@]}" snapshot 2>&1)"
 printf '%s\n' "$SNAPSHOT"
 grep -q '手机访问' <<< "$SNAPSHOT"
 grep -q '更新' <<< "$SNAPSHOT"
+grep -q '开发日期 2026-04-15' <<< "$SNAPSHOT"
 "${PWCLI[@]}" close >/dev/null 2>&1 || true
 
 echo 'UI smoke test passed.'

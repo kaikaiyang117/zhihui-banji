@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
+from app.agent import actions
 from app.agent.agent_service import invoke_tool, list_audits, list_tools
 from app.agent.model_client import ModelResponse, ModelStreamEvent, ToolCall
 from app.agent.runner import AgentRunner
@@ -38,7 +39,7 @@ class AgentFoundationTest(unittest.TestCase):
         db.DB_PATH, db.DATA_DIR = self.old_path, self.old_data_dir
         self.temp.cleanup()
 
-    def test_registry_exposes_only_read_tools(self):
+    def test_registry_exposes_read_and_confirmation_gated_write_tools(self):
         tools = list_tools()
         self.assertEqual(
             [tool['name'] for tool in tools],
@@ -46,14 +47,25 @@ class AgentFoundationTest(unittest.TestCase):
                 'attendance_summary',
                 'class_student_count',
                 'communications_list',
+                'create_task',
+                'record_communication',
+                'record_points',
+                'save_attendance',
+                'school_calendar_query',
                 'scores_summary',
                 'student_get_profile',
                 'student_get_timeline',
+                'students_aggregate',
+                'students_query',
                 'students_search',
                 'tasks_list',
             ],
         )
-        self.assertTrue(all(tool['read_only'] for tool in tools))
+        self.assertTrue(all(tool['read_only'] for tool in tools if not tool['write_action']))
+        self.assertEqual(
+            {tool['name'] for tool in tools if tool['write_action']},
+            {'create_task', 'record_communication', 'record_points', 'save_attendance'},
+        )
 
     def test_class_student_count(self):
         result = invoke_tool('class_student_count')
@@ -65,6 +77,25 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertIn('exams', invoke_tool('scores_summary'))
         self.assertIn('tasks', invoke_tool('tasks_list'))
         self.assertIn('communications', invoke_tool('communications_list'))
+
+    def test_write_requires_confirmation_backup_and_is_idempotent(self):
+        pending = invoke_tool(
+            'create_task', {'title': '回访学生', 'student_id': 1, 'due_at': '2026-08-12'},
+            channel='web', actor_id='teacher', session_id='web:write-1',
+        )
+        self.assertTrue(pending['confirmation_required'])
+        self.assertEqual(db.get_conn().execute('SELECT COUNT(*) FROM student_tasks').fetchone()[0], 0)
+        handled, answer = actions.handle_confirmation(
+            '确认', session_id='web:write-1', actor_id='teacher', channel='web')
+        self.assertTrue(handled)
+        self.assertIn('待办已创建', answer)
+        row = db.get_conn().execute('SELECT * FROM student_tasks').fetchone()
+        self.assertEqual(row['title'], '回访学生')
+        action = db.get_conn().execute('SELECT * FROM agent_actions').fetchone()
+        repeated = actions.confirm(action['id'], session_id='web:write-1', actor_id='teacher')
+        self.assertTrue(repeated['duplicate'])
+        self.assertTrue(action['backup_file'] or db.get_conn().execute(
+            'SELECT backup_file FROM agent_actions WHERE id=?', (action['id'],)).fetchone()['backup_file'])
 
     def test_search_and_profile_are_audited(self):
         result = invoke_tool('students_search', {'keyword': '张'})
@@ -78,6 +109,134 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(audits[0]['actor_id'], 'teacher')
         self.assertEqual(audits[0]['status'], 'success')
         self.assertIsInstance(audits[0]['arguments'], dict)
+
+    def test_students_query_returns_selected_safe_fields(self):
+        db.get_conn().execute(
+            'UPDATE students SET 监护人职业=?, 监护人电话=?, 家庭住址=? WHERE id=?',
+            ('教师', '13800000000', '测试地址', 1),
+        )
+        db.get_conn().commit()
+        result = invoke_tool('students_query', {
+            'fields': ['student_no', 'student_name', 'guardian_occupation'],
+            'limit': 100,
+        })
+        self.assertEqual(result['fields'], ['student_no', 'student_name', 'guardian_occupation'])
+        self.assertEqual(result['students'][0]['监护人职业'], '教师')
+        self.assertNotIn('监护人电话', result['students'][0])
+        self.assertNotIn('家庭住址', result['students'][0])
+
+    def test_students_aggregate_groups_guardian_occupations(self):
+        db.get_conn().execute(
+            'UPDATE students SET 监护人职业=? WHERE id=?',
+            ('教师', 1),
+        )
+        db.get_conn().execute(
+            'UPDATE students SET 监护人职业=? WHERE id=?',
+            ('个体经营', 2),
+        )
+        db.get_conn().commit()
+        result = invoke_tool('students_aggregate', {
+            'group_by': 'guardian_occupation',
+            'include_empty': True,
+            'include_students': True,
+        })
+        self.assertEqual(result['student_count'], 2)
+        self.assertEqual(
+            [(item['value'], item['count']) for item in result['groups']],
+            [('个体经营', 1), ('教师', 1)],
+        )
+        self.assertEqual(result['groups'][0]['students'][0]['姓名'], '李四')
+
+    def test_student_query_rejects_unapproved_fields(self):
+        with self.assertRaises(ToolError) as error:
+            invoke_tool('students_query', {'fields': ['家庭住址']})
+        self.assertEqual(error.exception.code, 'invalid_arguments')
+
+    def test_planner_uses_batch_query_for_parent_occupation(self):
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('已整理全班学生家长职业。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'batch-parent-occupation-session', '查看所有学生家长的职业',
+            channel='web', actor_id='web-user',
+        ))
+        self.assertEqual(answer, '已整理全班学生家长职业。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual(tool_calls[0]['function']['name'], 'students_query')
+        arguments = json.loads(tool_calls[0]['function']['arguments'])
+        self.assertEqual(arguments['fields'], ['student_no', 'student_name', 'guardian_occupation'])
+
+    def test_planner_uses_batch_query_for_all_student_names(self):
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('共有 2 名学生。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'batch-student-names-session', '查看所有的学生姓名',
+            channel='web', actor_id='web-user',
+        ))
+        self.assertEqual(answer, '共有 2 名学生。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual(tool_calls[0]['function']['name'], 'students_query')
+        arguments = json.loads(tool_calls[0]['function']['arguments'])
+        self.assertEqual(arguments['fields'], ['student_no', 'student_name'])
+
+    def test_planner_filters_walk_in_students(self):
+        db.get_conn().execute('UPDATE students SET 是否住校=? WHERE id=?', ('走读', 1))
+        db.get_conn().execute('UPDATE students SET 是否住校=? WHERE id=?', ('住校', 2))
+        db.get_conn().commit()
+
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('已查询走读学生。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'boarding-filter-session', '统计所有走读学生',
+            channel='web', actor_id='web-user',
+        ))
+        self.assertEqual(answer, '已查询走读学生。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual(tool_calls[0]['function']['name'], 'students_query')
+        arguments = json.loads(tool_calls[0]['function']['arguments'])
+        self.assertEqual(arguments['boarding_status'], '走读')
+        tool_result = next(message for message in model.messages if message.get('role') == 'tool')
+        self.assertEqual(json.loads(tool_result['content'])['total_count'], 1)
+
+    def test_planner_uses_aggregate_for_parent_occupation_distribution(self):
+        class FakeModel:
+            def __init__(self):
+                self.messages = None
+
+            async def complete(self, messages, _tools):
+                self.messages = messages
+                return ModelResponse('已统计全班家长职业分布。', [])
+
+        model = FakeModel()
+        answer = asyncio.run(AgentRunner(model_client=model).chat(
+            'aggregate-parent-occupation-session', '统计全班家长职业分布',
+            channel='web', actor_id='web-user',
+        ))
+        self.assertEqual(answer, '已统计全班家长职业分布。')
+        tool_calls = next(message['tool_calls'] for message in model.messages if message.get('tool_calls'))
+        self.assertEqual(tool_calls[0]['function']['name'], 'students_aggregate')
+        arguments = json.loads(tool_calls[0]['function']['arguments'])
+        self.assertEqual(arguments['group_by'], 'guardian_occupation')
 
     def test_unknown_tool_is_rejected_and_audited(self):
         with self.assertRaises(ToolError):
@@ -345,6 +504,8 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertEqual(events[1]['status'], 'running')
         self.assertEqual(events[2]['status'], 'completed')
         self.assertEqual(events[-1], {'type': 'delta', 'content': '已完成查询。'})
+        history = SessionStore().load('planned-stream-session')
+        self.assertEqual(history[-1], {'role': 'assistant', 'content': '已完成查询。'})
 
     def test_session_store_keeps_tool_messages_with_their_call(self):
         store = SessionStore(max_messages=8)

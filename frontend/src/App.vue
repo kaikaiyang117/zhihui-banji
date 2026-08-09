@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, nextTick, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
 import QRCode from 'qrcode'
@@ -28,6 +28,8 @@ const accessLoading = ref(false)
 const accessError = ref('')
 const accessBlocked = ref(false)
 const updateOpen = ref(false)
+const runtime = ref(null)
+const contextVersion = ref(0)
 const agentOpen = ref(false)
 const agentInput = ref('')
 const agentMessages = ref([])
@@ -36,6 +38,11 @@ const agentError = ref('')
 const agentPlanIndex = ref(-1)
 const agentBody = ref(null)
 const agentInputEl = ref(null)
+const agentFabEl = ref(null)
+const accessDialogEl = ref(null)
+const accessCloseEl = ref(null)
+const accessTriggerEl = ref(null)
+let accessPreviousActiveEl = null
 const agentSuggestions = [
   '我们班有多少名学生？',
   '查询张三的基本信息',
@@ -55,7 +62,7 @@ function getWebAgentSessionId() {
   }
 }
 
-const agentSessionId = getWebAgentSessionId()
+const agentSessionId = ref(getWebAgentSessionId())
 
 function itemTo(item) {
   return activeTab.value === 'teacher' ? '/' + item.page : '/p/' + item.page
@@ -66,6 +73,10 @@ function isActive(item) {
 }
 function tabTo(tab) {
   return tab.key === 'teacher' ? '/dashboard' : '/p/health'
+}
+
+function handleContextChange() {
+  contextVersion.value += 1
 }
 
 async function runSearch() {
@@ -105,9 +116,46 @@ async function loadAccessInfo() {
   }
 }
 
+async function loadRuntime() {
+  try { runtime.value = await get('/api/system/runtime') } catch { runtime.value = null }
+}
+
 async function openAccessDialog() {
+  accessPreviousActiveEl = document.activeElement
   accessOpen.value = true
   await refreshPairing()
+  await nextTick()
+  accessCloseEl.value?.focus()
+}
+
+function closeAccessDialog() {
+  accessOpen.value = false
+  nextTick(() => {
+    if (accessPreviousActiveEl && typeof accessPreviousActiveEl.focus === 'function') accessPreviousActiveEl.focus()
+    else accessTriggerEl.value?.focus()
+    accessPreviousActiveEl = null
+  })
+}
+
+function handleAccessDialogKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeAccessDialog()
+    return
+  }
+  if (event.key !== 'Tab' || !accessDialogEl.value) return
+  const focusable = [...accessDialogEl.value.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')]
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 async function refreshPairing() {
@@ -210,6 +258,22 @@ function useAgentSuggestion(message) {
   nextTick(() => agentInputEl.value?.focus())
 }
 
+function openAgentChat() {
+  agentOpen.value = true
+  nextTick(() => agentInputEl.value?.focus())
+}
+
+function closeAgentChat() {
+  agentOpen.value = false
+  nextTick(() => agentFabEl.value?.focus())
+}
+
+function handleAgentDialogKeydown(event) {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  closeAgentChat()
+}
+
 async function sendAgentMessage() {
   const message = agentInput.value.trim()
   if (!message || agentSending.value) return
@@ -221,7 +285,7 @@ async function sendAgentMessage() {
   let assistantIndex = -1
   try {
     await streamPost('/api/agent/chat/stream', {
-      session_id: agentSessionId,
+      session_id: agentSessionId.value,
       message,
       channel: 'web',
       actor_id: 'web-user',
@@ -261,7 +325,7 @@ function handleAgentKeydown(event) {
 async function resetAgentSession() {
   if (agentSending.value) return
   try {
-    await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}`)
+    await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
     agentMessages.value = []
     agentPlanIndex.value = -1
     agentError.value = ''
@@ -271,7 +335,39 @@ async function resetAgentSession() {
   }
 }
 
-onMounted(loadAccessInfo)
+async function loadAgentHistory() {
+  try {
+    const data = await get(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
+    agentMessages.value = (data.messages || []).map(item => ({ role: item.role, content: item.content }))
+    scrollAgentToBottom()
+  } catch (error) {
+    agentError.value = error.message || '历史会话加载失败。'
+  }
+}
+
+async function switchAgentSession(event) {
+  const sessionId = String(event.detail?.sessionId || '')
+  if (!sessionId.startsWith('web:') || sessionId === agentSessionId.value || agentSending.value) return
+  window.localStorage.setItem('meimei_agent_web_session_id', sessionId)
+  agentSessionId.value = sessionId
+  agentMessages.value = []
+  agentPlanIndex.value = -1
+  agentError.value = ''
+  await loadAgentHistory()
+}
+
+onMounted(async () => {
+  window.addEventListener('meimei-agent-session-change', switchAgentSession)
+  window.addEventListener('workbench-context-change', handleContextChange)
+  await loadRuntime()
+  await loadAccessInfo()
+  await loadAgentHistory()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('meimei-agent-session-change', switchAgentSession)
+  window.removeEventListener('workbench-context-change', handleContextChange)
+})
 </script>
 
 <template>
@@ -283,6 +379,7 @@ onMounted(loadAccessInfo)
         <span>{{ tab.title }}</span>
       </router-link>
       <ContextSwitcher v-if="activeTab === 'teacher'" />
+      <span v-if="runtime?.business_date_overridden" class="runtime-date-badge">开发日期 {{ runtime.business_date }}</span>
       <div class="global-search">
         <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
         <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
@@ -295,7 +392,7 @@ onMounted(loadAccessInfo)
           </button>
         </div>
       </div>
-      <button v-if="accessInfo?.enabled && accessInfo?.can_manage" class="access-button" type="button" aria-label="显示手机访问二维码" @click="openAccessDialog">
+      <button v-if="accessInfo?.enabled && accessInfo?.can_manage" ref="accessTriggerEl" class="access-button" type="button" aria-label="显示手机访问二维码" @click="openAccessDialog">
         <component :is="renderIcon('Wifi')" :size="16" />
         <span>手机访问</span>
       </button>
@@ -318,14 +415,14 @@ onMounted(loadAccessInfo)
         <button class="btn btn-primary" type="button" @click="loadAccessInfo">重新检查</button>
       </section>
     </div>
-    <div v-if="accessOpen" class="access-scrim" @click.self="accessOpen = false">
-      <section class="access-dialog" role="dialog" aria-modal="true" aria-labelledby="access-title">
+    <div v-if="accessOpen" class="access-scrim" @click.self="closeAccessDialog">
+      <section ref="accessDialogEl" class="access-dialog" role="dialog" aria-modal="true" aria-labelledby="access-title" tabindex="-1" @keydown="handleAccessDialogKeydown">
         <div class="access-dialog-head">
           <div>
             <div id="access-title" class="access-title">手机 / 平板访问</div>
             <div class="access-subtitle">连接同一 Wi-Fi 后，用相机扫描短时配对二维码</div>
           </div>
-          <button class="icon-button" type="button" aria-label="关闭二维码" @click="accessOpen = false">
+          <button ref="accessCloseEl" class="icon-button" type="button" aria-label="关闭二维码" @click="closeAccessDialog">
             <component :is="renderIcon('X')" :size="18" />
           </button>
         </div>
@@ -355,11 +452,11 @@ onMounted(loadAccessInfo)
       </section>
     </div>
     <div class="agent-float" :class="{ 'is-open': agentOpen }">
-      <button v-if="!agentOpen" class="agent-fab" type="button" aria-label="打开凯凯小兵对话" @click="agentOpen = true">
+      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开凯凯小兵对话" @click="openAgentChat">
         <MessageCircle :size="19" :stroke-width="2.2" />
         <span>凯凯小兵</span>
       </button>
-      <section v-else class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title">
+      <section v-else class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title" @keydown="handleAgentDialogKeydown">
         <header class="agent-chat-head">
           <div class="agent-chat-identity">
             <div>
@@ -371,7 +468,7 @@ onMounted(loadAccessInfo)
             <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话" @click="resetAgentSession">
               <RefreshCw :size="16" />
             </button>
-            <button class="agent-icon-button" type="button" aria-label="收起凯凯小兵" title="收起" @click="agentOpen = false">
+            <button class="agent-icon-button" type="button" aria-label="收起凯凯小兵" title="收起" @click="closeAgentChat">
               <component :is="renderIcon('X')" :size="17" />
             </button>
           </div>
@@ -443,7 +540,7 @@ onMounted(loadAccessInfo)
       <main class="main">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
-            <component :is="Component" />
+          <component :is="Component" :key="`${route.fullPath}:${contextVersion}`" />
           </transition>
         </router-view>
       </main>
@@ -472,8 +569,9 @@ onMounted(loadAccessInfo)
   opacity: 0;
 }
 
-.global-search { position: relative; margin-left: auto; width: min(300px, 32vw); }
-.global-search input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.72); padding: 9px 32px 9px 14px; color: var(--text); outline: none; transition: border-color .2s, box-shadow .2s; }
+.runtime-date-badge { align-self: center; padding: 4px 8px; border: 1px solid rgba(91,106,191,.2); border-radius: 999px; background: var(--primary-bg); color: var(--primary); font-size: 10px; white-space: nowrap; }
+.global-search { position: relative; align-self: center; min-width: 0; margin-left: auto; width: min(300px, 32vw); }
+.global-search input { width: 100%; height: 34px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.72); padding: 0 32px 0 14px; color: var(--text); outline: none; transition: border-color .2s, box-shadow .2s; }
 .global-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.12); }
 .search-clear { position: absolute; right: 10px; top: 6px; border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
 .search-popover { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; right: 0; max-height: 360px; overflow: auto; padding: 7px; background: rgba(255,255,255,.96); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 14px 36px rgba(25,35,65,.14); }
@@ -681,15 +779,19 @@ onMounted(loadAccessInfo)
 @keyframes agent-panel-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes agent-thinking-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
 
+@media (min-width: 641px) and (max-width: 1100px) {
+  .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
+  .global-search input { min-height: 40px; }
+}
+
 @media (max-width: 760px) {
-  .global-search { width: 42vw; }
   .global-search input { font-size: 12px; }
 }
 
 @media (max-width: 640px) {
   .top-tabs { height: auto; min-height: 52px; flex-wrap: wrap; gap: 2px; }
   .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
-  .global-search input { min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
+  .global-search input { height: 40px; min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
   .search-popover { position: fixed; top: 96px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
   .access-button { margin-left: auto; padding: 0 10px; }
   .access-button span { display: none; }
@@ -700,7 +802,9 @@ onMounted(loadAccessInfo)
   .access-scrim { align-items: end; padding: 0; }
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); }
-  .agent-chat-panel { width: calc(100vw - 24px); height: min(600px, calc(100vh - 24px)); border-radius: 20px; }
+  .agent-float.is-open { right: 0; bottom: 0; width: 100%; }
+  .agent-chat-panel { width: 100%; height: min(680px, calc(100vh - 12px)); border-radius: 20px 20px 0 0; }
+  .agent-chat-foot { padding-bottom: calc(13px + env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -715,5 +819,6 @@ onMounted(loadAccessInfo)
 @media (prefers-reduced-transparency: reduce) {
   .access-scrim { background: rgba(20, 24, 38, .42); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .access-dialog { background: #fff; }
+  .agent-chat-panel, .agent-chat-head, .agent-chat-foot { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 </style>

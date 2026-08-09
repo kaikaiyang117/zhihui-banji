@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import asyncio
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -62,6 +63,7 @@ class ModelResponse:
     content: str
     tool_calls: list[ToolCall]
     reasoning_content: str = ''
+    usage: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -103,20 +105,35 @@ class OpenAICompatibleClient:
         if owns_client:
             client = httpx.AsyncClient(timeout=self.config.timeout_seconds)
         try:
-            response = await client.post(
-                f'{self.config.base_url}/chat/completions',
-                headers=headers,
-                json=payload,
-            )
-            if response.status_code >= 400:
-                raise ModelError(f'模型接口返回 HTTP {response.status_code}: {_error_text(response)}')
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise ModelError('模型接口返回了无效 JSON') from exc
-            return _parse_response(data)
-        except httpx.HTTPError as exc:
-            raise ModelError(f'模型网络请求失败：{exc}') from exc
+            for attempt in range(2):
+                try:
+                    response = await client.post(
+                        f'{self.config.base_url}/chat/completions',
+                        headers=headers,
+                        json=payload,
+                    )
+                    if response.status_code >= 400:
+                        message = f'模型接口返回 HTTP {response.status_code}: {_error_text(response)}'
+                        if response.status_code in {408, 429} or response.status_code >= 500:
+                            if attempt == 0:
+                                await asyncio.sleep(0.35)
+                                continue
+                        raise ModelError(message)
+                    try:
+                        data = response.json()
+                    except ValueError as exc:
+                        if attempt == 0:
+                            await asyncio.sleep(0.15)
+                            continue
+                        raise ModelError('模型接口返回了无效 JSON') from exc
+                    return _parse_response(data)
+                except httpx.HTTPError as exc:
+                    if attempt == 0:
+                        await asyncio.sleep(0.35)
+                        continue
+                    raise ModelError(f'模型网络请求失败：{exc}') from exc
+        except ModelError:
+            raise
         finally:
             if owns_client:
                 await client.aclose()
@@ -137,6 +154,7 @@ class OpenAICompatibleClient:
             'temperature': 0.2,
             'thinking': {'type': self.config.thinking},
             'stream': True,
+            'stream_options': {'include_usage': True},
         }
         if tools:
             payload['tools'] = tools
@@ -153,6 +171,7 @@ class OpenAICompatibleClient:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls: dict[int, dict[str, str]] = {}
+        usage: dict[str, int] = {}
         try:
             async with client.stream(
                 'POST',
@@ -175,6 +194,9 @@ class OpenAICompatibleClient:
                         data = json.loads(raw)
                     except ValueError:
                         continue
+                    if isinstance(data.get('usage'), dict):
+                        usage = {key: int(value or 0) for key, value in data['usage'].items()
+                                 if key in {'prompt_tokens', 'completion_tokens', 'total_tokens'}}
                     delta = ((data.get('choices') or [{}])[0].get('delta') or {})
                     content = str(delta.get('content') or '')
                     if content:
@@ -202,6 +224,7 @@ class OpenAICompatibleClient:
             content=parsed_content,
             tool_calls=[ToolCall(**tool_calls[index]) for index in sorted(tool_calls)] + dsml_tool_calls,
             reasoning_content=''.join(reasoning_parts),
+            usage=usage or None,
         ))
 
 
@@ -224,6 +247,8 @@ def _parse_response(data: dict[str, Any]) -> ModelResponse:
         content=str(content),
         tool_calls=calls + dsml_tool_calls,
         reasoning_content=str(reasoning_content),
+        usage={key: int(value or 0) for key, value in (data.get('usage') or {}).items()
+               if key in {'prompt_tokens', 'completion_tokens', 'total_tokens'}} or None,
     )
 
 

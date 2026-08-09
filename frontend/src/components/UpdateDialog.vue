@@ -1,5 +1,5 @@
 <script setup>
-import { onUnmounted, ref, watch } from 'vue'
+import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { CheckCircle, Download, ExternalLink, LoaderCircle, RefreshCw, X } from 'lucide-vue-next'
 import { get, post } from '../api'
 
@@ -11,6 +11,9 @@ const result = ref(null)
 const updateStatus = ref(null)
 const errorMessage = ref('')
 let pollTimer = null
+const dialog = ref(null)
+const closeButton = ref(null)
+let previousActiveEl = null
 
 function clearPoll() {
   if (pollTimer) window.clearTimeout(pollTimer)
@@ -56,11 +59,41 @@ async function installUpdate() {
 function close() {
   clearPoll()
   emit('close')
+  nextTick(() => {
+    if (previousActiveEl?.isConnected && typeof previousActiveEl.focus === 'function') previousActiveEl.focus()
+    previousActiveEl = null
+  })
+}
+
+function handleDialogKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    close()
+    return
+  }
+  if (event.key !== 'Tab' || !dialog.value) return
+  const focusable = [...dialog.value.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')]
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 watch(() => props.open, value => {
-  if (value) checkUpdate()
-  else clearPoll()
+  if (value) {
+    previousActiveEl = document.activeElement
+    checkUpdate()
+    nextTick(() => closeButton.value?.focus())
+  } else {
+    clearPoll()
+  }
 })
 
 onUnmounted(clearPoll)
@@ -68,13 +101,13 @@ onUnmounted(clearPoll)
 
 <template>
   <div v-if="open" class="update-scrim" @click.self="close">
-    <section class="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
+    <section ref="dialog" class="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title" tabindex="-1" @keydown="handleDialogKeydown">
       <div class="update-dialog-head">
         <div>
           <div id="update-title" class="update-title">软件更新</div>
           <div class="update-subtitle">保持工作台处于最新状态</div>
         </div>
-        <button class="icon-button" type="button" aria-label="关闭更新窗口" @click="close">
+        <button ref="closeButton" class="icon-button" type="button" aria-label="关闭更新窗口" @click="close">
           <X :size="18" />
         </button>
       </div>

@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .. import db
+from .. import clock
 from ..config import APP_VERSION, IS_FROZEN, RESOURCE_ROOT, UPDATE_API_URL, UPDATE_MANIFEST_URL
 from ..services import devices
 
@@ -33,6 +34,12 @@ _update_state = {
     'error': '',
     'asset_name': '',
 }
+
+
+@router.get('/runtime')
+def runtime():
+    """返回当前业务日期；仅开发/测试通过环境变量覆盖。"""
+    return clock.runtime()
 
 
 @router.get('/access-info')

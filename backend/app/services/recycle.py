@@ -25,6 +25,9 @@ OBJECTS = {
     'score_rule': {'table': 'score_rules', 'label': ('name',), 'scoped': True},
     'class_task': {'table': 'class_tasks', 'label': ('title',), 'scoped': True},
     'duty_assignment': {'table': 'duty_assignments', 'label': ('duty_date', 'area'), 'scoped': True},
+    'meeting': {'table': 'meeting_records', 'label': ('held_on', 'topic'), 'scoped': True},
+    'activity': {'table': 'activity_records', 'label': ('occurred_on', 'name'), 'scoped': True},
+    'diary': {'table': 'diary_entries', 'label': ('diary_date', 'work'), 'scoped': True},
 }
 
 _write_lock = threading.RLock()
@@ -82,13 +85,20 @@ def soft_delete(object_type: str, object_id: int, *, conn=None, commit: bool = T
         linked_ids = []
         if object_type in {
             'event', 'focus', 'communication', 'attendance_rule', 'score_rule',
-            'class_task', 'duty_assignment',
+            'class_task', 'duty_assignment', 'activity', 'meeting',
         }:
-            linked_ids = [int(item['id']) for item in conn.execute(
-                "SELECT id FROM student_tasks WHERE class_id=? AND term_id=? "
-                "AND source_type=? AND source_id=? AND deleted_at=''",
-                (class_id, term_id, object_type, object_id),
-            ).fetchall()]
+            if object_type == 'meeting':
+                linked_ids = [int(item['id']) for item in conn.execute(
+                    '''SELECT t.id FROM student_tasks t JOIN meeting_actions a ON a.work_item_id=t.id
+                       WHERE a.meeting_id=? AND t.class_id=? AND t.term_id=? AND t.deleted_at='' ''',
+                    (object_id, class_id, term_id),
+                ).fetchall()]
+            else:
+                linked_ids = [int(item['id']) for item in conn.execute(
+                    "SELECT id FROM student_tasks WHERE class_id=? AND term_id=? "
+                    "AND source_type=? AND source_id=? AND deleted_at=''",
+                    (class_id, term_id, object_type, object_id),
+                ).fetchall()]
             if linked_ids:
                 row['__linked_work_items'] = linked_ids
         try:

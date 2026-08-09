@@ -70,10 +70,14 @@ export MEIMEI_WECHAT_ENABLED=true
 ```bash
 curl -H "Content-Type: application/json" \
   -X POST http://127.0.0.1:5000/api/agent/chat \
-  -d '{"session_id":"local:me","message":"查询张三的基本信息"}'
+  -d '{"session_id":"web:local-user:main","message":"查询张三的基本信息"}'
 ```
 
-第一版只开放查询工具，不开放修改、删除、批量导入和数据库恢复。当前查询工具包括学生搜索、学生档案、学生时间线、班级学生总人数、考勤、成绩、待办和家校沟通；询问“班级有多少人”“学生总数”等问题时会直接查询数据库，不依赖此前的聊天上下文。
+当前 Agent 同时提供查询工具和四个低风险确认写工具。查询工具包括学生搜索、批量学生字段查询、学生分布聚合、学生档案、学生时间线、班级学生总人数、考勤、成绩、待办和家校沟通；询问“所有学生家长的职业”“家长职业分布”等问题时，会在服务端一次批量查询或聚合，不要求模型逐个读取学生档案。写工具包括创建待办、记录家校沟通、保存单条考勤和记录行为积分。
+
+批量学生查询只允许字段白名单，当前支持学号、姓名、性别、出生年月、民族、监护人姓名、监护人职业、第二监护人姓名/关系、是否住校、特长和班级任职，不返回监护人电话、家庭住址或备注。当前学生表只有“监护人1职业”字段，暂未提供“监护人2职业”字段。
+
+写操作不会直接执行：Agent 先生成包含参数的操作预览，用户明确回复“确认”后才执行，回复“取消”则放弃。确认有效期为 10 分钟，确认内容会与参数绑定；写入前自动创建 SQLite 备份，并记录操作审计。当前仍不开放删除、批量写入、数据库恢复和敏感字段写入。
 
 微信中可以使用以下命令管理当前用户的对话上下文：
 
@@ -88,11 +92,17 @@ curl -H "Content-Type: application/json" \
 
 ```text
 GET  /api/agent/status
+GET  /api/agent/config
+PUT  /api/agent/config
 GET  /api/wechat/status
 GET  /api/wechat/config
 PUT  /api/wechat/config
 GET  /api/agent/tools
 GET  /api/agent/audit
+GET  /api/agent/usage
+GET  /api/agent/actions/pending?session_id=...
+POST /api/agent/actions/{action_id}/confirm
+POST /api/agent/actions/{action_id}/cancel
 ```
 
-微信消息会按 `wechat:<from_user_id>` 保存 Agent 会话，iLink 的 `get_updates_buf` 和消息 ID 也会保存到 SQLite，避免程序重启后重复处理消息。
+网页端使用 `web:{用户}:{会话}` 保存会话；微信端按 `wechat:<from_user_id>` 保存每个微信用户的主会话。两个渠道不会共享会话 ID。iLink 的 `get_updates_buf` 和消息 ID 也会保存到 SQLite，避免程序重启后重复处理消息。

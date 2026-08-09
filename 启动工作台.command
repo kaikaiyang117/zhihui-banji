@@ -45,6 +45,16 @@ fi
 # 首次运行没有凭证，不会发起登录，也不会阻止工作台启动。
 export MEIMEI_WECHAT_ENABLED="${MEIMEI_WECHAT_ENABLED:-true}"
 
+# 开发/测试默认使用学期内的正常上课日；显式设置为空可恢复真实系统日期。
+if [ -z "${WORKBENCH_BUSINESS_DATE+x}" ]; then
+  export WORKBENCH_BUSINESS_DATE="2026-04-15"
+fi
+if [ -n "$WORKBENCH_BUSINESS_DATE" ]; then
+  echo "  开发业务日期：$WORKBENCH_BUSINESS_DATE"
+else
+  echo "  开发业务日期：使用系统日期"
+fi
+
 if [ "$MEIMEI_WECHAT_ENABLED" = "true" ]; then
   echo "  已开启微信消息循环自动恢复"
 else

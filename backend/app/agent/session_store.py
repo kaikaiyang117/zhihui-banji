@@ -14,11 +14,19 @@ class SessionStore:
     def load(self, session_id: str) -> list[dict[str, Any]]:
         return _compact_messages(db.load_agent_session(session_id), self.max_messages)
 
-    def save(self, session_id: str, messages: list[dict[str, Any]]):
-        db.save_agent_session(session_id, _compact_messages(messages, self.max_messages))
+    def save(self, session_id: str, messages: list[dict[str, Any]], title: str | None = None):
+        title = title or next((str(item.get('content') or '').strip()[:40]
+                               for item in messages if item.get('role') == 'user'), '新会话')
+        db.save_agent_session(session_id, _compact_messages(messages, self.max_messages), title=title)
 
     def clear(self, session_id: str):
         db.delete_agent_session(session_id)
+
+    def list(self, prefix: str = ''):
+        return db.list_agent_sessions(prefix)
+
+    def rename(self, session_id: str, title: str):
+        return db.rename_agent_session(session_id, title)
 
 
 def _compact_messages(messages: list[dict[str, Any]], max_messages: int) -> list[dict[str, Any]]:
@@ -57,7 +65,12 @@ def _compact_messages(messages: list[dict[str, Any]], max_messages: int) -> list
         break
 
     compacted = [message for turn in selected for message in turn]
-    return ([system] if system else []) + compacted
+    dropped = turns[:max(0, len(turns) - len(selected))]
+    summary = _context_summary(dropped)
+    prefix = ([system] if system else [])
+    if summary:
+        prefix.append({'role': 'system', 'content': summary, 'context_summary': True})
+    return prefix + compacted
 
 
 def _shrink_turn(turn: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -71,3 +84,18 @@ def _shrink_turn(turn: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if user and final:
         return [user, final]
     return [user] if user else []
+
+
+def _context_summary(turns: list[list[dict[str, Any]]]) -> str:
+    if not turns:
+        return ''
+    lines = []
+    for turn in turns[-8:]:
+        user = next((str(item.get('content') or '').strip() for item in turn if item.get('role') == 'user'), '')
+        answer = next((str(item.get('content') or '').strip() for item in reversed(turn) if item.get('role') == 'assistant' and not item.get('tool_calls')), '')
+        if user:
+            line = f'用户：{user[:180]}'
+            if answer:
+                line += f'；助手结论：{answer[:240]}'
+            lines.append(line)
+    return '历史上下文摘要（由本地会话压缩生成，仅保留用户问题和助手结论）：\n' + '\n'.join(lines) if lines else ''

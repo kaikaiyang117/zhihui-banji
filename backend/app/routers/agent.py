@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..agent.agent_service import invoke_tool, list_audits, list_tools
+from ..agent.agent_service import invoke_tool, list_audits, list_tools, usage_stats
+from ..agent import actions
 from ..agent.model_config import load_local_config, public_config, save_local_config
 from ..agent.model_client import ModelError, ModelConfig
 from ..agent.runner import AgentRunner
@@ -30,6 +31,17 @@ class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     channel: str = 'local'
     actor_id: str = ''
+
+
+class ActionConfirmBody(BaseModel):
+    session_id: str = Field(min_length=1, max_length=120)
+    actor_id: str = ''
+    channel: str = 'web'
+    confirmation_token: str = ''
+
+
+class SessionRenameBody(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class ModelConfigBody(BaseModel):
@@ -153,6 +165,62 @@ def clear_agent_session(session_id: str):
     return {'ok': True}
 
 
+@router.get('/sessions')
+def list_agent_sessions(prefix: str = ''):
+    return {'sessions': SessionStore().list(prefix)}
+
+
+@router.put('/sessions/{session_id}')
+def rename_agent_session(session_id: str, body: SessionRenameBody):
+    try:
+        return {'ok': True, **SessionStore().rename(session_id, body.title)}
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get('/sessions/{session_id}')
+def get_agent_session(session_id: str):
+    messages = SessionStore().load(session_id)
+    visible = [
+        {'role': item.get('role'), 'content': item.get('content', '')}
+        for item in messages
+        if item.get('role') in {'user', 'assistant'} and item.get('content') and not item.get('tool_calls')
+    ]
+    return {'session_id': session_id, 'messages': visible}
+
+
+@router.get('/actions/pending')
+def pending_action(session_id: str = Query(..., min_length=1, max_length=120), actor_id: str = 'local-user'):
+    return {'action': actions.pending_for_session(session_id, actor_id)}
+
+
+@router.post('/actions/{action_id}/confirm')
+def confirm_action(action_id: int, body: ActionConfirmBody):
+    try:
+        result = actions.confirm(
+            action_id, session_id=body.session_id, actor_id=body.actor_id,
+            token=body.confirmation_token,
+        )
+        return {'ok': True, **result}
+    except actions.ActionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/actions/{action_id}/cancel')
+def cancel_action(action_id: int, body: ActionConfirmBody):
+    try:
+        return {'ok': True, **actions.cancel(
+            action_id, session_id=body.session_id, actor_id=body.actor_id,
+        )}
+    except actions.ActionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get('/audit')
 def agent_audit(limit: int = Query(50, ge=1, le=200)):
     return {'audits': list_audits(limit)}
+
+
+@router.get('/usage')
+def agent_usage():
+    return usage_stats()

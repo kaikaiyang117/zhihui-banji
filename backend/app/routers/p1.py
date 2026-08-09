@@ -124,6 +124,8 @@ class ScoreSubjectBody(BaseModel):
     full_score: float = Field(default=0, ge=0)
     enabled: bool = True
     sort_order: int = 0
+    subject_group: str = '必考'
+    score_type: str = '原始分'
 
 
 class ScoreSubjectUpdate(BaseModel):
@@ -131,6 +133,8 @@ class ScoreSubjectUpdate(BaseModel):
     full_score: Optional[float] = Field(default=None, ge=0)
     enabled: Optional[bool] = None
     sort_order: Optional[int] = None
+    subject_group: Optional[str] = None
+    score_type: Optional[str] = None
 
 
 class ScoreExamBody(BaseModel):
@@ -167,6 +171,30 @@ def edit_score_subject(subject_id: int, body: ScoreSubjectUpdate):
     try:
         return scores_service.update_subject(
             subject_id, **body.model_dump(exclude_none=True))
+    except scores_service.ScoreError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class ScoreSettingsBody(BaseModel):
+    mode: str = '固定科目'
+
+
+class StudentScoreSubjectsBody(BaseModel):
+    subject_ids: list[int] = []
+
+
+@router.put('/score-config/settings')
+def edit_score_settings(body: ScoreSettingsBody):
+    try:
+        return scores_service.update_term_settings(mode=body.mode)
+    except scores_service.ScoreError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put('/score-config/students/{student_id}/subjects')
+def edit_student_score_subjects(student_id: int, body: StudentScoreSubjectsBody):
+    try:
+        return scores_service.save_student_subjects(student_id, body.subject_ids)
     except scores_service.ScoreError as exc:
         raise HTTPException(400, str(exc)) from exc
 

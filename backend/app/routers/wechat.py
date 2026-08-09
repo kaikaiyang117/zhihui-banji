@@ -62,3 +62,11 @@ async def start_loop():
 async def stop_loop():
     await wechat_service.stop()
     return {'running': False}
+
+
+@router.post('/reminders/send')
+async def send_reminders():
+    try:
+        return await wechat_service.send_pending_reminders()
+    except Exception as exc:
+        raise HTTPException(400, f'微信提醒发送失败：{exc}') from exc

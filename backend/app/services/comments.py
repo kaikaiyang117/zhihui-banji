@@ -195,8 +195,10 @@ def create_template(*, name: str, comment_type: str = '学期评语', content: s
                      params={'name': name, 'comment_type': comment_type, 'variables': extract_variables(content)},
                      class_id=class_id, term_id=term_id, conn=conn, commit=False)
         conn.commit()
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        if 'UNIQUE constraint failed' in str(exc):
+            raise CommentError('当前班级与学期已有同名评语模板') from exc
         raise
     return _template_row(template_id, conn=conn)
 
@@ -225,8 +227,10 @@ def update_template(template_id: int, *, name: str | None = None, comment_type: 
         audit.record('comment_template', template_id, 'update', summary=f"更新评语模板：{values['name']}",
                      params=values, conn=conn, commit=False)
         conn.commit()
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        if 'UNIQUE constraint failed' in str(exc):
+            raise CommentError('当前班级与学期已有同名评语模板') from exc
         raise
     return _template_row(template_id, conn=conn)
 
@@ -645,7 +649,12 @@ def student_comment_summary(student_id: int, *, conn=None) -> dict:
     conn = _conn(conn)
     _student_row(student_id, conn=conn)
     rows = list_comments(student_id=student_id, limit=100, conn=conn)
-    return {'comments': rows, 'latest': rows[0] if rows else None}
+    latest = max(
+        rows,
+        key=lambda item: (str(item.get('updated_at') or item.get('created_at') or ''), int(item['id'])),
+        default=None,
+    )
+    return {'comments': rows, 'latest': latest}
 
 
 def evaluate_startup(*, conn=None):

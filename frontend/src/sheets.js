@@ -166,36 +166,36 @@ export const NAV = [
   {
     key: 'teacher', icon: 'School', title: '教师工作台', school: '汶川县七一映秀中学',
     groups: [
-      { title: '概览', items: [
+      { title: '工作台', items: [
         { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },
-        { page: 'agent', icon: 'Brain', label: 'Agent 设置' },
-        { page: 'recycle', icon: 'Trash2', label: '回收站与审计' },
         { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' },
-        { page: 'class-tasks', icon: 'ClipboardList', label: '班级任务' }
+        { page: 'agent', icon: 'Brain', label: '凯凯小兵' }
       ] },
-      { title: '学生管理', items: [
+      { title: '学生跟进', items: [
         { page: 'students', icon: 'Users', label: '学生信息' },
         { page: 'special', icon: 'Tag', label: '关注事项' },
-        { page: 'comments', icon: 'Pencil', label: '评语管理' }
-      ] },
-      { title: '日常记录', items: [
-        { page: 'events', icon: 'FileEdit', label: '学生事件' }
+        { page: 'events', icon: 'FileEdit', label: '学生事件' },
+        { page: 'parent-comm', icon: 'Phone', label: '家校沟通' }
       ] },
       { title: '教学管理', items: [
-        { page: 'attendance', icon: 'ClipboardList', label: '考勤管理' },
+        { page: 'attendance', icon: 'ClipboardCheck', label: '考勤管理' },
         { page: 'scores', icon: 'TrendingUp', label: '成绩跟踪' },
         { page: 'points', icon: 'Star', label: '行为积分' }
       ] },
       { title: '班级事务', items: [
+        { page: 'class-tasks', icon: 'FolderCheck', label: '班级任务' },
+        { page: 'school-calendar', icon: 'CalendarDays', label: '校历管理' },
         { page: 'seating', icon: 'LayoutGrid', label: '座位表' },
         { page: 'duty', icon: 'CheckCircle', label: '值日安排' },
-        { page: 'parent-comm', icon: 'Phone', label: '家校沟通' },
         { page: 'meetings', icon: 'Presentation', label: '班会记录' },
+        { page: 'activities', icon: 'CalendarDays', label: '班级活动' },
         { page: 'fund', icon: 'DollarSign', label: '班费管理' }
       ] },
-      { title: '日志', items: [
+      { title: '总结与档案', items: [
+        { page: 'comments', icon: 'Pencil', label: '评语管理' },
+        { page: 'reports', icon: 'FileText', label: '报告与学期档案' },
         { page: 'diary', icon: 'FileText', label: '班主任日志' },
-        { page: 'activities', icon: 'CalendarDays', label: '班级活动' }
+        { page: 'recycle', icon: 'Trash2', label: '回收站与审计' }
       ] }
     ]
   },

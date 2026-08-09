@@ -8,12 +8,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .. import db
+from .. import clock, db
 from ..services import (
     attendance as attendance_service,
     class_context,
     class_tasks as class_tasks_service,
     comments as comments_service,
+    communications as communications_service,
     points as points_service,
     scores as scores_service,
     work_items,
@@ -279,7 +280,7 @@ def student_detail(student_id: int):
         })
     timeline.sort(key=lambda x: str(x['at'] or ''), reverse=True)
 
-    today_text = date.today().isoformat()
+    today_text = clock.today().isoformat()
     open_actions = work_items.list_work_items(
         bucket='open', student_id=student_id, limit=50, conn=db.get_conn())
     overdue_actions = [item for item in open_actions
@@ -520,27 +521,10 @@ def update_focus(focus_id: int, body: FocusUpdate):
 
 @router.post('/communications')
 def create_communication(body: CommunicationBody):
-    _student(body.student_id, write=True)
-    communication_status = '待回访' if body.followup_at and body.status == '已完成' else body.status
-    if communication_status not in COMMUNICATION_STATUSES:
-        raise HTTPException(400, '沟通状态不合法')
-    conn = db.get_conn()
-    class_id, term_id = _scope(write=True)
-    communication_id = conn.execute(
-        'INSERT INTO communications(student_id, communicated_at, method, reason, summary, feedback, '
-        'agreement, followup_at, status, event_id, class_id, term_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-        (body.student_id, body.communicated_at, body.method, body.reason, body.summary, body.feedback,
-         body.agreement, body.followup_at, communication_status, body.event_id, class_id, term_id)).lastrowid
-    task_id = None
-    if body.followup_at:
-        task = work_items.ensure_source_work_item(
-            title='家校沟通回访', student_id=body.student_id,
-            source_type='communication', source_id=communication_id,
-            due_at=body.followup_at, priority='重要', status='待复查',
-            notes=body.agreement or body.summary, conn=conn, commit=False)
-        task_id = task['id']
-    conn.commit()
-    return {'ok': True, 'communication_id': communication_id, 'task_id': task_id}
+    try:
+        return communications_service.create_record(**body.model_dump())
+    except communications_service.CommunicationError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get('/communications')

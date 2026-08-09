@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 
+from .. import clock
 from .. import db
 from ..services import attendance as attendance_service, funds as funds_service, points as points_service, scores as scores_service, work_items
 from ..services.class_context import scope_ids
@@ -19,7 +20,7 @@ def dashboard(date: str | None = None):
         "WHERE e.class_id=? AND e.term_id=? AND e.status='在读' AND s.deleted_at=''",
         (class_id, term_id)).fetchone()['n']
 
-    target_date = (date or datetime.now().strftime('%Y-%m-%d'))[:10]
+    target_date = (date or clock.today().isoformat())[:10]
     try:
         reference_date = datetime.strptime(target_date, '%Y-%m-%d').date()
     except ValueError as exc:

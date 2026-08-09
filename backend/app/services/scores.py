@@ -6,7 +6,7 @@ from datetime import date, datetime
 import json
 import uuid
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -15,6 +15,9 @@ DUPLICATE_STRATEGIES = {'update', 'skip'}
 RULE_METRICS = {'总分下降', '排名下降', '单科下降'}
 RULE_TRIGGERS = {'import', 'manual', 'rule_change', 'startup'}
 OPEN_TASK_STATUSES = {'待处理', '处理中', '待复查'}
+SUBJECT_GROUPS = {'必考', '首选', '再选', '选考'}
+SCORE_TYPES = {'原始分', '等级赋分'}
+SCORE_MODES = {'固定科目', '3+1+2', '3+3', '自定义'}
 
 
 class ScoreError(ValueError):
@@ -59,6 +62,20 @@ def _positive_number(value, label: str, *, allow_zero: bool = True) -> float:
     return number
 
 
+def _selection_status(mode: str, selected_ids: set[int], subject_by_id: dict[int, dict]) -> str:
+    if mode in {'固定科目', '自定义'}:
+        return '有效'
+    selected = [subject_by_id[item] for item in selected_ids if item in subject_by_id]
+    first_count = sum(item.get('subject_group') == '首选' for item in selected)
+    second_count = sum(item.get('subject_group') == '再选' for item in selected)
+    elective_count = sum(item.get('subject_group') == '选考' for item in selected)
+    if mode == '3+1+2':
+        return '有效' if first_count == 1 and second_count == 2 else '组合不完整'
+    if mode == '3+3':
+        return '有效' if elective_count == 3 else '组合不完整'
+    return '有效'
+
+
 def list_config(*, conn=None) -> dict:
     conn = conn or db.get_conn()
     class_id, term_id = _scope(conn=conn)
@@ -66,6 +83,10 @@ def list_config(*, conn=None) -> dict:
         '''SELECT * FROM score_subjects WHERE class_id=? AND term_id=?
            ORDER BY enabled DESC, sort_order, id''', (class_id, term_id)
     ).fetchall()]
+    settings_row = conn.execute(
+        '''SELECT mode FROM score_term_settings WHERE class_id=? AND term_id=?''',
+        (class_id, term_id),
+    ).fetchone()
     exams = [dict(row) for row in conn.execute(
         '''SELECT * FROM score_exams WHERE class_id=? AND term_id=?
            ORDER BY enabled DESC, CASE WHEN exam_date='' THEN 1 ELSE 0 END,
@@ -85,7 +106,10 @@ def list_config(*, conn=None) -> dict:
     for item in exams:
         item['enabled'] = bool(item['enabled'])
         item['subject_ids'] = by_exam.get(int(item['id']), [])
-    return {'exams': exams, 'subjects': subjects}
+    return {
+        'exams': exams, 'subjects': subjects,
+        'settings': {'mode': settings_row['mode'] if settings_row else '固定科目'},
+    }
 
 
 def _subject_row(subject_id: int, *, write: bool = False, conn=None):
@@ -126,23 +150,32 @@ def _replace_exam_subjects(exam_id: int, subject_ids: list[int], *, conn):
 
 
 def create_subject(*, name: str, full_score: float = 0, enabled: bool = True,
-                   sort_order: int = 0, conn=None) -> dict:
+                   sort_order: int = 0, subject_group: str = '必考',
+                   score_type: str = '原始分', conn=None) -> dict:
     conn = conn or db.get_conn()
     name = _text(name)
     if not name:
         raise ScoreError('科目名称不能为空')
+    if subject_group not in SUBJECT_GROUPS:
+        raise ScoreError('科目分组不合法')
+    if score_type not in SCORE_TYPES:
+        raise ScoreError('成绩口径不合法')
     full_score = _positive_number(full_score, '满分')
     class_id, term_id = _scope(write=True, conn=conn)
     try:
         subject_id = conn.execute(
             '''INSERT INTO score_subjects(
-                   class_id, term_id, name, full_score, sort_order, enabled
-               ) VALUES(?,?,?,?,?,?)''',
-            (class_id, term_id, name, full_score, int(sort_order), int(bool(enabled))),
+                   class_id, term_id, name, full_score, sort_order, enabled,
+                   subject_group, score_type
+               ) VALUES(?,?,?,?,?,?,?,?)''',
+            (class_id, term_id, name, full_score, int(sort_order), int(bool(enabled)),
+             subject_group, score_type),
         ).lastrowid
         audit.record(
             'score_subject', subject_id, 'create', summary=f'新增成绩科目：{name}',
-            params={'name': name, 'full_score': full_score}, conn=conn, commit=False)
+            params={'name': name, 'full_score': full_score,
+                    'subject_group': subject_group, 'score_type': score_type},
+            conn=conn, commit=False)
         conn.commit()
     except Exception as exc:
         conn.rollback()
@@ -154,7 +187,8 @@ def create_subject(*, name: str, full_score: float = 0, enabled: bool = True,
 
 def update_subject(subject_id: int, *, name: str | None = None,
                    full_score: float | None = None, enabled: bool | None = None,
-                   sort_order: int | None = None, conn=None) -> dict:
+                   sort_order: int | None = None, subject_group: str | None = None,
+                   score_type: str | None = None, conn=None) -> dict:
     conn = conn or db.get_conn()
     current = _subject_row(subject_id, write=True, conn=conn)
     values = {
@@ -163,13 +197,20 @@ def update_subject(subject_id: int, *, name: str | None = None,
                        if full_score is not None else current['full_score']),
         'enabled': int(bool(enabled)) if enabled is not None else current['enabled'],
         'sort_order': int(sort_order) if sort_order is not None else current['sort_order'],
+        'subject_group': subject_group if subject_group is not None else current.get('subject_group', '必考'),
+        'score_type': score_type if score_type is not None else current.get('score_type', '原始分'),
     }
     if not values['name']:
         raise ScoreError('科目名称不能为空')
+    if values['subject_group'] not in SUBJECT_GROUPS:
+        raise ScoreError('科目分组不合法')
+    if values['score_type'] not in SCORE_TYPES:
+        raise ScoreError('成绩口径不合法')
     try:
         conn.execute(
             '''UPDATE score_subjects SET name=:name, full_score=:full_score,
                    enabled=:enabled, sort_order=:sort_order,
+                   subject_group=:subject_group, score_type=:score_type,
                    updated_at=datetime('now','localtime') WHERE id=:id''',
             {**values, 'id': int(subject_id)},
         )
@@ -187,6 +228,70 @@ def update_subject(subject_id: int, *, name: str | None = None,
             raise ScoreError('当前学期已存在同名科目') from exc
         raise
     return {'ok': True}
+
+
+def update_term_settings(*, mode: str, conn=None) -> dict:
+    if mode not in SCORE_MODES:
+        raise ScoreError('选科模式不合法')
+    conn = conn or db.get_conn()
+    class_id, term_id = _scope(write=True, conn=conn)
+    conn.execute(
+        '''INSERT INTO score_term_settings(class_id, term_id, mode)
+           VALUES(?,?,?)
+           ON CONFLICT(class_id, term_id) DO UPDATE SET mode=excluded.mode,
+           updated_at=datetime('now','localtime')''',
+        (class_id, term_id, mode),
+    )
+    audit.record(
+        'score_term_settings', term_id, 'update', summary=f'更新成绩选科模式：{mode}',
+        params={'mode': mode}, class_id=class_id, term_id=term_id,
+        conn=conn, commit=False,
+    )
+    conn.commit()
+    return {'ok': True, 'mode': mode}
+
+
+def save_student_subjects(student_id: int, subject_ids: list[int], *, conn=None) -> dict:
+    conn = conn or db.get_conn()
+    class_id, term_id = _scope(write=True, conn=conn)
+    student = conn.execute(
+        '''SELECT s.id FROM students s JOIN student_enrollments e ON e.student_id=s.id
+           WHERE s.id=? AND e.class_id=? AND e.term_id=? AND e.status='在读' AND s.deleted_at='' ''',
+        (int(student_id), class_id, term_id),
+    ).fetchone()
+    if not student:
+        raise ScoreError('学生不在当前班级和学期')
+    clean_ids = []
+    for subject_id in subject_ids or []:
+        subject = _subject_row(int(subject_id), write=True, conn=conn)
+        if not subject['enabled']:
+            raise ScoreError('不能选择已停用科目')
+        if int(subject['id']) not in clean_ids:
+            clean_ids.append(int(subject['id']))
+    conn.execute(
+        '''INSERT INTO student_score_profiles(class_id, term_id, student_id)
+           VALUES(?,?,?)
+           ON CONFLICT(class_id, term_id, student_id) DO UPDATE SET
+           updated_at=datetime('now','localtime')''',
+        (class_id, term_id, int(student_id)),
+    )
+    conn.execute(
+        'DELETE FROM student_score_subjects WHERE class_id=? AND term_id=? AND student_id=?',
+        (class_id, term_id, int(student_id)),
+    )
+    conn.executemany(
+        '''INSERT INTO student_score_subjects(
+               class_id, term_id, student_id, subject_id
+           ) VALUES(?,?,?,?)''',
+        [(class_id, term_id, int(student_id), subject_id) for subject_id in clean_ids],
+    )
+    audit.record(
+        'student_score_subjects', student_id, 'update', summary='更新学生选科',
+        params={'student_id': int(student_id), 'subject_ids': clean_ids},
+        class_id=class_id, term_id=term_id, conn=conn, commit=False,
+    )
+    conn.commit()
+    return {'ok': True, 'student_id': int(student_id), 'subject_ids': clean_ids}
 
 
 def create_exam(*, name: str, exam_date: str = '', subject_ids: list[int] | None = None,
@@ -672,6 +777,7 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
     conn = conn or db.get_conn()
     class_id, term_id = _scope(conn=conn)
     config = list_config(conn=conn)
+    selection_mode = config.get('settings', {}).get('mode', '固定科目')
     exams = [item for item in config['exams'] if item['enabled']]
     subjects = [item for item in config['subjects'] if item['enabled']]
     records = list_records(conn=conn)
@@ -681,6 +787,20 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
            WHERE e.class_id=? AND e.term_id=? AND e.status='在读' AND s.deleted_at=''
            ORDER BY s.学号''', (class_id, term_id)
     ).fetchall()]
+    selection_rows = conn.execute(
+        '''SELECT student_id, subject_id FROM student_score_subjects
+           WHERE class_id=? AND term_id=? ORDER BY student_id, subject_id''',
+        (class_id, term_id),
+    ).fetchall()
+    selected_subjects_by_student: dict[int, set[int]] = {}
+    for row in selection_rows:
+        selected_subjects_by_student.setdefault(int(row['student_id']), set()).add(int(row['subject_id']))
+    configured_selection_students = {
+        int(row['student_id']) for row in conn.execute(
+            '''SELECT student_id FROM student_score_profiles
+               WHERE class_id=? AND term_id=?''', (class_id, term_id)
+        ).fetchall()
+    }
     if not exams and records:
         seen = set()
         for row in records:
@@ -698,6 +818,8 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
     student_output = []
     exam_student_map: dict[int, list[dict]] = {int(exam['id']): [] for exam in exams}
     for student in students:
+        selected_subject_ids = selected_subjects_by_student.get(int(student['student_id']))
+        selection_configured = int(student['student_id']) in configured_selection_students
         exam_results = []
         for exam in exams:
             expected_ids = [int(value) for value in exam.get('subject_ids', []) if int(value) in subject_by_id]
@@ -706,6 +828,12 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
                     int(row['subject_id']) for row in records
                     if int(row['exam_id'] or 0) == int(exam['id']) and row.get('subject_id')
                 }, key=lambda value: subject_by_id.get(value, {}).get('sort_order', value))
+            if selection_configured:
+                expected_ids = [
+                    subject_id_value for subject_id_value in expected_ids
+                    if subject_by_id.get(subject_id_value, {}).get('subject_group', '必考') == '必考'
+                    or subject_id_value in selected_subject_ids
+                ]
             detail, missing = {}, []
             for subject_id_value in expected_ids:
                 subject = subject_by_id.get(subject_id_value, {'name': f'科目{subject_id_value}'})
@@ -734,7 +862,15 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
             }
             exam_results.append(result)
             exam_student_map[int(exam['id'])].append(result)
-        student_output.append({**student, 'exams': exam_results})
+        student_output.append({
+            **student,
+            'exams': exam_results,
+            'selected_subject_ids': sorted(selected_subject_ids or []),
+            'selection_configured': selection_configured,
+            'selection_status': _selection_status(
+                selection_mode, selected_subject_ids or set(), subject_by_id
+            ) if selection_configured else '未配置',
+        })
 
     exam_output = []
     for exam in exams:
@@ -769,10 +905,17 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
         subject_stats = []
         for subject_id_value in expected_ids:
             subject = subject_by_id.get(subject_id_value, {'name': f'科目{subject_id_value}', 'full_score': 0})
+            eligible_student_ids = {
+                int(item['student_id']) for item in students
+                if int(item['student_id']) not in configured_selection_students
+                or subject.get('subject_group', '必考') == '必考'
+                or subject_id_value in selected_subjects_by_student.get(int(item['student_id']), set())
+            }
             values = [
                 row for row in records
                 if int(row['exam_id'] or 0) == exam_id_value
                 and int(row['subject_id'] or 0) == subject_id_value
+                and int(row['student_id']) in eligible_student_ids
             ]
             normal_scores = [float(row['score']) for row in values
                              if row['record_status'] == '正常' and row['score'] is not None]
@@ -781,8 +924,9 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
                 'subject_id': subject_id_value, 'subject': subject['name'],
                 'full_score': subject.get('full_score', 0),
                 'average': round(sum(normal_scores) / len(normal_scores), 1) if normal_scores else None,
-                'recorded_count': len(normal_scores), 'absent_count': explicit_absence,
-                'missing_count': max(0, len(students) - len(normal_scores) - explicit_absence),
+                'eligible_count': len(eligible_student_ids), 'recorded_count': len(normal_scores),
+                'absent_count': explicit_absence,
+                'missing_count': max(0, len(eligible_student_ids) - len(normal_scores) - explicit_absence),
             })
         totals = [item['total'] for item in complete_rows]
         exam_output.append({
@@ -968,7 +1112,7 @@ def _activate_task(rule: dict, student: dict, previous_exam: dict, current_exam:
     task = work_items.ensure_source_work_item(
         title=title, legacy_title=title, student_id=student['student_id'],
         source_type='score_rule', source_id=rule['id'],
-        due_at=current_exam['exam_date'] or date.today().isoformat(),
+        due_at=current_exam['exam_date'] or clock.today().isoformat(),
         priority=rule['priority'], status='待处理', notes=notes,
         conn=conn, commit=False,
     )
@@ -977,7 +1121,7 @@ def _activate_task(rule: dict, student: dict, previous_exam: dict, current_exam:
         '''SELECT status, title, priority, due_at, notes FROM student_tasks
            WHERE id=? AND deleted_at='' ''', (task_id,)
     ).fetchone()
-    due_at = current_exam['exam_date'] or date.today().isoformat()
+    due_at = current_exam['exam_date'] or clock.today().isoformat()
     reopened = False
     if row and row['status'] not in OPEN_TASK_STATUSES and (rehit or not task['created']):
         work_items.update_work_item(

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { Brain, CheckCircle, CircleAlert, MessageCircle, Play, QrCode, RefreshCw, Send, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
+import { BarChart3, Brain, CheckCircle, CircleAlert, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, Send, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import { get, post, put } from '../api'
+import { del, get, post, put } from '../api'
 
 const providers = {
   deepseek: {
@@ -36,8 +36,78 @@ const loopChanging = ref(false)
 const policySaving = ref(false)
 const wechatQr = ref('')
 const wechatQrSource = ref('')
+const agentSessions = ref([])
+const agentUsage = ref(null)
+const sessionsLoading = ref(false)
+const sessionBusy = ref(false)
+const currentWebSessionId = ref(getCurrentWebSessionId())
 let loginTimer = null
 let statusTimer = null
+
+function getCurrentWebSessionId() {
+  try { return window.localStorage.getItem('meimei_agent_web_session_id') || 'web:default' } catch { return 'web:default' }
+}
+
+function dispatchSessionChange(sessionId) {
+  currentWebSessionId.value = sessionId
+  window.localStorage.setItem('meimei_agent_web_session_id', sessionId)
+  window.dispatchEvent(new CustomEvent('meimei-agent-session-change', { detail: { sessionId } }))
+}
+
+function newWebSession() {
+  dispatchSessionChange(`web:${window.crypto?.randomUUID?.() || Date.now()}`)
+}
+
+async function loadAgentOperations() {
+  sessionsLoading.value = true
+  try {
+    const [sessions, usage] = await Promise.all([
+      get('/api/agent/sessions?prefix=web%3A'),
+      get('/api/agent/usage'),
+    ])
+    agentSessions.value = sessions.sessions || []
+    agentUsage.value = usage
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function selectWebSession(sessionId) {
+  if (!sessionId || sessionId === currentWebSessionId.value) return
+  dispatchSessionChange(sessionId)
+}
+
+async function renameWebSession(session) {
+  const title = window.prompt('请输入新的会话名称', session.title || '新会话')?.trim()
+  if (!title || title === session.title) return
+  sessionBusy.value = true
+  try {
+    await put(`/api/agent/sessions/${encodeURIComponent(session.session_id)}`, { title })
+    await loadAgentOperations()
+    notice.value = '会话名称已更新。'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    sessionBusy.value = false
+  }
+}
+
+async function deleteWebSession(session) {
+  if (!window.confirm(`删除“${session.title || '新会话'}”及其历史记录吗？`)) return
+  sessionBusy.value = true
+  try {
+    await del(`/api/agent/sessions/${encodeURIComponent(session.session_id)}`)
+    if (session.session_id === currentWebSessionId.value) newWebSession()
+    await loadAgentOperations()
+    notice.value = '会话已删除。'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    sessionBusy.value = false
+  }
+}
 
 function detectProvider(baseUrl) {
   return baseUrl?.includes('api.deepseek.com') ? 'deepseek' : 'custom'
@@ -260,6 +330,7 @@ function loginStatusText(value) {
 
 onMounted(() => {
   load()
+  loadAgentOperations()
   loadWechat()
   statusTimer = window.setInterval(refreshWechat, 6000)
 })
@@ -325,6 +396,40 @@ onBeforeUnmount(() => {
           <div><span>模型配置</span><strong :class="status?.model_configured ? 'status-ok' : 'status-off'">{{ status?.model_configured ? '已配置' : '未配置' }}</strong></div>
           <div><span>可用工具</span><strong>{{ status?.tool_count || 0 }} 个只读工具</strong></div>
         </div>
+      </div>
+
+      <div class="card agent-session-card">
+        <div class="card-title"><MessageCircle :size="16" /> 网页 Agent 会话</div>
+        <div class="session-toolbar">
+          <span class="muted">网页与微信会话相互隔离；切换会话不会混用上下文。</span>
+          <button class="btn btn-primary" type="button" @click="newWebSession"><Plus :size="14" /> 新建会话</button>
+        </div>
+        <div class="current-session">当前会话：<code>{{ currentWebSessionId }}</code></div>
+        <div v-if="sessionsLoading" class="loading-inline">读取会话中…</div>
+        <div v-else-if="!agentSessions.length" class="wechat-muted">还没有保存的网页会话，发送第一条消息后会自动出现在这里。</div>
+        <div v-else class="session-list">
+          <div v-for="session in agentSessions" :key="session.session_id" class="session-row" :class="{ active: session.session_id === currentWebSessionId }">
+            <button class="session-select" type="button" @click="selectWebSession(session.session_id)">
+              <strong>{{ session.title || '新会话' }}</strong>
+              <small>{{ session.message_count }} 条消息 · {{ session.updated_at }}</small>
+            </button>
+            <div class="session-actions">
+              <button class="icon-button" type="button" title="重命名会话" :disabled="sessionBusy" @click="renameWebSession(session)"><Pencil :size="14" /></button>
+              <button class="icon-button" type="button" title="删除会话" :disabled="sessionBusy" @click="deleteWebSession(session)"><Trash2 :size="14" /></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card agent-usage-card">
+        <div class="card-title"><BarChart3 :size="16" /> Agent 使用统计</div>
+        <div class="usage-grid">
+          <div><span>工具调用</span><strong>{{ agentUsage?.tool_calls?.total ?? 0 }}</strong></div>
+          <div><span>成功</span><strong class="status-ok">{{ agentUsage?.tool_calls?.successful ?? 0 }}</strong></div>
+          <div><span>失败/拒绝</span><strong class="status-off">{{ agentUsage?.tool_calls?.failed ?? 0 }}</strong></div>
+          <div><span>失败率</span><strong>{{ agentUsage ? `${(agentUsage.tool_calls.failure_rate * 100).toFixed(1)}%` : '—' }}</strong></div>
+        </div>
+        <div class="muted">统计来自本地 Agent 审计记录；模型 Token 需模型接口返回 usage 后才会显示。</div>
       </div>
 
       <div class="card wechat-card">
@@ -415,6 +520,21 @@ onBeforeUnmount(() => {
 .status-ok { color:var(--success); }
 .status-off { color:var(--text-secondary); }
 .wechat-card { margin-top:18px; }
+.agent-session-card, .agent-usage-card { margin-top:18px; }
+.session-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.current-session { margin:12px 0; color:var(--text-secondary); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.current-session code { color:var(--text); }
+.session-list { display:grid; gap:7px; max-height:280px; overflow:auto; }
+.session-row { display:flex; align-items:center; gap:8px; padding:7px 9px; border:1px solid transparent; border-radius:9px; background:var(--bg); }
+.session-row.active { border-color:var(--primary); background:var(--primary-bg); }
+.session-select { min-width:0; flex:1; display:grid; gap:3px; padding:0; border:0; background:none; color:var(--text); text-align:left; cursor:pointer; }
+.session-select strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-select small { color:var(--text-secondary); font-size:11px; }
+.session-actions { display:flex; gap:2px; }
+.usage-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
+.usage-grid div { display:grid; gap:4px; padding:11px; border-radius:9px; background:var(--bg); }
+.usage-grid span { color:var(--text-secondary); font-size:12px; }
+.usage-grid strong { font-size:18px; }
 .wechat-connection-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,0.9fr); gap:24px; }
 .wechat-login-panel, .wechat-policy-panel { min-width:0; }
 .wechat-status-line { display:flex; align-items:center; gap:8px; min-height:24px; }
@@ -447,4 +567,5 @@ onBeforeUnmount(() => {
 .loading-inline { color:var(--text-secondary); font-size:13px; padding:12px 0; }
 @media (max-width: 850px) { .wechat-connection-grid { grid-template-columns:1fr; } }
 @media (max-width: 700px) { .agent-status-grid { grid-template-columns:1fr; } }
+@media (max-width: 700px) { .session-toolbar { align-items:flex-start; flex-direction:column; }.usage-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 </style>

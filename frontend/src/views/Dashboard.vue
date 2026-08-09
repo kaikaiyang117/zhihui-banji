@@ -10,7 +10,6 @@ import QuickRecordModal from '../components/QuickRecordModal.vue'
 const stats = ref(null)
 const errorMsg = ref('')
 const modalMode = ref(null)
-const selectedDate = ref(localDate())
 const fileInput = ref(null)
 const backupMessage = ref('')
 
@@ -20,16 +19,10 @@ const actionSections = computed(() => stats.value ? [
   { key: 'next7', title: '即将到期', hint: '未来 7 天需要安排', tone: 'neutral', items: stats.value.work_sections.next7 },
 ] : [])
 
-function localDate() {
-  const d = new Date()
-  const pad = value => String(value).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
 async function load() {
   errorMsg.value = ''
   try {
-    stats.value = await get(`/api/stats/dashboard?date=${selectedDate.value}`)
+    stats.value = await get('/api/stats/dashboard')
   } catch (error) {
     errorMsg.value = error.message
   }
@@ -212,6 +205,8 @@ onMounted(load)
 <style scoped>
 .dashboard-page { display: grid; gap: 16px; }
 .dashboard-toolbar { margin-bottom: 0; }
+.dashboard-page .card { box-shadow: none; }
+.dashboard-page > section.card { padding: 2px 0; border: 0; margin-bottom: 0; background: transparent; }
 .action-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .action-summary-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 5px 9px; min-height: 86px; padding: 15px 16px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); color: var(--text-secondary); text-decoration: none; box-shadow: var(--shadow-sm); }
 .action-summary-card > svg { grid-row: 1 / span 2; color: var(--primary); }
@@ -221,7 +216,7 @@ onMounted(load)
 .action-summary-card.danger { border-color: rgba(220,64,54,.2); background: var(--danger-bg); }
 .action-summary-card.danger > svg, .action-summary-card.danger strong { color: var(--danger); }
 .action-summary-card.primary { border-color: rgba(91,106,191,.2); background: var(--primary-bg); }
-.action-board { padding: 18px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.action-board { padding: 2px 0; border: 0; background: transparent; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
 .section-heading h2 { margin: 0; color: var(--text); font-size: 16px; }
 .section-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }

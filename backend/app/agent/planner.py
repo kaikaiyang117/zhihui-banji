@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -82,8 +83,9 @@ class AgentPlan:
 class AgentPlanner:
     """生成并校验计划；模型只负责提出计划，执行由 AgentRunner 完成。"""
 
-    def __init__(self, model_client: OpenAICompatibleClient):
+    def __init__(self, model_client: OpenAICompatibleClient, usage_recorder=None):
         self.model_client = model_client
+        self.usage_recorder = usage_recorder
 
     async def create(
         self,
@@ -91,13 +93,21 @@ class AgentPlanner:
         registry: ToolRegistry,
         context: str = '',
     ) -> AgentPlan:
-        response = await self.model_client.complete(
-            [
-                {'role': 'system', 'content': _planner_prompt(registry)},
-                {'role': 'user', 'content': _planner_input(text, context)},
-            ],
-            None,
-        )
+        started = time.monotonic()
+        try:
+            response = await self.model_client.complete(
+                [
+                    {'role': 'system', 'content': _planner_prompt(registry)},
+                    {'role': 'user', 'content': _planner_input(text, context)},
+                ],
+                None,
+            )
+        except Exception as exc:
+            if self.usage_recorder:
+                self.usage_recorder(None, started, 'error', str(exc))
+            raise
+        if self.usage_recorder:
+            self.usage_recorder(response, started, 'success', '')
         return self._from_response(response, registry)
 
     async def create_stream(
@@ -106,18 +116,28 @@ class AgentPlanner:
         registry: ToolRegistry,
         context: str = '',
     ) -> AgentPlan:
+        started = time.monotonic()
         response = None
-        async for event in self.model_client.iter_complete(
-            [
-                {'role': 'system', 'content': _planner_prompt(registry)},
-                {'role': 'user', 'content': _planner_input(text, context)},
-            ],
-            None,
-        ):
-            if event.response:
-                response = event.response
+        try:
+            async for event in self.model_client.iter_complete(
+                [
+                    {'role': 'system', 'content': _planner_prompt(registry)},
+                    {'role': 'user', 'content': _planner_input(text, context)},
+                ],
+                None,
+            ):
+                if event.response:
+                    response = event.response
+        except Exception as exc:
+            if self.usage_recorder:
+                self.usage_recorder(None, started, 'error', str(exc))
+            raise
         if response is None:
+            if self.usage_recorder:
+                self.usage_recorder(None, started, 'error', '规划器没有返回最终结果')
             raise PlanningError('规划器没有返回最终结果')
+        if self.usage_recorder:
+            self.usage_recorder(response, started, 'success', '')
         return self._from_response(response, registry)
 
     @staticmethod
@@ -129,9 +149,51 @@ class AgentPlanner:
 
 def build_rule_plan(text: str, registry: ToolRegistry) -> AgentPlan | None:
     """为明确的学生查询建立确定性计划，避免学号被误当成数据库 id。"""
-    if not _is_student_lookup(text):
+    normalized_text = normalize_query_text(text)
+    if _is_class_student_analysis(normalized_text):
+        boarding_status = _boarding_status_from_text(normalized_text)
+        occupation_query = any(term in normalized_text for term in ('家长职业', '监护人职业'))
+        distribution_query = any(term in normalized_text for term in ('分布', '分类', '各有多少', '统计'))
+        if occupation_query and distribution_query:
+            arguments = {
+                'group_by': 'guardian_occupation',
+                'include_empty': True,
+                'include_students': True,
+                'limit': 500,
+            }
+            if boarding_status:
+                arguments['boarding_status'] = boarding_status
+            return AgentPlan.from_payload({
+                'goal': text.strip(),
+                'steps': [{
+                    'id': 'aggregate_students',
+                    'tool': 'students_aggregate',
+                    'arguments': arguments,
+                }],
+            }, registry)
+        fields = ['student_no', 'student_name']
+        if any(term in normalized_text for term in ('姓名', '名单', '名字')):
+            pass
+        elif occupation_query:
+            fields.append('guardian_occupation')
+        elif any(term in normalized_text for term in ('家长', '监护人')):
+            fields.extend(('guardian_name', 'guardian_occupation', 'guardian2_name', 'guardian2_relationship'))
+        else:
+            fields.extend(('gender', 'birth_month', 'ethnicity', 'is_boarding', 'specialty', 'class_role'))
+        arguments = {'fields': fields, 'limit': 500}
+        if boarding_status:
+            arguments['boarding_status'] = boarding_status
+        return AgentPlan.from_payload({
+            'goal': text.strip(),
+            'steps': [{
+                'id': 'query_students',
+                'tool': 'students_query',
+                'arguments': arguments,
+            }],
+        }, registry)
+    if not _is_student_lookup(normalized_text):
         return None
-    keyword = _extract_student_keyword(text)
+    keyword = _extract_student_keyword(normalized_text)
     if not keyword:
         return None
 
@@ -171,6 +233,35 @@ def _is_student_lookup(text: str) -> bool:
          or bool(re.search(r'(?<!\d)\d{2,}(?!\d)', text)))
         and any(term in text for term in ('查看', '查询', '了解', '详细', '档案', '信息', '成绩', '考勤', '待办', '沟通'))
     )
+
+
+def _is_class_student_analysis(text: str) -> bool:
+    scope_terms = (
+        '所有学生', '所有的学生', '每个学生', '每名学生', '全班学生', '全班的学生',
+        '班里学生', '班里的学生', '班上学生', '班上的学生',
+        '学生家长', '学生的家长', '全班家长', '全班监护人', '家长职业', '监护人职业',
+        '走读学生', '住校学生', '走读的学生', '住校的学生',
+    )
+    analysis_terms = ('查看', '查询', '统计', '分析', '职业', '信息', '分布', '哪些')
+    return any(term in text for term in scope_terms) and any(term in text for term in analysis_terms)
+
+
+def _boarding_status_from_text(text: str) -> str:
+    """把常见住宿状态表达转换为学生表中的标准值。"""
+    if '走读' in text or '不住校' in text:
+        return '走读'
+    if '住校' in text:
+        return '住校'
+    return ''
+
+
+def normalize_query_text(text: str) -> str:
+    """将不改变意图的常见口语表达归一化，降低规则路由对措辞的敏感度。"""
+    normalized = re.sub(r'\s+', '', str(text or '').strip())
+    normalized = re.sub(r'(所有|全班|班里|班上)的学生', r'\1学生', normalized)
+    normalized = re.sub(r'每名学生', '每个学生', normalized)
+    normalized = re.sub(r'(家长|监护人)的职业', r'\1职业', normalized)
+    return normalized
 
 
 def _extract_student_keyword(text: str) -> str:
@@ -213,6 +304,7 @@ def _planner_prompt(registry: ToolRegistry) -> str:
     return '''你是“凯凯小兵”的任务规划器，不直接回答用户。
 请把用户请求拆成最多 6 个只读工具步骤，并且只输出 JSON，不要 Markdown、解释或思维过程。
 步骤必须按依赖顺序排列；涉及具体学生时先 students_search，再使用搜索结果中的 id。
+涉及“所有学生”“每个学生”“学生家长”“全班分布”或需要比较多名学生时，优先使用 students_query 或 students_aggregate，不要逐个调用 student_get_profile。
 如果搜索结果不唯一，依赖学生 id 的步骤使用 condition="exactly_one_student"。
 工具结果引用格式为 $步骤id.结果字段[0].字段名。
 

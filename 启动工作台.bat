@@ -8,5 +8,7 @@ echo Starting...
 cd /d "%~dp0backend"
 set "PYTHON=%~dp0.venv\Scripts\python.exe"
 if not exist "%PYTHON%" set "PYTHON=python"
+if not defined WORKBENCH_BUSINESS_DATE set "WORKBENCH_BUSINESS_DATE=2026-04-15"
+echo Business date: %WORKBENCH_BUSINESS_DATE%
 "%PYTHON%" run.py --open-browser %*
 pause

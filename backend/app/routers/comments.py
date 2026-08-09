@@ -152,10 +152,10 @@ def get_comment_versions(comment_id: int):
 
 
 @router.get('/print', response_class=HTMLResponse)
-def print_comments(comment_type: str = '', status: str = ''):
+def print_comments(student_id: Optional[int] = None, comment_type: str = '', status: str = ''):
     try:
         rows = comments_service.list_comments(
-            comment_type=comment_type, status=status, limit=5000)
+            student_id=student_id, comment_type=comment_type, status=status, limit=5000)
         scope = class_context.get_current_scope()
     except comments_service.CommentError as exc:
         _error(exc)
@@ -168,13 +168,14 @@ def print_comments(comment_type: str = '', status: str = ''):
         for item in rows
     ) or '<p class="empty">没有符合条件的评语。</p>'
     document = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-    <title>{html.escape(title)}</title><style>
-    body{{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#1d1d1f;margin:28px}}
+    <title>{html.escape(title)}</title><link rel="icon" href="/favicon.svg"><style>
+    @page{{size:A4 portrait;margin:14mm}}
+    body{{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#1d1d1f;margin:0}}
     header{{display:flex;justify-content:space-between;border-bottom:2px solid #5968bd;padding-bottom:12px;margin-bottom:20px}}
     header h1{{font-size:22px;margin:0}}header button{{padding:8px 14px}}
     article{{break-inside:avoid;border:1px solid #ddd;border-radius:10px;padding:18px;margin:0 0 14px}}
     h2{{font-size:17px;margin:0 0 12px}}h2 small{{font-size:12px;color:#777;margin-left:10px;font-weight:400}}
     p{{font-size:14px;line-height:1.8;margin:0}}footer{{font-size:11px;color:#777;margin-top:12px}}
-    .empty{{text-align:center;color:#777}}@media print{{header button{{display:none}}body{{margin:0}}article{{border-color:#aaa}}}}
+    .empty{{text-align:center;color:#777}}@media print{{header button{{display:none}}article{{border-color:#aaa;break-inside:avoid}}}}
     </style></head><body><header><h1>{html.escape(title)}</h1><button onclick="window.print()">打印</button></header>{cards}</body></html>'''
     return HTMLResponse(document)

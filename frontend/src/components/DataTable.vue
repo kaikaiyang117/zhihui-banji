@@ -5,7 +5,7 @@ const props = defineProps({
   headers: { type: Array, default: () => [] },
   rows: { type: Array, default: () => [] },      // [{row_no, data:[]}]
   searchable: { type: Boolean, default: false },
-  maxHeight: { type: Number, default: 500 },
+  maxHeight: { type: Number, default: null },
   highlight: { type: Array, default: () => [] },  // 列索引 → 特殊样式
   showEdit: { type: Boolean, default: false },    // 显示编辑按钮
   showDelete: { type: Boolean, default: false },  // 显示删除按钮
@@ -22,6 +22,10 @@ const filtered = computed(() => {
     (r.data || []).some(v => v !== null && v !== undefined && String(v).toLowerCase().includes(k)))
 })
 
+const tableWrapStyle = computed(() => props.maxHeight === null
+  ? { maxHeight: 'max(500px, calc(100vh - 250px))' }
+  : { maxHeight: props.maxHeight + 'px' })
+
 function fmt(v) {
   if (v === null || v === undefined || v === '') return ''
   return String(v)
@@ -36,7 +40,7 @@ function fmt(v) {
       </div>
     </div>
     <div v-if="!filtered.length" class="empty-state">暂无数据</div>
-    <div v-else class="table-wrap" :style="{ maxHeight: maxHeight + 'px' }">
+    <div v-else class="table-wrap table-wrap-fill" :style="tableWrapStyle">
       <table class="data-table" :class="{ 'fixed-layout': colWidths.length }">
         <colgroup v-if="colWidths.length">
           <col style="width:30px">

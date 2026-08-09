@@ -9,7 +9,154 @@ from typing import Optional
 
 from .. import db
 from .class_context import scope_ids
-from . import attendance, scores, work_items
+from . import attendance, scores, school_calendar, work_items
+
+
+STUDENT_QUERY_FIELDS = {
+    'student_id': ('s.id', 'id'),
+    'student_no': ('s.学号', '学号'),
+    'student_name': ('s.姓名', '姓名'),
+    'gender': ('s.性别', '性别'),
+    'birth_month': ('s.出生年月', '出生年月'),
+    'ethnicity': ('s.民族', '民族'),
+    'guardian_name': ('s.监护人姓名', '监护人姓名'),
+    'guardian_occupation': ('s.监护人职业', '监护人职业'),
+    'guardian2_name': ('s.监护人2姓名', '监护人2姓名'),
+    'guardian2_relationship': ('s.监护人2关系', '监护人2关系'),
+    'is_boarding': ('s.是否住校', '是否住校'),
+    'specialty': ('s.特长', '特长'),
+    'class_role': ('s.班级任职', '班级任职'),
+}
+DEFAULT_STUDENT_QUERY_FIELDS = ('student_no', 'student_name', 'gender', 'is_boarding', 'class_role')
+MAX_STUDENT_QUERY_LIMIT = 500
+
+
+def _student_query_fields(fields: list[str] | None) -> list[tuple[str, str, str]]:
+    selected = list(fields or DEFAULT_STUDENT_QUERY_FIELDS)
+    if not selected:
+        selected = list(DEFAULT_STUDENT_QUERY_FIELDS)
+    result = []
+    seen = set()
+    for name in selected:
+        name = str(name or '').strip()
+        if name not in STUDENT_QUERY_FIELDS:
+            raise ValueError(f'不支持的学生字段：{name}')
+        if name in seen:
+            continue
+        seen.add(name)
+        expression, label = STUDENT_QUERY_FIELDS[name]
+        result.append((name, expression, label))
+    if len(result) > 10:
+        raise ValueError('一次最多查询 10 个学生字段')
+    return result
+
+
+def _student_query_scope(*, keyword: str, gender: str, boarding_status: str,
+                         class_role: str) -> tuple[str, list]:
+    class_id, term_id = scope_ids(conn=db.get_conn())
+    where = [
+        'e.class_id=?', 'e.term_id=?', "e.status='在读'", "s.deleted_at=''",
+    ]
+    params: list = [class_id, term_id]
+    keyword = str(keyword or '').strip()
+    if keyword:
+        where.append('(s.姓名 LIKE ? OR s.学号 LIKE ?)')
+        params.extend((f'%{keyword}%', f'%{keyword}%'))
+    if gender:
+        where.append('s.性别=?')
+        params.append(str(gender).strip())
+    if boarding_status:
+        where.append('s.是否住校=?')
+        params.append(str(boarding_status).strip())
+    if class_role:
+        where.append('s.班级任职 LIKE ?')
+        params.append(f'%{str(class_role).strip()}%')
+    return ' AND '.join(where), params
+
+
+def query_students(
+    fields: list[str] | None = None,
+    keyword: str = '',
+    gender: str = '',
+    boarding_status: str = '',
+    class_role: str = '',
+    limit: int = 100,
+) -> dict:
+    """按字段白名单批量查询当前班级学生，不返回电话、住址或备注。"""
+    selected = _student_query_fields(fields)
+    limit = max(1, min(int(limit), MAX_STUDENT_QUERY_LIMIT))
+    conn = db.get_conn()
+    scope, params = _student_query_scope(
+        keyword=keyword, gender=gender, boarding_status=boarding_status, class_role=class_role,
+    )
+    count = conn.execute(
+        'SELECT COUNT(*) AS count FROM students s JOIN student_enrollments e ON e.student_id=s.id '
+        f'WHERE {scope}', tuple(params),
+    ).fetchone()
+    columns = ', '.join(f'{expression} AS "{label}"' for _, expression, label in selected)
+    rows = conn.execute(
+        'SELECT ' + columns + ' FROM students s JOIN student_enrollments e ON e.student_id=s.id '
+        f'WHERE {scope} ORDER BY s.学号, s.id LIMIT ?',
+        (*params, limit),
+    ).fetchall()
+    total = int(count['count'] if count else 0)
+    return {
+        'fields': [name for name, _, _ in selected],
+        'students': [dict(row) for row in rows],
+        'count': len(rows),
+        'total_count': total,
+        'truncated': total > limit,
+    }
+
+
+def aggregate_students(
+    group_by: str,
+    keyword: str = '',
+    gender: str = '',
+    boarding_status: str = '',
+    class_role: str = '',
+    include_empty: bool = False,
+    include_students: bool = True,
+    limit: int = MAX_STUDENT_QUERY_LIMIT,
+) -> dict:
+    """按字段白名单聚合当前班级学生，适合职业、住校和性别分布分析。"""
+    selected = _student_query_fields([group_by])
+    group_field = selected[0][0]
+    query = query_students(
+        fields=['student_id', 'student_no', 'student_name', group_field],
+        keyword=keyword, gender=gender, boarding_status=boarding_status,
+        class_role=class_role, limit=limit,
+    )
+    group_column = STUDENT_QUERY_FIELDS[group_field][1].split('.')[-1]
+    groups: dict[str, dict] = {}
+    empty_count = 0
+    for row in query['students']:
+        value = str(row.get(group_column) or '').strip()
+        if not value:
+            empty_count += 1
+            if not include_empty:
+                continue
+            value = '未填写'
+        group = groups.setdefault(value, {'value': value, 'count': 0, 'students': []})
+        group['count'] += 1
+        if include_students:
+            group['students'].append({
+                'id': row.get('id'),
+                '学号': row.get('学号', ''),
+                '姓名': row.get('姓名', ''),
+            })
+    ordered = sorted(groups.values(), key=lambda item: (-item['count'], item['value']))
+    if not include_students:
+        for item in ordered:
+            item.pop('students', None)
+    return {
+        'group_by': group_field,
+        'groups': ordered,
+        'student_count': query['total_count'],
+        'included_student_count': query['count'],
+        'empty_count': empty_count,
+        'truncated': query['truncated'],
+    }
 
 
 def _student_identity(student_id: int | None = None) -> tuple[int | None, str, str]:
@@ -214,3 +361,14 @@ def get_communications_list(
     params.append(limit)
     records = [dict(row) for row in db.get_conn().execute(sql, tuple(params)).fetchall()]
     return {'student': {'id': student_id, '姓名': student_name} if student_id else None, 'communications': records}
+
+
+def get_school_calendar(
+    date_from: str = '',
+    date_to: str = '',
+    day_type: str = '',
+    limit: int = 100,
+) -> dict:
+    """查询当前学期校历，不返回学生敏感信息。"""
+    return school_calendar.query_calendar(
+        date_from=date_from, date_to=date_to, day_type=day_type, limit=limit)

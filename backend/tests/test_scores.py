@@ -111,6 +111,47 @@ class ScoreServiceTest(unittest.TestCase):
         self.assertEqual(first_student_latest['stratum'], 'B层')
         self.assertIsNone(summary['students'][1]['exams'][-1]['total'])
 
+    def test_subject_selection_uses_each_students_exam_scope(self):
+        subjects = ['语文', '数学', '英语', '物理', '历史', '化学', '生物', '地理', '政治']
+        for name in subjects:
+            scores.create_subject(name=name, full_score=100)
+        rows = []
+        student_subjects = {
+            1: ['语文', '数学', '英语', '物理', '化学', '生物'],
+            2: ['语文', '数学', '英语', '历史', '地理', '政治'],
+        }
+        for student_id, selected in student_subjects.items():
+            for index, subject in enumerate(selected, start=1):
+                rows.append({
+                    'student_id': student_id, 'exam_name': '高一月考',
+                    'exam_date': '2026-10-10', 'subject': subject,
+                    'score': 60 + index, 'record_status': '正常',
+                })
+        self.commit('selection-exam', rows)
+        config = scores.list_config()
+        subject_by_name = {item['name']: item for item in config['subjects']}
+        for name in ('语文', '数学', '英语'):
+            scores.update_subject(subject_by_name[name]['id'], subject_group='必考')
+        for name in ('物理', '历史'):
+            scores.update_subject(subject_by_name[name]['id'], subject_group='首选')
+        for name in ('化学', '生物', '地理', '政治'):
+            scores.update_subject(subject_by_name[name]['id'], subject_group='再选')
+        scores.update_term_settings(mode='3+1+2')
+        scores.save_student_subjects(1, [subject_by_name[name]['id'] for name in ('物理', '化学', '生物')])
+        scores.save_student_subjects(2, [subject_by_name[name]['id'] for name in ('历史', '地理', '政治')])
+
+        summary = scores.score_summary()
+        first = summary['students'][0]['exams'][0]
+        second = summary['students'][1]['exams'][0]
+        self.assertTrue(first['complete'])
+        self.assertTrue(second['complete'])
+        self.assertEqual(first['expected_subject_count'], 6)
+        self.assertEqual(second['expected_subject_count'], 6)
+        self.assertEqual(len(summary['students'][0]['selected_subject_ids']), 3)
+        chemistry = next(item for item in summary['exams'][0]['subject_stats'] if item['subject'] == '化学')
+        self.assertEqual(chemistry['eligible_count'], 1)
+        self.assertEqual(chemistry['missing_count'], 0)
+
     def test_rule_is_idempotent_handled_resolved_and_reopened(self):
         for key, exam_name, exam_date, score in (
             ('rule-exam-1', '第一次月考', '2026-09-10', 90),

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+import ast
+import time
 from typing import Any, AsyncIterator
 
-from .agent_service import invoke_tool, record_tool_failure
+from .agent_service import invoke_tool, record_model_usage, record_tool_failure
+from . import actions
 from .model_client import ModelResponse, OpenAICompatibleClient
-from .planner import AgentPlan, AgentPlanner, PlanStep, PlanningError, build_rule_plan
+from .planner import (
+    AgentPlan, AgentPlanner, PlanStep, PlanningError, _is_class_student_analysis,
+    build_rule_plan, normalize_query_text,
+)
 from .prompt import system_prompt
 from .session_store import SessionStore
 from .tool_registry import ToolError, build_registry
@@ -36,6 +42,14 @@ class AgentRunner:
         text = str(text or '').strip()
         if not text:
             return '请输入要查询的内容。'
+        handled, confirmation_answer = actions.handle_confirmation(
+            text, session_id=session_id, actor_id=actor_id, channel=channel)
+        if handled:
+            messages = self.session_store.load(session_id)
+            messages.append({'role': 'user', 'content': text})
+            messages.append({'role': 'assistant', 'content': confirmation_answer})
+            self.session_store.save(session_id, messages)
+            return confirmation_answer
         messages = self.session_store.load(session_id)
         system_message = {'role': 'system', 'content': system_prompt()}
         if not messages or messages[0].get('role') != 'system':
@@ -47,18 +61,20 @@ class AgentRunner:
         tools = registry.model_tools()
         direct_tool = _infer_direct_tool(text)
         if direct_tool:
-            _apply_direct_tool(messages, text, channel, actor_id)
+            _apply_direct_tool(messages, text, channel, actor_id, session_id)
         else:
             planned_answer = await self._run_planned_chat(
-                messages, text, registry, channel, actor_id
+                messages, text, registry, channel, actor_id, session_id
             )
             if planned_answer is not None:
+                messages.append({'role': 'assistant', 'content': planned_answer})
                 self.session_store.save(session_id, messages)
                 return planned_answer
         failure_counts: dict[str, int] = {}
 
         for _ in range(self.max_turns):
-            response = await self.model_client.complete(messages, tools)
+            response = await self._complete_with_usage(
+                messages, tools, session_id=session_id, channel=channel, actor_id=actor_id)
             if not response.tool_calls:
                 answer = response.content.strip() or '模型没有返回可显示的内容。'
                 assistant_message = {'role': 'assistant', 'content': answer}
@@ -72,7 +88,7 @@ class AgentRunner:
             halt_message = ''
             for call in response.tool_calls:
                 result = self._execute_tool_with_retry(
-                    call.name, call.arguments, channel, actor_id, failure_counts
+                    call.name, call.arguments, channel, actor_id, failure_counts, session_id
                 )
                 messages.append({
                     'role': 'tool',
@@ -103,6 +119,15 @@ class AgentRunner:
         if not text:
             yield {'type': 'delta', 'content': '请输入要查询的内容。'}
             return
+        handled, confirmation_answer = actions.handle_confirmation(
+            text, session_id=session_id, actor_id=actor_id, channel=channel)
+        if handled:
+            messages = self.session_store.load(session_id)
+            messages.append({'role': 'user', 'content': text})
+            messages.append({'role': 'assistant', 'content': confirmation_answer})
+            self.session_store.save(session_id, messages)
+            yield {'type': 'delta', 'content': confirmation_answer}
+            return
         messages = self.session_store.load(session_id)
         system_message = {'role': 'system', 'content': system_prompt()}
         if not messages or messages[0].get('role') != 'system':
@@ -114,13 +139,14 @@ class AgentRunner:
         tools = registry.model_tools()
         direct_tool = _infer_direct_tool(text)
         if direct_tool:
-            _apply_direct_tool(messages, text, channel, actor_id)
+            _apply_direct_tool(messages, text, channel, actor_id, session_id)
         else:
             planned_result = await self._run_planned_stream(
-                messages, text, registry, channel, actor_id
+                messages, text, registry, channel, actor_id, session_id
             )
             if planned_result is not None:
                 planned_answer, plan_events = planned_result
+                messages.append({'role': 'assistant', 'content': planned_answer})
                 self.session_store.save(session_id, messages)
                 for event in plan_events:
                     yield event
@@ -129,14 +155,21 @@ class AgentRunner:
         failure_counts: dict[str, int] = {}
 
         for _ in range(self.max_turns):
+            started = time.monotonic()
             response = None
-            async for event in self.model_client.iter_complete(messages, tools):
-                if event.content:
-                    yield {'type': 'delta', 'content': event.content}
-                if event.response:
-                    response = event.response
+            try:
+                async for event in self.model_client.iter_complete(messages, tools):
+                    if event.content:
+                        yield {'type': 'delta', 'content': event.content}
+                    if event.response:
+                        response = event.response
+            except Exception as exc:
+                self._record_model_usage(session_id, channel, actor_id, 'error', started, error=str(exc))
+                raise
             if response is None:
+                self._record_model_usage(session_id, channel, actor_id, 'error', started, error='模型流式响应缺少最终结果')
                 raise RuntimeError('模型流式响应缺少最终结果')
+            self._record_model_usage(session_id, channel, actor_id, 'success', started, response=response)
             if not response.tool_calls:
                 answer = response.content.strip() or '模型没有返回可显示的内容。'
                 messages.append({'role': 'assistant', 'content': answer})
@@ -146,7 +179,7 @@ class AgentRunner:
             halt_message = ''
             for call in response.tool_calls:
                 result = self._execute_tool_with_retry(
-                    call.name, call.arguments, channel, actor_id, failure_counts
+                    call.name, call.arguments, channel, actor_id, failure_counts, session_id
                 )
                 messages.append({
                     'role': 'tool',
@@ -167,10 +200,37 @@ class AgentRunner:
         self.session_store.save(session_id, messages)
         yield {'type': 'delta', 'content': answer}
 
-    @staticmethod
-    def _call_tool(name: str, raw_arguments: str, channel: str, actor_id: str) -> dict[str, Any]:
+    async def _complete_with_usage(self, messages, tools, *, session_id, channel, actor_id):
+        started = time.monotonic()
         try:
-            arguments = json.loads(raw_arguments or '{}')
+            response = await self.model_client.complete(messages, tools)
+        except Exception as exc:
+            self._record_model_usage(session_id, channel, actor_id, 'error', started, error=str(exc))
+            raise
+        self._record_model_usage(session_id, channel, actor_id, 'success', started, response=response)
+        return response
+
+    def _record_model_usage(self, session_id, channel, actor_id, status, started, response=None, error=''):
+        config = getattr(self.model_client, 'config', None)
+        model = str(getattr(config, 'model', '') or '')
+        record_model_usage(
+            session_id=session_id, channel=channel, actor_id=actor_id, model=model,
+            status=status, duration_ms=round((time.monotonic() - started) * 1000),
+            usage=getattr(response, 'usage', None) if response else None,
+            error_message=error,
+        )
+
+    def _planner(self, channel, actor_id, session_id):
+        return AgentPlanner(
+            self.model_client,
+            usage_recorder=lambda response, started, status, error: self._record_model_usage(
+                session_id, channel, actor_id, status, started, response=response, error=error),
+        )
+
+    @staticmethod
+    def _call_tool(name: str, raw_arguments: str, channel: str, actor_id: str, session_id: str = '') -> dict[str, Any]:
+        try:
+            arguments = _parse_tool_arguments(raw_arguments)
         except (TypeError, ValueError):
             message = '工具参数不是有效 JSON'
             record_tool_failure(channel, actor_id, name, {}, 'error', message)
@@ -180,7 +240,7 @@ class AgentRunner:
             record_tool_failure(channel, actor_id, name, {}, 'error', message)
             return _tool_error('invalid_arguments', message, retryable=True)
         try:
-            return invoke_tool(name, arguments, channel=channel, actor_id=actor_id)
+            return invoke_tool(name, arguments, channel=channel, actor_id=actor_id, session_id=session_id)
         except ToolError as exc:
             return _tool_error(exc.code, str(exc), retryable=exc.retryable, auto_retry=exc.auto_retry)
 
@@ -192,6 +252,7 @@ class AgentRunner:
         channel: str,
         actor_id: str,
         failure_counts: dict[str, int],
+        session_id: str = '',
     ) -> dict[str, Any]:
         key = f'{name}:{raw_arguments}'
         if failure_counts.get(key, 0) >= 1:
@@ -199,7 +260,7 @@ class AgentRunner:
             record_tool_failure(channel, actor_id, name, {}, 'retry_exhausted', message)
             return _tool_error('retry_exhausted', message, retryable=False)
 
-        result = cls._call_tool(name, raw_arguments, channel, actor_id)
+        result = cls._call_tool(name, raw_arguments, channel, actor_id, session_id)
         error = result.get('error')
         if not error:
             return result
@@ -207,7 +268,7 @@ class AgentRunner:
         if not error.get('auto_retry'):
             return result
 
-        retry_result = cls._call_tool(name, raw_arguments, channel, actor_id)
+        retry_result = cls._call_tool(name, raw_arguments, channel, actor_id, session_id)
         if not retry_result.get('error'):
             return retry_result
         retry_result['error']['retry_attempts'] = 1
@@ -220,26 +281,32 @@ class AgentRunner:
         registry,
         channel: str,
         actor_id: str,
+        session_id: str,
     ) -> str | None:
         plan = build_rule_plan(text, registry)
         if plan is None and _should_attempt_model_plan(text):
             try:
-                plan = await AgentPlanner(self.model_client).create(
+                plan = await self._planner(channel, actor_id, session_id).create(
                     text, registry, _recent_context(messages)
                 )
             except PlanningError:
                 return None
         if plan is None:
             return None
-        executed, _results = self._execute_plan(plan, channel, actor_id)
+        plan = _validate_plan_for_request(plan, text, registry)
+        executed, _results = self._execute_plan(plan, channel, actor_id, session_id=session_id)
         if _has_retry_exhausted(executed):
             return _tool_failure_message()
+        recovery_plan = _recovery_plan_for_empty_batch(text, plan, executed, registry)
+        if recovery_plan:
+            plan = recovery_plan
+            executed, _results = self._execute_plan(plan, channel, actor_id, session_id=session_id)
         if _should_replan(executed):
             try:
-                plan = await AgentPlanner(self.model_client).create(
+                plan = await self._planner(channel, actor_id, session_id).create(
                     text, registry, _recent_context(messages) + '\n' + _plan_failure_context(executed)
                 )
-                executed, _results = self._execute_plan(plan, channel, actor_id)
+                executed, _results = self._execute_plan(plan, channel, actor_id, session_id=session_id)
             except PlanningError:
                 pass
             if _has_retry_exhausted(executed):
@@ -258,28 +325,35 @@ class AgentRunner:
         registry,
         channel: str,
         actor_id: str,
+        session_id: str,
     ) -> tuple[str, list[dict[str, Any]]] | None:
         plan = build_rule_plan(text, registry)
         if plan is None and _should_attempt_model_plan(text):
             try:
-                plan = await AgentPlanner(self.model_client).create_stream(
+                plan = await self._planner(channel, actor_id, session_id).create_stream(
                     text, registry, _recent_context(messages)
                 )
             except PlanningError:
                 return None
         if plan is None:
             return None
+        plan = _validate_plan_for_request(plan, text, registry)
         plan_events = [_plan_started_event(plan)]
-        executed, _results = self._execute_plan(plan, channel, actor_id, plan_events)
+        executed, _results = self._execute_plan(plan, channel, actor_id, plan_events, session_id=session_id)
         if _has_retry_exhausted(executed):
             return _tool_failure_message(), plan_events
+        recovery_plan = _recovery_plan_for_empty_batch(text, plan, executed, registry)
+        if recovery_plan:
+            plan = recovery_plan
+            plan_events.append(_plan_started_event(plan, status='replanned'))
+            executed, _results = self._execute_plan(plan, channel, actor_id, plan_events, session_id=session_id)
         if _should_replan(executed):
             try:
-                plan = await AgentPlanner(self.model_client).create_stream(
+                plan = await self._planner(channel, actor_id, session_id).create_stream(
                     text, registry, _recent_context(messages) + '\n' + _plan_failure_context(executed)
                 )
                 plan_events.append(_plan_started_event(plan, status='replanned'))
-                executed, _results = self._execute_plan(plan, channel, actor_id, plan_events)
+                executed, _results = self._execute_plan(plan, channel, actor_id, plan_events, session_id=session_id)
             except PlanningError:
                 pass
             if _has_retry_exhausted(executed):
@@ -308,6 +382,7 @@ class AgentRunner:
         channel: str,
         actor_id: str,
         events: list[dict[str, Any]] | None = None,
+        session_id: str = '',
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         failure_counts: dict[str, int] = {}
         results: dict[str, Any] = {}
@@ -323,7 +398,7 @@ class AgentRunner:
                 arguments = _resolve_references(step.arguments, results)
                 raw_arguments = json.dumps(arguments, ensure_ascii=False)
                 result = self._execute_tool_with_retry(
-                    step.tool, raw_arguments, channel, actor_id, failure_counts
+                    step.tool, raw_arguments, channel, actor_id, failure_counts, session_id
                 )
             except PlanningError as exc:
                 result = _tool_error('plan_error', str(exc), retryable=False)
@@ -362,13 +437,16 @@ def _infer_direct_tool(text: str) -> tuple[str, str, str] | None:
         return 'tasks_list', '{}', 'direct-tasks-list'
     if any(term in text for term in ('家校沟通', '家长联系', '家访记录')):
         return 'communications_list', '{}', 'direct-communications-list'
+    if any(term in text for term in ('校历', '上课日', '放假', '调休', '节假日', '考试安排')):
+        return 'school_calendar_query', '{}', 'direct-school-calendar-query'
     return None
 
 
 def _should_attempt_model_plan(text: str) -> bool:
     return any(term in text for term in (
         '查询', '查看', '统计', '分析', '有没有', '是否', '最近', '详细',
-        '学生', '同学', '成绩', '考勤', '任务', '沟通',
+        '学生', '同学', '家长', '监护人', '职业', '分布', '所有', '每个',
+        '成绩', '考勤', '任务', '沟通', '校历', '上课日', '放假', '调休', '节假日',
     ))
 
 
@@ -502,8 +580,44 @@ def _plan_step_label(step: PlanStep) -> str:
         'tasks_list': '查询待办任务',
         'communications_list': '查询家校沟通',
         'class_student_count': '统计班级人数',
+        'students_query': '批量查询学生信息',
+        'students_aggregate': '统计学生分布',
+        'school_calendar_query': '查询校历',
     }
     return labels.get(step.tool, step.tool)
+
+
+def _validate_plan_for_request(plan: AgentPlan, text: str, registry) -> AgentPlan:
+    """阻止全班问题退化为单个学生搜索；错误计划直接换成确定性批量计划。"""
+    if not _is_class_student_analysis(normalize_query_text(text)):
+        return plan
+    if any(step.tool in {'students_search', 'student_get_profile'} for step in plan.steps):
+        corrected = build_rule_plan(text, registry)
+        if corrected:
+            return corrected
+    return plan
+
+
+def _recovery_plan_for_empty_batch(
+    text: str,
+    plan: AgentPlan,
+    executed: list[dict[str, Any]],
+    registry,
+) -> AgentPlan | None:
+    """批量请求因错误关键词返回空结果时，最多恢复一次为无关键词查询。"""
+    if not _is_class_student_analysis(normalize_query_text(text)):
+        return None
+    for item in executed:
+        step = item['step']
+        result = item['result']
+        arguments = item['arguments']
+        if step.tool == 'students_search':
+            corrected = build_rule_plan(text, registry)
+            return corrected if corrected and corrected != plan else None
+        if step.tool == 'students_query' and arguments.get('keyword') and result.get('total_count') == 0:
+            corrected = build_rule_plan(text, registry)
+            return corrected if corrected and corrected != plan else None
+    return None
 
 
 def _has_retry_exhausted(executed: list[dict[str, Any]]) -> bool:
@@ -547,7 +661,7 @@ def _fallback_plan_answer(executed: list[dict[str, Any]]) -> str:
     return '查询已完成，但模型没有返回可显示的回答。'
 
 
-def _apply_direct_tool(messages: list[dict[str, Any]], text: str, channel: str, actor_id: str):
+def _apply_direct_tool(messages: list[dict[str, Any]], text: str, channel: str, actor_id: str, session_id: str = ''):
     direct_tool = _infer_direct_tool(text)
     if not direct_tool:
         return
@@ -561,7 +675,7 @@ def _apply_direct_tool(messages: list[dict[str, Any]], text: str, channel: str, 
             'function': {'name': tool_name, 'arguments': tool_arguments},
         }],
     })
-    result = AgentRunner._call_tool(tool_name, tool_arguments, channel, actor_id)
+    result = AgentRunner._call_tool(tool_name, tool_arguments, channel, actor_id, session_id)
     messages.append({
         'role': 'tool',
         'tool_call_id': tool_call_id,
@@ -578,6 +692,24 @@ def _tool_error(code: str, message: str, *, retryable: bool, auto_retry: bool = 
             'auto_retry': auto_retry,
         },
     }
+
+
+def _parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
+    text = str(raw_arguments or '{}').strip()
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        cleaned = text.removeprefix('```json').removeprefix('```').removesuffix('```').strip()
+        start, end = cleaned.find('{'), cleaned.rfind('}')
+        if start >= 0 and end > start:
+            cleaned = cleaned[start:end + 1]
+        try:
+            value = ast.literal_eval(cleaned)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError('工具参数不是有效 JSON') from exc
+    if not isinstance(value, dict):
+        raise ValueError('工具参数必须是对象')
+    return value
 
 
 def _tool_failure_message() -> str:

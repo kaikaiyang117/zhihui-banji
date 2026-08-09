@@ -12,7 +12,7 @@ import re
 import threading
 from uuid import uuid4
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -56,7 +56,7 @@ def _money(value, *, allow_zero: bool = False) -> float | None:
 def _date(value, label: str = '日期', *, required: bool = True, default_today: bool = False) -> str:
     text = _text(value)[:10]
     if not text and default_today:
-        text = date.today().isoformat()
+        text = clock.today().isoformat()
     if not text and not required:
         return ''
     try:
@@ -676,7 +676,7 @@ def class_summary(*, reference_date: str | None = None, conn=None) -> dict:
     conn = _conn(conn)
     ensure_legacy_migrated(conn=conn)
     overall = _totals(conn=conn)
-    current = _date(reference_date, '参考日期', default_today=True) if reference_date else date.today().isoformat()
+    current = _date(reference_date, '参考日期', default_today=True) if reference_date else clock.today().isoformat()
     current_date = date.fromisoformat(current)
     period_start = current_date.replace(day=1).isoformat()
     month = _totals(start=period_start, end=current, conn=conn)

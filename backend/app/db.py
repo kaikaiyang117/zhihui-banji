@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 24
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -1204,6 +1204,452 @@ def _migration_15(conn: sqlite3.Connection):
     ''')
 
 
+def _migration_16(conn: sqlite3.Connection):
+    """增加班会、活动、日志和知识库的结构化记录与关联表。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS meeting_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            format TEXT NOT NULL DEFAULT '主题班会',
+            content TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS meeting_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            template_id INTEGER REFERENCES meeting_templates(id) ON DELETE SET NULL,
+            held_on TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            format TEXT NOT NULL DEFAULT '主题班会',
+            content TEXT NOT NULL DEFAULT '',
+            participation TEXT NOT NULL DEFAULT '',
+            conclusion TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '已记录',
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
+            work_item_id INTEGER REFERENCES student_tasks(id) ON DELETE SET NULL,
+            legacy_row_no INTEGER,
+            legacy_payload TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS meeting_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meeting_id INTEGER NOT NULL REFERENCES meeting_records(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            participation TEXT NOT NULL DEFAULT '参加',
+            note TEXT NOT NULL DEFAULT '',
+            UNIQUE(meeting_id, student_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS meeting_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meeting_id INTEGER NOT NULL REFERENCES meeting_records(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            owner TEXT NOT NULL DEFAULT '班主任',
+            due_at TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '待处理',
+            work_item_id INTEGER REFERENCES student_tasks(id) ON DELETE SET NULL,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            name TEXT NOT NULL,
+            activity_type TEXT NOT NULL DEFAULT '其他',
+            description TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            template_id INTEGER REFERENCES activity_templates(id) ON DELETE SET NULL,
+            occurred_on TEXT NOT NULL,
+            name TEXT NOT NULL,
+            activity_type TEXT NOT NULL DEFAULT '其他',
+            budget REAL NOT NULL DEFAULT 0,
+            participant_count INTEGER NOT NULL DEFAULT 0,
+            summary TEXT NOT NULL DEFAULT '',
+            result TEXT NOT NULL DEFAULT '',
+            retrospective TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '计划中',
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
+            work_item_id INTEGER REFERENCES student_tasks(id) ON DELETE SET NULL,
+            legacy_row_no INTEGER,
+            legacy_payload TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_id INTEGER NOT NULL REFERENCES activity_records(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            participation TEXT NOT NULL DEFAULT '参加',
+            note TEXT NOT NULL DEFAULT '',
+            UNIQUE(activity_id, student_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_id INTEGER NOT NULL REFERENCES activity_records(id) ON DELETE CASCADE,
+            original_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            mime_type TEXT NOT NULL DEFAULT '',
+            size INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS diary_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            diary_date TEXT NOT NULL,
+            weather TEXT NOT NULL DEFAULT '',
+            work TEXT NOT NULL DEFAULT '',
+            event TEXT NOT NULL DEFAULT '',
+            reflection TEXT NOT NULL DEFAULT '',
+            todo TEXT NOT NULL DEFAULT '',
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_id TEXT NOT NULL DEFAULT '',
+            legacy_row_no INTEGER,
+            legacy_payload TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT NOT NULL DEFAULT '',
+            deleted_by TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS diary_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            diary_id INTEGER NOT NULL REFERENCES diary_entries(id) ON DELETE CASCADE,
+            link_type TEXT NOT NULL,
+            link_id INTEGER,
+            student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+            label TEXT NOT NULL DEFAULT '',
+            UNIQUE(diary_id, link_type, link_id, student_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER REFERENCES terms(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '未分类',
+            tags TEXT NOT NULL DEFAULT '[]',
+            content_hash TEXT NOT NULL DEFAULT '',
+            file_mtime REAL NOT NULL DEFAULT 0,
+            sync_status TEXT NOT NULL DEFAULT '同步',
+            linked_source_type TEXT NOT NULL DEFAULT '',
+            linked_source_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_note_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id INTEGER NOT NULL REFERENCES knowledge_notes(id) ON DELETE CASCADE,
+            link_type TEXT NOT NULL,
+            link_id INTEGER,
+            label TEXT NOT NULL DEFAULT '',
+            UNIQUE(note_id, link_type, link_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS domain4_migration_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            source_sheet TEXT NOT NULL,
+            source_version TEXT NOT NULL DEFAULT 'v1',
+            source_rows INTEGER NOT NULL DEFAULT 0,
+            imported_entries INTEGER NOT NULL DEFAULT 0,
+            skipped_entries INTEGER NOT NULL DEFAULT 0,
+            report TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, source_sheet, source_version)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_source_key
+            ON meeting_records(class_id, term_id, source_key)
+            WHERE source_key<>'';
+        CREATE INDEX IF NOT EXISTS idx_meeting_scope_date
+            ON meeting_records(class_id, term_id, held_on, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_meeting_participants_student
+            ON meeting_participants(student_id, meeting_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_source_key
+            ON activity_records(class_id, term_id, source_key)
+            WHERE source_key<>'';
+        CREATE INDEX IF NOT EXISTS idx_activity_scope_date
+            ON activity_records(class_id, term_id, occurred_on, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_activity_participants_student
+            ON activity_participants(student_id, activity_id);
+        CREATE INDEX IF NOT EXISTS idx_diary_scope_date
+            ON diary_entries(class_id, term_id, diary_date, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_diary_links_source
+            ON diary_links(link_type, link_id, student_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_scope_category
+            ON knowledge_notes(class_id, term_id, category, sync_status);
+    ''')
+
+
+def _migration_17(conn: sqlite3.Connection):
+    """增加可追溯报告快照。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS report_archives (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            report_type TEXT NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            archived_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, report_type, period_start, period_end, student_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_report_archives_scope
+            ON report_archives(class_id, term_id, report_type, period_start, period_end);
+    ''')
+
+
+def _migration_18(conn: sqlite3.Connection):
+    """增加 Agent 写入确认状态机。"""
+    _add_column(conn, 'communications', 'source_type', "TEXT NOT NULL DEFAULT 'manual'")
+    _add_column(conn, 'communications', 'source_id', 'TEXT NOT NULL DEFAULT \'\'')
+    _add_column(conn, 'communications', 'source_key', "TEXT NOT NULL DEFAULT ''")
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS agent_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            session_id TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'web',
+            actor_id TEXT NOT NULL DEFAULT '',
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL DEFAULT '{}',
+            arguments_hash TEXT NOT NULL,
+            confirmation_hash TEXT NOT NULL,
+            preview TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            expires_at TEXT NOT NULL,
+            backup_file TEXT NOT NULL DEFAULT '',
+            result_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            confirmed_at TEXT NOT NULL DEFAULT '',
+            executed_at TEXT NOT NULL DEFAULT '',
+            UNIQUE(session_id, arguments_hash, status)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_actions_session
+            ON agent_actions(session_id, actor_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_actions_expiry
+            ON agent_actions(status, expires_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_communications_source_key
+            ON communications(class_id, term_id, source_key)
+            WHERE source_key<>'';
+    ''')
+
+
+def _migration_19(conn: sqlite3.Connection):
+    """增加微信提醒发送去重记录。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS wechat_reminder_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            term_id INTEGER NOT NULL REFERENCES terms(id),
+            task_id INTEGER NOT NULL REFERENCES student_tasks(id) ON DELETE CASCADE,
+            recipient TEXT NOT NULL,
+            reminder_key TEXT NOT NULL,
+            sent_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, task_id, recipient, reminder_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_wechat_reminder_receipts_scope
+            ON wechat_reminder_receipts(class_id, term_id, recipient, sent_at);
+    ''')
+
+
+def _migration_20(conn: sqlite3.Connection):
+    """增加个人健康目标、周期复盘和本地提醒配置。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS health_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            metric TEXT NOT NULL UNIQUE,
+            target_value REAL,
+            unit TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS health_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            period_type TEXT NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            next_plan TEXT NOT NULL DEFAULT '',
+            metrics_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(period_type, period_start, period_end)
+        );
+        CREATE TABLE IF NOT EXISTS health_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reminder_type TEXT NOT NULL UNIQUE,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            remind_time TEXT NOT NULL DEFAULT '21:00',
+            message TEXT NOT NULL DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+    ''')
+
+
+def _migration_21(conn: sqlite3.Connection):
+    """增加 Agent 会话标题和模型调用统计。"""
+    _add_column(conn, 'agent_sessions', 'title', "TEXT NOT NULL DEFAULT '新会话'")
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS agent_model_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'web',
+            actor_id TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'success',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_model_usage_created
+            ON agent_model_usage(channel, model, status, created_at);
+    ''')
+
+
+def _migration_22(conn: sqlite3.Connection):
+    """增加高中选科模式、科目分组和学生选科关系。"""
+    for column, definition in (
+        ('subject_group', "TEXT NOT NULL DEFAULT '必考'"),
+        ('score_type', "TEXT NOT NULL DEFAULT '原始分'"),
+    ):
+        _add_column(conn, 'score_subjects', column, definition)
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS score_term_settings (
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            mode TEXT NOT NULL DEFAULT '固定科目',
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(class_id, term_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS student_score_subjects (
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            subject_id INTEGER NOT NULL REFERENCES score_subjects(id) ON DELETE CASCADE,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(class_id, term_id, student_id, subject_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS student_score_profiles (
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(class_id, term_id, student_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_student_score_subjects_scope
+            ON student_score_subjects(class_id, term_id, student_id);
+    ''')
+
+
+def _migration_23(conn: sqlite3.Connection):
+    """补充可表示空选科结果的学生选科档案。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS student_score_profiles (
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY(class_id, term_id, student_id)
+        );
+    ''')
+
+
+def _migration_24(conn: sqlite3.Connection):
+    """增加学期校历日期与导入批次。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS school_calendar_days (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            calendar_date TEXT NOT NULL,
+            day_type TEXT NOT NULL DEFAULT '上课日',
+            title TEXT NOT NULL DEFAULT '',
+            is_school_day INTEGER NOT NULL DEFAULT 1,
+            note TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'manual',
+            source_filename TEXT NOT NULL DEFAULT '',
+            source_row INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, calendar_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS school_calendar_import_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+            term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+            request_id TEXT NOT NULL DEFAULT '',
+            filename TEXT NOT NULL DEFAULT '',
+            imported INTEGER NOT NULL DEFAULT 0,
+            updated INTEGER NOT NULL DEFAULT 0,
+            skipped INTEGER NOT NULL DEFAULT 0,
+            conflict_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(class_id, term_id, request_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_school_calendar_scope_date
+            ON school_calendar_days(class_id, term_id, calendar_date);
+        CREATE INDEX IF NOT EXISTS idx_school_calendar_import_scope
+            ON school_calendar_import_runs(class_id, term_id, created_at);
+    ''')
+
+
 MIGRATIONS = {
     2: _migration_2,
     3: _migration_3,
@@ -1219,6 +1665,15 @@ MIGRATIONS = {
     13: _migration_13,
     14: _migration_14,
     15: _migration_15,
+    16: _migration_16,
+    17: _migration_17,
+    18: _migration_18,
+    19: _migration_19,
+    20: _migration_20,
+    21: _migration_21,
+    22: _migration_22,
+    23: _migration_23,
+    24: _migration_24,
 }
 
 
@@ -1576,17 +2031,66 @@ def load_agent_session(session_id: str) -> list[dict]:
     return value if isinstance(value, list) else []
 
 
-def save_agent_session(session_id: str, messages: list[dict]):
+def save_agent_session(session_id: str, messages: list[dict], title: str | None = None):
+    title_value = str(title or '新会话').strip()[:120] or '新会话'
     get_conn().execute(
-        "INSERT INTO agent_sessions(session_id, messages, updated_at) VALUES(?,?,datetime('now','localtime')) "
-        'ON CONFLICT(session_id) DO UPDATE SET messages=excluded.messages, updated_at=excluded.updated_at',
-        (session_id, json.dumps(messages, ensure_ascii=False)),
+        "INSERT INTO agent_sessions(session_id, messages, title, updated_at) VALUES(?,?,?,datetime('now','localtime')) "
+        'ON CONFLICT(session_id) DO UPDATE SET messages=excluded.messages, '
+        'title=CASE WHEN ? <> \'新会话\' THEN ? ELSE agent_sessions.title END, updated_at=excluded.updated_at',
+        (session_id, json.dumps(messages, ensure_ascii=False), title_value, title_value, title_value),
     )
     get_conn().commit()
 
 
 def delete_agent_session(session_id: str):
     get_conn().execute('DELETE FROM agent_sessions WHERE session_id=?', (session_id,))
+    get_conn().commit()
+
+
+def list_agent_sessions(prefix: str = '') -> list[dict]:
+    params = []
+    where = ''
+    if prefix:
+        where = ' WHERE session_id LIKE ?'
+        params.append(f'{prefix}%')
+    rows = get_conn().execute(
+        'SELECT session_id, title, updated_at, messages FROM agent_sessions' + where +
+        ' ORDER BY updated_at DESC', tuple(params)).fetchall()
+    result = []
+    for row in rows:
+        try:
+            messages = json.loads(row['messages'])
+        except (TypeError, ValueError):
+            messages = []
+        result.append({'session_id': row['session_id'], 'title': row['title'] or '新会话',
+                       'updated_at': row['updated_at'], 'message_count': len(messages) if isinstance(messages, list) else 0})
+    return result
+
+
+def rename_agent_session(session_id: str, title: str):
+    title = str(title or '').strip()[:120]
+    if not title:
+        raise ValueError('会话名称不能为空')
+    cur = get_conn().execute(
+        "UPDATE agent_sessions SET title=?, updated_at=datetime('now','localtime') WHERE session_id=?",
+        (title, session_id))
+    get_conn().commit()
+    if not cur.rowcount:
+        raise KeyError(session_id)
+    return {'session_id': session_id, 'title': title}
+
+
+def record_agent_model_usage(*, session_id: str, channel: str, actor_id: str, model: str,
+                             status: str, duration_ms: int = 0, prompt_tokens: int = 0,
+                             completion_tokens: int = 0, error_message: str = ''):
+    get_conn().execute(
+        '''INSERT INTO agent_model_usage(
+               session_id, channel, actor_id, model, status, duration_ms,
+               prompt_tokens, completion_tokens, error_message)
+           VALUES(?,?,?,?,?,?,?,?,?)''',
+        (session_id, channel, actor_id, model, status, max(0, int(duration_ms or 0)),
+         max(0, int(prompt_tokens or 0)), max(0, int(completion_tokens or 0)), str(error_message or '')[:500]),
+    )
     get_conn().commit()
 
 

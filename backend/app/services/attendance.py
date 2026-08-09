@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 import json
 
-from .. import db
+from .. import clock, db
 from . import audit, class_context
 
 
@@ -22,7 +22,7 @@ class AttendanceError(ValueError):
 
 
 def _today() -> str:
-    return date.today().isoformat()
+    return clock.today().isoformat()
 
 
 def _now() -> str:

@@ -80,10 +80,18 @@ function chooseClass(event) {
   selectedTermId.value = String(active?.id || '')
 }
 
-function applyScope() {
+function notifyContextChanged(classId = selectedClassId.value, termId = selectedTermId.value) {
+  window.dispatchEvent(new CustomEvent('workbench-context-change', {
+    detail: { classId, termId },
+  }))
+}
+
+async function applyScope() {
   if (!selectedClassId.value || !selectedTermId.value) return
   setStoredScope(selectedClassId.value, selectedTermId.value)
-  window.location.reload()
+  open.value = false
+  notifyContextChanged()
+  await load()
 }
 
 async function openManager() {
@@ -137,7 +145,9 @@ async function createClass() {
   try {
     const result = await post('/api/classes', newClass.value)
     setStoredScope(result.class_id, result.term_id)
-    window.location.reload()
+    manageOpen.value = false
+    notifyContextChanged(result.class_id, result.term_id)
+    await load()
   } catch (err) {
     message.value = err.message
   } finally {
@@ -182,7 +192,9 @@ async function createTerm() {
   try {
     const result = await post(`/api/classes/${selectedClass.value.id}/terms`, newTerm.value)
     setStoredScope(selectedClass.value.id, result.term_id)
-    window.location.reload()
+    manageOpen.value = false
+    notifyContextChanged(selectedClass.value.id, result.term_id)
+    await load()
   } catch (err) {
     message.value = err.message
   } finally {
@@ -231,7 +243,9 @@ async function rolloverCurrentTerm() {
       archive_source: true,
     })
     setStoredScope(result.class_id, result.term_id)
-    window.location.reload()
+    manageOpen.value = false
+    notifyContextChanged(result.class_id, result.term_id)
+    await load()
   } catch (err) {
     message.value = err.message
   } finally {

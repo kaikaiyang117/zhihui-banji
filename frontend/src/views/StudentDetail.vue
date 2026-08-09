@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, AlertTriangle, ArrowLeft, CalendarCheck, ClipboardList, Flag, MessageCircle, Plus, Tag, UserRound, TrendingUp, Star } from 'lucide-vue-next'
+import { Activity, AlertTriangle, ArrowLeft, CalendarCheck, ClipboardList, FileText, Flag, MessageCircle, Plus, Tag, UserRound, TrendingUp, Star } from 'lucide-vue-next'
 import { get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 
@@ -97,6 +97,7 @@ onMounted(load)
       <div class="overview-card"><div class="oc-icon red"><Tag :size="20" /></div><div><div class="oc-label">关注事项</div><div class="oc-value">{{ data.focus.filter(f => f.status !== '已结束').length }}</div></div></div>
       <div class="overview-card"><div class="oc-icon blue"><TrendingUp :size="20" /></div><div><div class="oc-label">成绩考试</div><div class="oc-value">{{ data.score_summary.exams.length }}</div></div></div>
       <div class="overview-card"><div class="oc-icon orange"><Star :size="20" /></div><div><div class="oc-label">行为积分</div><div class="oc-value">{{ data.points_summary.total }}</div></div></div>
+      <div class="overview-card"><div class="oc-icon blue"><FileText :size="20" /></div><div><div class="oc-label">评语记录</div><div class="oc-value">{{ data.comments_summary.comments.length }}</div></div></div>
     </div>
 
     <div class="student-detail-grid">
@@ -132,6 +133,15 @@ onMounted(load)
             <span class="tag" :class="item.status === '已结束' ? 'tag-green' : 'tag-orange'">{{ item.status }}</span>
           </div>
         </div>
+        <div class="card">
+          <div class="card-title"><FileText :size="16" /> 学生评语 <span class="count">{{ data.comments_summary.comments.length }}</span></div>
+          <div v-if="!data.comments_summary.comments.length" class="empty-state compact-empty">暂无评语记录</div>
+          <div v-for="item in data.comments_summary.comments.slice(0, 3)" :key="item.id" class="comment-summary-row">
+            <div><strong>{{ item.comment_type }}</strong><span>{{ item.status }} · {{ item.updated_at || item.created_at }}</span></div>
+            <p>{{ item.content }}</p>
+          </div>
+          <router-link v-if="data.comments_summary.comments.length" :to="{ path: '/comments', query: { student_id: data.student.id } }" class="detail-link">查看全部评语</router-link>
+        </div>
       </div>
     </div>
 
@@ -158,8 +168,23 @@ onMounted(load)
         <div><span>性别</span><strong>{{ data.student.性别 || '—' }}</strong></div>
         <div><span>出生年月</span><strong>{{ data.student.出生年月 || '—' }}</strong></div>
         <div><span>民族</span><strong>{{ data.student.民族 || '—' }}</strong></div>
-        <div><span>监护人</span><strong>{{ data.student.监护人姓名 || '—' }}</strong></div>
+        <div><span>是否住校</span><strong>{{ data.student.是否住校 || '—' }}</strong></div>
+        <div><span>特长</span><strong>{{ data.student.特长 || '—' }}</strong></div>
+        <div><span>班级任职</span><strong>{{ data.student.班级任职 || '—' }}</strong></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">家庭联系信息</div>
+      <div class="profile-grid">
+        <div><span>监护人 1</span><strong>{{ data.student.监护人姓名 || '—' }}</strong></div>
         <div><span>联系电话</span><strong>{{ data.student.监护人电话 || '—' }}</strong></div>
+        <div><span>职业</span><strong>{{ data.student.监护人职业 || '—' }}</strong></div>
+        <template v-if="data.student.监护人2姓名 || data.student.监护人2电话 || data.student.监护人2关系">
+          <div><span>监护人 2</span><strong>{{ data.student.监护人2姓名 || '—' }}</strong></div>
+          <div><span>联系电话</span><strong>{{ data.student.监护人2电话 || '—' }}</strong></div>
+          <div><span>关系</span><strong>{{ data.student.监护人2关系 || '—' }}</strong></div>
+        </template>
         <div><span>家庭住址</span><strong>{{ data.student.家庭住址 || '—' }}</strong></div>
       </div>
     </div>
@@ -188,6 +213,12 @@ onMounted(load)
 .insight-row span, .insight-empty { color: var(--text-secondary); font-size: 11px; }
 .conclusion p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
 .chart-text-summary { margin: -2px 0 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.comment-summary-row { padding: 8px 0; border-top: 1px solid var(--border); }
+.comment-summary-row > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.comment-summary-row strong { color: var(--text); font-size: 12px; }
+.comment-summary-row span { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
+.comment-summary-row p { display: -webkit-box; overflow: hidden; margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.detail-link { display: inline-block; margin-top: 8px; color: var(--primary); font-size: 12px; text-decoration: none; }
 @media (max-width: 1000px) { .student-insight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
   .student-insights { padding: 14px; }

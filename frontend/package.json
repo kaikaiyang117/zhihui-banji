@@ -9,6 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fullcalendar/core": "^6.1.21",
+    "@fullcalendar/daygrid": "^6.1.21",
+    "@fullcalendar/interaction": "^6.1.21",
+    "@fullcalendar/vue3": "^6.1.21",
     "dompurify": "^3.4.13",
     "echarts": "^5.5.0",
     "lucide-vue-next": "^0.577.0",
