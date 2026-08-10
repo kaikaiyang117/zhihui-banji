@@ -13,6 +13,7 @@ from ..services.agent_read import (
     get_school_calendar,
     get_scores_summary,
     get_student_profile,
+    get_student_term_comment_context,
     get_student_timeline,
     aggregate_students,
     get_tasks_list,
@@ -247,6 +248,21 @@ def build_registry() -> ToolRegistry:
                 'additionalProperties': False,
             },
             handler=get_student_timeline,
+        ),
+        ToolDefinition(
+            name='student_term_comment_context',
+            description='整理当前学期生成学生评语所需的安全事实摘要。只返回成绩变化、异常考勤、行为记录和已形成结论的过程记录，不返回家庭电话、住址或家校沟通原文。生成评语前必须使用此工具。',
+            parameters={
+                'type': 'object', 'properties': {
+                    'student_ids': {
+                        'type': 'array', 'items': {'type': 'integer', 'minimum': 1},
+                        'minItems': 1, 'maxItems': 30,
+                    },
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 30, 'default': 30},
+                },
+                'required': ['student_ids'], 'additionalProperties': False,
+            },
+            handler=get_student_term_comment_context,
         ),
         ToolDefinition(
             name='students_query',

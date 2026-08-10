@@ -101,7 +101,7 @@ def _serialize(row: dict, *, conn=None) -> dict:
     ).fetchone()[0])
     item['source_label'] = {
         'manual': '手工创建', 'template': '模板生成', 'legacy_sheet': '旧版评语工作表',
-        'agent': 'Agent 草稿',
+        'agent': 'Agent 草稿', 'ai': 'AI生成草稿',
     }.get(item.get('source_type'), item.get('source_type') or '')
     return item
 
@@ -563,6 +563,83 @@ def create_comment(*, student_id: int, comment_type: str = '学期评语', conte
     return get_comment(comment_id, conn=conn)
 
 
+def save_ai_drafts(*, rows: list[dict], comment_type: str = '学期评语', model: str = '',
+                   period: dict | None = None, conn=None) -> dict:
+    """保存 AI 预览结果为草稿；人工内容和已进入审核流程的记录不会被覆盖。"""
+    conn = _conn(conn)
+    if not rows:
+        raise CommentError('没有可保存的 AI 评语')
+    comment_type = _comment_type(comment_type)
+    with _write_lock:
+        class_id, term_id = _scope(write=True, conn=conn)
+        selected = {int(row.get('student_id')) for row in rows if row.get('content')}
+        active = {int(row['id']) for row in _active_students(conn=conn)}
+        if not selected or not selected.issubset(active):
+            raise CommentError('AI评语中包含无效学生')
+        payload = {
+            'kind': 'ai_comment_generation', 'model': _text(model), 'period': period or {},
+            'rows': [{
+                'student_id': int(row['student_id']), 'content': _text(row.get('content')),
+                'evidence': row.get('evidence', []), 'warnings': row.get('warnings', []),
+            } for row in rows if row.get('content')],
+        }
+        try:
+            run_id = conn.execute(
+                '''INSERT INTO comment_generation_runs(
+                       class_id, term_id, template_id, comment_type, requested_count, result_json
+                   ) VALUES(?,?,NULL,?,?,?) RETURNING id''',
+                (class_id, term_id, comment_type, len(rows), json.dumps(payload, ensure_ascii=False)),
+            ).fetchone()['id']
+            created = updated = protected = 0
+            for row in rows:
+                content = _text(row.get('content'))
+                if not content:
+                    continue
+                student_id = int(row['student_id'])
+                current = conn.execute(
+                    '''SELECT * FROM student_comments
+                       WHERE class_id=? AND term_id=? AND student_id=? AND comment_type=? AND deleted_at='' ''',
+                    (class_id, term_id, student_id, comment_type),
+                ).fetchone()
+                if current:
+                    current = dict(current)
+                    if current['status'] != '草稿' or int(current['is_manually_edited']):
+                        protected += 1
+                        continue
+                    conn.execute(
+                        '''UPDATE student_comments SET content=?, generation_run_id=?, source_type='ai',
+                               source_id=?, updated_at=datetime('now','localtime') WHERE id=?''',
+                        (content, run_id, _text(model)[:120], int(current['id'])),
+                    )
+                    _record_version(current['id'], content, '草稿', 'ai_generate', conn=conn)
+                    updated += 1
+                else:
+                    comment_id = conn.execute(
+                        '''INSERT INTO student_comments(
+                               class_id, term_id, student_id, generation_run_id, comment_type, content,
+                               status, source_type, source_id
+                           ) VALUES(?,?,?,?,?,?,'草稿','ai',?) RETURNING id''',
+                        (class_id, term_id, student_id, run_id, comment_type, content, _text(model)[:120]),
+                    ).fetchone()['id']
+                    _record_version(comment_id, content, '草稿', 'ai_generate', conn=conn)
+                    created += 1
+            result = {'run_id': int(run_id), 'created': created, 'updated': updated, 'protected': protected,
+                      'generated': created + updated, 'requested': len(rows)}
+            conn.execute(
+                '''UPDATE comment_generation_runs SET created_count=?, updated_count=?, protected_count=?
+                   WHERE id=?''', (created, updated, protected, run_id),
+            )
+            audit.record('comment_generation', run_id, 'ai_generate', summary='AI生成学生评语草稿',
+                         params={'requested': len(rows), 'created': created, 'updated': updated,
+                                 'protected': protected, 'model': _text(model)[:120]},
+                         class_id=class_id, term_id=term_id, conn=conn, commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return result
+
+
 def update_comment(comment_id: int, *, content: str | None = None, note: str | None = None,
                    conn=None) -> dict:
     conn = _conn(conn)
@@ -633,8 +710,26 @@ def summary(*, conn=None) -> dict:
     ).fetchall():
         counts[row['status']] = int(row['count'])
     counts['total'] = sum(counts.values())
+    student_count = len(_active_students(conn=conn))
+    term_comment_count = int(conn.execute(
+        '''SELECT COUNT(*) FROM student_comments
+           WHERE class_id=? AND term_id=? AND comment_type='学期评语' AND deleted_at='' ''',
+        (class_id, term_id),
+    ).fetchone()[0])
+    generated_student_ids = [int(row['student_id']) for row in conn.execute(
+        '''SELECT DISTINCT student_id FROM student_comments
+           WHERE class_id=? AND term_id=? AND comment_type='学期评语' AND deleted_at='' ''',
+        (class_id, term_id),
+    ).fetchall()]
     return {
         'counts': counts,
+        'coverage': {
+            'student_count': student_count,
+            'generated_count': term_comment_count,
+            'missing_count': max(0, student_count - term_comment_count),
+            'completion_rate': round(term_comment_count / student_count * 100, 1) if student_count else 0,
+            'generated_student_ids': generated_student_ids,
+        },
         'templates': list_templates(conn=conn),
         'migration': migration_report(conn=conn),
         'variables': variable_catalog(),

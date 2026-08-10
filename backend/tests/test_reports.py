@@ -38,9 +38,17 @@ class ReportsWorkflowTest(unittest.TestCase):
         report = reports.build_report('monthly', '2026-08-01', '2026-08-31')
         self.assertEqual(report['metrics']['meetings'], 1)
         self.assertEqual(report['source_refs']['meetings'][0]['id'], meeting['id'])
-        archive = reports.create_archive('monthly', '2026-08-01', '2026-08-31')
+        archive = reports.create_archive(
+            'monthly', '2026-08-01', '2026-08-31',
+            class_summary='班风稳定，活动参与积极。',
+            teacher_summary='希望大家继续保持。',
+            next_term_plan='下学期加强考试复盘。',
+        )
         loaded = reports.get_archive(archive['id'])
         self.assertEqual(loaded['payload']['period_start'], '2026-08-01')
+        self.assertEqual(loaded['payload']['manual']['class_summary'], '班风稳定，活动参与积极。')
+        self.assertEqual(loaded['payload']['manual']['teacher_summary'], '希望大家继续保持。')
+        self.assertEqual(loaded['payload']['manual']['next_term_plan'], '下学期加强考试复盘。')
         buf, filename = reports.export_archive(archive['id'])
         self.assertTrue(filename.endswith('.xlsx'))
         self.assertGreater(len(buf.getvalue()), 100)

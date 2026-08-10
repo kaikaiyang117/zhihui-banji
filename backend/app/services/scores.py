@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from itertools import combinations
 import json
 import uuid
 
@@ -18,6 +19,22 @@ OPEN_TASK_STATUSES = {'待处理', '处理中', '待复查'}
 SUBJECT_GROUPS = {'必考', '首选', '再选', '选考'}
 SCORE_TYPES = {'原始分', '等级赋分'}
 SCORE_MODES = {'固定科目', '3+1+2', '3+3', '自定义'}
+SICHUAN_312_SUBJECTS = (
+    {'name': '语文', 'aliases': {'语文'}, 'full_score': 150, 'group': '必考', 'score_type': '原始分'},
+    {'name': '数学', 'aliases': {'数学'}, 'full_score': 150, 'group': '必考', 'score_type': '原始分'},
+    {'name': '英语', 'aliases': {'英语', '外语'}, 'full_score': 150, 'group': '必考', 'score_type': '原始分'},
+    {'name': '物理', 'aliases': {'物理'}, 'full_score': 100, 'group': '首选', 'score_type': '原始分'},
+    {'name': '历史', 'aliases': {'历史'}, 'full_score': 100, 'group': '首选', 'score_type': '原始分'},
+    {'name': '化学', 'aliases': {'化学'}, 'full_score': 100, 'group': '再选', 'score_type': '等级赋分'},
+    {'name': '生物', 'aliases': {'生物'}, 'full_score': 100, 'group': '再选', 'score_type': '等级赋分'},
+    {'name': '政治', 'aliases': {'政治', '思想政治'}, 'full_score': 100, 'group': '再选', 'score_type': '等级赋分'},
+    {'name': '地理', 'aliases': {'地理'}, 'full_score': 100, 'group': '再选', 'score_type': '等级赋分'},
+)
+SICHUAN_312_FIRST = {'物理', '历史'}
+SICHUAN_312_SECOND = {'化学', '生物', '政治', '地理'}
+SICHUAN_312_SHORT_NAMES = {
+    '物理': '物', '历史': '史', '化学': '化', '生物': '生', '政治': '政', '地理': '地',
+}
 
 
 class ScoreError(ValueError):
@@ -62,18 +79,95 @@ def _positive_number(value, label: str, *, allow_zero: bool = True) -> float:
     return number
 
 
-def _selection_status(mode: str, selected_ids: set[int], subject_by_id: dict[int, dict]) -> str:
+def _canonical_subject_name(name: str) -> str:
+    value = _text(name)
+    for item in SICHUAN_312_SUBJECTS:
+        if value in item['aliases']:
+            return item['name']
+    return value
+
+
+def _sichuan_expected_subject(name: str) -> dict | None:
+    canonical = _canonical_subject_name(name)
+    return next((item for item in SICHUAN_312_SUBJECTS if item['name'] == canonical), None)
+
+
+def _selection_error(mode: str, selected_ids: set[int], subject_by_id: dict[int, dict]) -> str:
     if mode in {'固定科目', '自定义'}:
-        return '有效'
+        return ''
     selected = [subject_by_id[item] for item in selected_ids if item in subject_by_id]
     first_count = sum(item.get('subject_group') == '首选' for item in selected)
     second_count = sum(item.get('subject_group') == '再选' for item in selected)
     elective_count = sum(item.get('subject_group') == '选考' for item in selected)
     if mode == '3+1+2':
-        return '有效' if first_count == 1 and second_count == 2 else '组合不完整'
+        if len(selected) != 3 or first_count != 1 or second_count != 2:
+            return '3+1+2选科必须是物理/历史二选一，并从化学、生物、政治、地理中选择两科'
+        first_names = {
+            _canonical_subject_name(item.get('name', ''))
+            for item in selected if item.get('subject_group') == '首选'
+        }
+        second_names = {
+            _canonical_subject_name(item.get('name', ''))
+            for item in selected if item.get('subject_group') == '再选'
+        }
+        if not first_names <= SICHUAN_312_FIRST or not second_names <= SICHUAN_312_SECOND:
+            return '首选科目只能是物理或历史，再选科目只能是化学、生物、政治或地理'
+        return ''
     if mode == '3+3':
-        return '有效' if elective_count == 3 else '组合不完整'
-    return '有效'
+        return '' if len(selected) == 3 and elective_count == 3 else '3+3选科必须选择三门选考科目'
+    return ''
+
+
+def _selection_status(mode: str, selected_ids: set[int], subject_by_id: dict[int, dict]) -> str:
+    if not selected_ids and mode not in {'固定科目', '自定义'}:
+        return '组合不完整'
+    return '有效' if not _selection_error(mode, selected_ids, subject_by_id) else '组合无效'
+
+
+def _sichuan_312_config(subjects: list[dict], mode: str) -> dict:
+    enabled_subjects = [item for item in subjects if item.get('enabled')]
+    by_canonical: dict[str, list[dict]] = {}
+    for subject in enabled_subjects:
+        canonical = _canonical_subject_name(subject.get('name', ''))
+        by_canonical.setdefault(canonical, []).append(subject)
+
+    issues = []
+    subject_map = {}
+    if mode != '3+1+2':
+        issues.append('当前成绩制度不是3+1+2')
+    for expected in SICHUAN_312_SUBJECTS:
+        matched = by_canonical.get(expected['name'], [])
+        if not matched:
+            issues.append(f"缺少{expected['name']}科目")
+            continue
+        if len(matched) > 1:
+            issues.append(f"{expected['name']}存在重复科目")
+            continue
+        subject = matched[0]
+        subject_map[expected['name']] = subject
+        if subject.get('subject_group') != expected['group']:
+            issues.append(f"{subject['name']}应设为{expected['group']}")
+        if subject.get('score_type') != expected['score_type']:
+            issues.append(f"{subject['name']}应使用{expected['score_type']}")
+
+    combination_rows = []
+    if all(name in subject_map for name in SICHUAN_312_FIRST | SICHUAN_312_SECOND):
+        second_order = ['化学', '生物', '政治', '地理']
+        for first_name in ('物理', '历史'):
+            for second_names in combinations(second_order, 2):
+                names = [first_name, *second_names]
+                combination_rows.append({
+                    'code': ''.join(SICHUAN_312_SHORT_NAMES[name] for name in names),
+                    'label': ' + '.join(names),
+                    'first_subject': first_name,
+                    'subject_ids': [int(subject_map[name]['id']) for name in names],
+                })
+    return {
+        'ready': not issues,
+        'issues': issues,
+        'combinations': combination_rows,
+        'standard_subject_ids': [int(item['id']) for item in subject_map.values()],
+    }
 
 
 def list_config(*, conn=None) -> dict:
@@ -109,7 +203,58 @@ def list_config(*, conn=None) -> dict:
     return {
         'exams': exams, 'subjects': subjects,
         'settings': {'mode': settings_row['mode'] if settings_row else '固定科目'},
+        'sichuan_312': _sichuan_312_config(
+            subjects, settings_row['mode'] if settings_row else '固定科目'
+        ),
     }
+
+
+def apply_sichuan_312_preset(*, conn=None) -> dict:
+    """应用四川3+1+2标准科目角色，不改写既有成绩和考试科目范围。"""
+    conn = conn or db.get_conn()
+    class_id, term_id = _scope(write=True, conn=conn)
+    existing = [dict(row) for row in conn.execute(
+        '''SELECT * FROM score_subjects WHERE class_id=? AND term_id=?
+           ORDER BY id''', (class_id, term_id)
+    ).fetchall()]
+    try:
+        for sort_order, expected in enumerate(SICHUAN_312_SUBJECTS, start=1):
+            subject = next((
+                item for item in existing
+                if _canonical_subject_name(item.get('name', '')) == expected['name']
+            ), None)
+            if subject:
+                conn.execute(
+                    '''UPDATE score_subjects SET enabled=1, sort_order=?, subject_group=?,
+                           score_type=?, updated_at=datetime('now','localtime') WHERE id=?''',
+                    (sort_order, expected['group'], expected['score_type'], int(subject['id'])),
+                )
+            else:
+                conn.execute(
+                    '''INSERT INTO score_subjects(
+                           class_id, term_id, name, full_score, sort_order, enabled,
+                           subject_group, score_type
+                       ) VALUES(?,?,?,?,?,1,?,?)''',
+                    (class_id, term_id, expected['name'], expected['full_score'], sort_order,
+                     expected['group'], expected['score_type']),
+                )
+        conn.execute(
+            '''INSERT INTO score_term_settings(class_id, term_id, mode)
+               VALUES(?,?,'3+1+2')
+               ON CONFLICT(class_id, term_id) DO UPDATE SET mode='3+1+2',
+               updated_at=datetime('now','localtime')''',
+            (class_id, term_id),
+        )
+        audit.record(
+            'score_term_settings', term_id, 'update', summary='应用四川3+1+2标准科目配置',
+            params={'mode': '3+1+2'}, class_id=class_id, term_id=term_id,
+            conn=conn, commit=False,
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {'ok': True, 'config': list_config(conn=conn)}
 
 
 def _subject_row(subject_id: int, *, write: bool = False, conn=None):
@@ -206,6 +351,18 @@ def update_subject(subject_id: int, *, name: str | None = None,
         raise ScoreError('科目分组不合法')
     if values['score_type'] not in SCORE_TYPES:
         raise ScoreError('成绩口径不合法')
+    settings_row = conn.execute(
+        'SELECT mode FROM score_term_settings WHERE class_id=? AND term_id=?',
+        (current['class_id'], current['term_id']),
+    ).fetchone()
+    expected = _sichuan_expected_subject(current['name'])
+    if settings_row and settings_row['mode'] == '3+1+2' and expected:
+        if not values['enabled']:
+            raise ScoreError('四川3+1+2标准科目不能停用')
+        if _canonical_subject_name(values['name']) != expected['name']:
+            raise ScoreError('四川3+1+2标准科目不能改为其他科目')
+        if values['subject_group'] != expected['group'] or values['score_type'] != expected['score_type']:
+            raise ScoreError('四川3+1+2标准科目的分组和成绩口径由系统维护')
     try:
         conn.execute(
             '''UPDATE score_subjects SET name=:name, full_score=:full_score,
@@ -268,30 +425,111 @@ def save_student_subjects(student_id: int, subject_ids: list[int], *, conn=None)
             raise ScoreError('不能选择已停用科目')
         if int(subject['id']) not in clean_ids:
             clean_ids.append(int(subject['id']))
+    mode_row = conn.execute(
+        'SELECT mode FROM score_term_settings WHERE class_id=? AND term_id=?',
+        (class_id, term_id),
+    ).fetchone()
+    mode = mode_row['mode'] if mode_row else '固定科目'
+    subject_by_id = {
+        int(row['id']): dict(row) for row in conn.execute(
+            'SELECT * FROM score_subjects WHERE class_id=? AND term_id=?',
+            (class_id, term_id),
+        ).fetchall()
+    }
+    error = _selection_error(mode, set(clean_ids), subject_by_id)
+    if error:
+        raise ScoreError(error)
+    try:
+        _replace_student_subject_selection(
+            int(student_id), clean_ids, class_id=class_id, term_id=term_id, conn=conn
+        )
+        audit.record(
+            'student_score_subjects', student_id, 'update', summary='更新学生选科',
+            params={'student_id': int(student_id), 'subject_ids': clean_ids},
+            class_id=class_id, term_id=term_id, conn=conn, commit=False,
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {'ok': True, 'student_id': int(student_id), 'subject_ids': clean_ids}
+
+
+def _replace_student_subject_selection(student_id: int, subject_ids: list[int], *,
+                                       class_id: int, term_id: int, conn) -> None:
     conn.execute(
         '''INSERT INTO student_score_profiles(class_id, term_id, student_id)
            VALUES(?,?,?)
            ON CONFLICT(class_id, term_id, student_id) DO UPDATE SET
            updated_at=datetime('now','localtime')''',
-        (class_id, term_id, int(student_id)),
+        (class_id, term_id, student_id),
     )
     conn.execute(
         'DELETE FROM student_score_subjects WHERE class_id=? AND term_id=? AND student_id=?',
-        (class_id, term_id, int(student_id)),
+        (class_id, term_id, student_id),
     )
     conn.executemany(
         '''INSERT INTO student_score_subjects(
                class_id, term_id, student_id, subject_id
            ) VALUES(?,?,?,?)''',
-        [(class_id, term_id, int(student_id), subject_id) for subject_id in clean_ids],
+        [(class_id, term_id, student_id, subject_id) for subject_id in subject_ids],
     )
-    audit.record(
-        'student_score_subjects', student_id, 'update', summary='更新学生选科',
-        params={'student_id': int(student_id), 'subject_ids': clean_ids},
-        class_id=class_id, term_id=term_id, conn=conn, commit=False,
-    )
-    conn.commit()
-    return {'ok': True, 'student_id': int(student_id), 'subject_ids': clean_ids}
+
+
+def save_student_subjects_batch(student_ids: list[int], subject_ids: list[int], *, conn=None) -> dict:
+    conn = conn or db.get_conn()
+    class_id, term_id = _scope(write=True, conn=conn)
+    clean_student_ids = list(dict.fromkeys(int(value) for value in student_ids or []))
+    if not clean_student_ids:
+        raise ScoreError('请至少选择一名学生')
+    placeholders = ','.join('?' for _ in clean_student_ids)
+    rows = conn.execute(
+        f'''SELECT s.id FROM students s JOIN student_enrollments e ON e.student_id=s.id
+            WHERE s.id IN ({placeholders}) AND e.class_id=? AND e.term_id=?
+              AND e.status='在读' AND s.deleted_at='' ''',
+        (*clean_student_ids, class_id, term_id),
+    ).fetchall()
+    if {int(row['id']) for row in rows} != set(clean_student_ids):
+        raise ScoreError('部分学生不在当前班级和学期')
+
+    clean_subject_ids = list(dict.fromkeys(int(value) for value in subject_ids or []))
+    subject_by_id = {
+        int(row['id']): dict(row) for row in conn.execute(
+            'SELECT * FROM score_subjects WHERE class_id=? AND term_id=?',
+            (class_id, term_id),
+        ).fetchall()
+    }
+    if any(value not in subject_by_id or not subject_by_id[value]['enabled']
+           for value in clean_subject_ids):
+        raise ScoreError('选科中包含不存在或已停用的科目')
+    mode_row = conn.execute(
+        'SELECT mode FROM score_term_settings WHERE class_id=? AND term_id=?',
+        (class_id, term_id),
+    ).fetchone()
+    mode = mode_row['mode'] if mode_row else '固定科目'
+    error = _selection_error(mode, set(clean_subject_ids), subject_by_id)
+    if error:
+        raise ScoreError(error)
+
+    try:
+        for student_id in clean_student_ids:
+            _replace_student_subject_selection(
+                student_id, clean_subject_ids,
+                class_id=class_id, term_id=term_id, conn=conn,
+            )
+        audit.record(
+            'student_score_subjects', term_id, 'batch_update', summary='批量更新学生选科',
+            params={'student_ids': clean_student_ids, 'subject_ids': clean_subject_ids},
+            class_id=class_id, term_id=term_id, conn=conn, commit=False,
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        'ok': True, 'updated_count': len(clean_student_ids),
+        'student_ids': clean_student_ids, 'subject_ids': clean_subject_ids,
+    }
 
 
 def create_exam(*, name: str, exam_date: str = '', subject_ids: list[int] | None = None,
@@ -820,6 +1058,11 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
     for student in students:
         selected_subject_ids = selected_subjects_by_student.get(int(student['student_id']))
         selection_configured = int(student['student_id']) in configured_selection_students
+        selection_status = (
+            _selection_status(selection_mode, selected_subject_ids or set(), subject_by_id)
+            if selection_configured else '未配置'
+        )
+        selection_valid = not selection_configured or selection_status == '有效'
         exam_results = []
         for exam in exams:
             expected_ids = [int(value) for value in exam.get('subject_ids', []) if int(value) in subject_by_id]
@@ -851,7 +1094,7 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
                 key[0] == int(student['student_id']) and key[1] == int(exam['id'])
                 for key in records_by_key
             )
-            complete = bool(expected_ids) and not missing
+            complete = bool(expected_ids) and not missing and selection_valid
             total = round(sum(float(item['score']) for item in detail.values()), 2) if complete else None
             result = {
                 'exam_id': int(exam['id']), 'exam_name': exam['name'],
@@ -867,9 +1110,7 @@ def score_summary(*, student_id: int | None = None, conn=None) -> dict:
             'exams': exam_results,
             'selected_subject_ids': sorted(selected_subject_ids or []),
             'selection_configured': selection_configured,
-            'selection_status': _selection_status(
-                selection_mode, selected_subject_ids or set(), subject_by_id
-            ) if selection_configured else '未配置',
+            'selection_status': selection_status,
         })
 
     exam_output = []

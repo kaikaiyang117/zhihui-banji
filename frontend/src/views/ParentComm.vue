@@ -11,12 +11,15 @@ const loading = ref(true)
 const showAdd = ref(false)
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
+const studentId = Number(route.query.student_id || 0)
 const workflowTarget = ref(null)
 
 async function load() {
   loading.value = true
-  const query = sourceId ? `source_id=${sourceId}` : 'limit=200'
-  try { communications.value = (await get(`/api/communications?${query}`)).communications || [] } finally { loading.value = false }
+  const params = new URLSearchParams({ limit: '200' })
+  if (sourceId) params.set('source_id', sourceId)
+  if (studentId) params.set('student_id', studentId)
+  try { communications.value = (await get(`/api/communications?${params}`)).communications || [] } finally { loading.value = false }
 }
 async function removeCommunication(item) {
   if (!confirm(`删除“${item.reason}”沟通记录并移入回收站吗？关联待办会一同隐藏。`)) return

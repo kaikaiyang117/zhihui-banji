@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-09）：11 个只读工具 + 4 个单条低风险确认写入工具；数据库 schema v24；成绩查询已包含高中选科后的适用科目口径；校历查询已接入网页和微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-10）：12 个只读工具 + 4 个单条低风险确认写入工具；数据库 schema v24；成绩查询已按四川`3+1+2`合法组合确定适用科目，非法组合不生成完整总分或排名；校历查询已接入网页和微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -30,8 +30,11 @@
 | 聚合学生分布 | `aggregate_students` | `students_aggregate` | 是 | 是 | 是 | 只读；服务端分组统计，可返回学生名单摘要 | 已接入 |
 | 查看学生档案 | `get_student_profile` | `student_get_profile` | 是 | 是 | 否 | 敏感信息，微信默认拒绝 | 已接入 |
 | 查看学生时间线 | `get_student_timeline` | `student_get_timeline` | 是 | 是 | 是 | 只读，返回事件摘要 | 已接入 |
+| 获取学生学期评语事实 | `comment_ai.build_student_term_contexts` | `student_term_comment_context` | 是 | 是 | 是 | 只读；只返回学期内成绩、异常考勤、行为记录和过程摘要，不返回家庭电话、住址和沟通原文 | 已接入 |
+| 生成班级学期档案草稿 | `report_drafter.generate_draft` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 只生成班级整体表现、下学期计划和班主任总结草稿；老师修改确认后才保存，不直接写入 | 已接入 |
 | 查询考勤统计 | `get_attendance_summary` | `attendance_summary` | 是 | 是 | 是 | 只读 | 已接入 |
-| 查询成绩统计 | `scores.score_summary` → `get_scores_summary` | `scores_summary` | 是 | 是 | 是 | 只读；返回结构化考试、科目状态、总分、排名与变化，不暴露导入明细 | 已接入 |
+| 查询成绩统计 | `scores.score_summary` → `get_scores_summary` | `scores_summary` | 是 | 是 | 是 | 只读；按学生合法选科组合返回适用科目、总分、排名与变化，不暴露导入明细 | 已接入 |
+| 登记学生选科 | `scores.apply_sichuan_312_preset`、`save_student_subjects_batch` | 无 | 是 | 否 | 否 | 网页教师主动写入；支持批量操作并记录审计，不开放给Agent | 系统已接入 |
 | 查询统一工作项 | `work_items.list_work_items` → `get_tasks_list` | `tasks_list` | 是 | 是 | 是 | 只读；默认返回未关闭事项 | 已接入 |
 | 查询家校沟通 | `get_communications_list` | `communications_list` | 是 | 是 | 是 | 只读，隐藏家长电话 | 已接入 |
 | 查询校历 | `get_school_calendar` → `school_calendar.query_calendar` | `school_calendar_query` | 是 | 是 | 是 | 只读；按当前班级/学期返回日期安排 | 已接入 |
@@ -52,6 +55,7 @@
 | `students_aggregate` | `group_by` | `keyword`, `gender`, `boarding_status`, `class_role`, `include_empty`, `include_students`, `limit` | 支持 `guardian_occupation` 等分组；服务端完成统计 |
 | `student_get_profile` | `student_id` | 无 | 网页可用；微信默认拒绝敏感档案 |
 | `student_get_timeline` | `student_id` | `limit` | 返回事件、沟通和待办摘要 |
+| `student_term_comment_context` | `student_ids` | `limit` | 生成评语前读取安全的学期事实摘要；最多 30 人，不含家庭电话、住址和沟通原文 |
 | `attendance_summary` | 无 | `student_id`, `date_from`, `date_to`, `limit` | 只读统计 |
 | `scores_summary` | 无 | `student_id`, `exam_name`, `limit` | 使用结构化成绩服务 |
 | `tasks_list` | 无 | `status`, `student_id`, `limit` | 默认查询未关闭事项 |

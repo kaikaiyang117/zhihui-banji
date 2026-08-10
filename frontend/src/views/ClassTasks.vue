@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Check, ClipboardList, Paperclip, Plus, Send, Trash2 } from 'lucide-vue-next'
+import { Check, ClipboardList, ListChecks, Paperclip, Plus, Trash2 } from 'lucide-vue-next'
 import { del, get, post, put, upload } from '../api'
 
 const route = useRoute()
@@ -14,11 +14,42 @@ const creating = ref(false)
 const managingTemplates = ref(false)
 const closing = ref(false)
 const saving = ref(false)
+const bulkUpdating = ref(false)
 const message = ref('')
+const studentKeyword = ref('')
+const itemFilter = ref('未提交')
+const selectedItemIds = ref([])
 const closeDraft = ref({ result: '', confirm_incomplete: false })
 const templateForm = ref({ name: '', task_type: '材料收集', material_name: '', description: '', default_due_days: 7 })
 const form = ref({ title: '', task_type: '材料收集', start_at: '', due_at: '', material_name: '', description: '', student_ids: [], template_id: null })
 const activeTask = computed(() => tasks.value.find(task => task.id === activeId.value))
+const filteredStudents = computed(() => {
+  const keyword = studentKeyword.value.trim().toLowerCase()
+  if (!keyword) return students.value
+  return students.value.filter(student => `${student.姓名}${student.学号}`.toLowerCase().includes(keyword))
+})
+const itemCounts = computed(() => {
+  const items = activeTask.value?.items || []
+  return {
+    all: items.length,
+    未提交: items.filter(item => item.status === '未提交').length,
+    已提交: items.filter(item => item.status === '已提交').length,
+    免交: items.filter(item => item.status === '免交').length,
+  }
+})
+const visibleItems = computed(() => {
+  const items = activeTask.value?.items || []
+  return itemFilter.value === '全部' ? items : items.filter(item => item.status === itemFilter.value)
+})
+const allVisibleItemsSelected = computed(() => (
+  visibleItems.value.length > 0
+  && visibleItems.value.every(item => selectedItemIds.value.includes(item.student_id))
+))
+const selectionActionLabel = computed(() => {
+  if (allVisibleItemsSelected.value) return '取消选择'
+  if (itemFilter.value === '全部') return '选择全部'
+  return `选择${itemFilter.value}`
+})
 
 function localDate(offset = 0) {
   const d = new Date()
@@ -29,6 +60,15 @@ function localDate(offset = 0) {
 
 function resetForm() {
   form.value = { title: '', task_type: '材料收集', start_at: '', due_at: '', material_name: '', description: '', student_ids: [], template_id: null }
+  studentKeyword.value = ''
+}
+
+function toggleCreate() {
+  creating.value = !creating.value
+  if (creating.value) {
+    resetForm()
+    selectAllStudents()
+  }
 }
 
 async function load() {
@@ -42,7 +82,12 @@ async function load() {
   if ((!activeId.value || sourceId) && tasks.value.length) activeId.value = sourceId || tasks.value[0].id
 }
 
-function selectAll() { form.value.student_ids = students.value.map(student => student.id) }
+function selectAllStudents() { form.value.student_ids = students.value.map(student => student.id) }
+function selectVisibleStudents() {
+  const ids = new Set(form.value.student_ids)
+  filteredStudents.value.forEach(student => ids.add(student.id))
+  form.value.student_ids = [...ids]
+}
 function clearAll() { form.value.student_ids = [] }
 
 function applyTemplate() {
@@ -55,7 +100,14 @@ function applyTemplate() {
 }
 
 async function createTask() {
-  if (!form.value.title.trim() || !form.value.student_ids.length) return
+  if (!form.value.title.trim()) {
+    message.value = '请填写任务名称'
+    return
+  }
+  if (!form.value.student_ids.length) {
+    message.value = '请至少选择一名参与学生'
+    return
+  }
   saving.value = true
   try {
     const result = await post('/api/class-tasks', form.value)
@@ -98,7 +150,10 @@ async function uploadAttachment(event, item) {
 }
 
 function openClose() {
-  closeDraft.value = { result: '', confirm_incomplete: Boolean(activeTask.value?.missing_count) }
+  closeDraft.value = {
+    result: activeTask.value?.missing_count ? '' : '已收齐全部材料',
+    confirm_incomplete: false,
+  }
   closing.value = true
 }
 
@@ -117,13 +172,35 @@ async function submitClose() {
   }
 }
 
-async function remindAll() {
-  if (!activeTask.value?.missing_count) return
+function setItemFilter(value) {
+  itemFilter.value = value
+  selectedItemIds.value = []
+}
+
+function toggleVisibleItems() {
+  if (allVisibleItemsSelected.value) {
+    const visibleIds = new Set(visibleItems.value.map(item => item.student_id))
+    selectedItemIds.value = selectedItemIds.value.filter(id => !visibleIds.has(id))
+    return
+  }
+  const ids = new Set(selectedItemIds.value)
+  visibleItems.value.forEach(item => ids.add(item.student_id))
+  selectedItemIds.value = [...ids]
+}
+
+async function bulkUpdateItems(status) {
+  if (!activeTask.value || !selectedItemIds.value.length) return
+  bulkUpdating.value = true
   try {
-    const result = await post(`/api/class-tasks/${activeTask.value.id}/remind`, {})
-    message.value = `已催办 ${result.reminded} 名学生`
+    const count = selectedItemIds.value.length
+    await put(`/api/class-tasks/${activeTask.value.id}/items/bulk`, {
+      student_ids: selectedItemIds.value, status,
+    })
+    message.value = `已批量标记 ${count} 名学生`
+    selectedItemIds.value = []
     await load()
-  } catch (error) { message.value = `催办失败：${error.message}` }
+  } catch (error) { message.value = `批量更新失败：${error.message}`
+  } finally { bulkUpdating.value = false }
 }
 
 async function removeTask() {
@@ -139,8 +216,8 @@ onMounted(load)
 <template>
   <div>
     <div class="page-title-bar">
-      <div><div class="page-title">班级任务</div><div class="page-subtitle">一次布置，逐人追踪材料、催办与完成凭证</div></div>
-      <div class="toolbar" style="margin-bottom:0"><button class="btn btn-outline" @click="managingTemplates = !managingTemplates">任务模板</button><button class="btn btn-primary" @click="creating = !creating"><Plus :size="14" /> 新建任务</button></div>
+      <div><div class="page-title">班级任务</div><div class="page-subtitle">一次布置，逐人追踪材料与完成凭证</div></div>
+      <div class="toolbar" style="margin-bottom:0"><button class="btn btn-outline" @click="managingTemplates = !managingTemplates">任务模板</button><button class="btn btn-primary" @click="toggleCreate"><Plus :size="14" /> 新建任务</button></div>
     </div>
     <div v-if="message" class="inline-message">{{ message }}</div>
 
@@ -167,15 +244,15 @@ onMounted(load)
         <label>材料名称<input class="form-input" v-model="form.material_name"></label>
         <label class="form-grid-wide">说明<textarea class="form-textarea" v-model="form.description" rows="2"></textarea></label>
       </div>
-      <div class="student-picker"><div class="picker-head"><strong>参与学生</strong><span>{{ form.student_ids.length }} / {{ students.length }} 人</span><button class="text-button" @click="selectAll">全选</button><button class="text-button" @click="clearAll">清空</button></div><label v-for="student in students" :key="student.id" class="student-check"><input v-model="form.student_ids" type="checkbox" :value="student.id"> {{ student.姓名 }}</label></div>
+      <div class="student-picker"><div class="picker-head"><strong>参与学生</strong><span>{{ form.student_ids.length }} / {{ students.length }} 人</span><button class="text-button" @click="selectVisibleStudents">选择这些</button><button class="text-button" @click="clearAll">清空选择</button></div><input v-model="studentKeyword" class="form-input task-student-search" placeholder="搜索学生姓名或学号"><div class="student-picker-list"><label v-for="student in filteredStudents" :key="student.id" class="student-check"><input v-model="form.student_ids" type="checkbox" :value="student.id"> {{ student.姓名 }}<small>{{ student.学号 }}</small></label><span v-if="!filteredStudents.length" class="hint">没有匹配的学生</span></div></div>
       <div class="modal-actions"><button class="btn btn-outline" @click="creating = false">取消</button><button class="btn btn-primary" :disabled="saving" @click="createTask">{{ saving ? '保存中…' : '创建任务' }}</button></div>
     </div>
 
     <div class="class-task-layout">
       <div class="card"><div class="card-title"><ClipboardList :size="16" /> 任务列表 <span class="count">{{ tasks.length }}</span></div><div v-if="!tasks.length" class="empty-state">还没有班级任务</div><button v-for="task in tasks" :key="task.id" class="class-task-row" :class="{ active: task.id === activeId, 'source-highlight': task.id === sourceId }" @click="activeId = task.id"><div><strong>{{ task.title }}</strong><small>{{ task.task_type }} · {{ task.timing_state }} · {{ task.due_at || '未设置截止日期' }}</small></div><span class="task-progress">{{ task.submitted }}/{{ task.total }}</span></button></div>
       <div class="card">
-        <div v-if="activeTask" class="card-title"><span>{{ activeTask.title }}</span><span class="tag" :class="activeTask.status === '已完成' ? 'tag-green' : activeTask.timing_state === '已逾期' ? 'tag-red' : 'tag-orange'">{{ activeTask.status === '进行中' ? activeTask.timing_state : activeTask.status }}</span><button v-if="activeTask.can_close" class="btn btn-outline task-close" @click="openClose"><Check :size="14" /> 完成任务</button><button v-if="activeTask.can_close && activeTask.missing_count" class="btn btn-outline" @click="remindAll"><Send :size="14" /> 催办</button><button class="btn btn-outline" aria-label="删除班级任务" @click="removeTask"><Trash2 :size="14" /></button></div>
-        <div v-if="activeTask" class="task-detail"><div class="hint">{{ activeTask.material_name || '无指定材料' }} · {{ activeTask.description || '无补充说明' }} · {{ activeTask.progress }}%</div><div class="task-progress-bar"><i :style="{ width: `${activeTask.progress}%` }"></i></div><div v-if="activeTask.closed_with_missing_count" class="hint">完成时仍有 {{ activeTask.closed_with_missing_count }} 名学生未提交，已记录为例外关闭</div><div v-for="item in activeTask.items" :key="item.id" class="collection-row"><div><strong>{{ item.姓名 }}</strong><span>{{ item.学号 }} · {{ item.note || '暂无备注' }}<template v-if="item.submitted_at"> · {{ item.submitted_at }} 提交</template><template v-if="item.reminder_count"> · 已催办 {{ item.reminder_count }} 次</template></span><span v-if="item.attachments?.length"><Paperclip :size="12" /> <a v-for="attachment in item.attachments" :key="attachment.id" :href="attachment.download_path" target="_blank">{{ attachment.original_name }}</a></span></div><div class="record-actions"><label class="btn btn-sm btn-outline"><Paperclip :size="13" /> 上传<input type="file" hidden @change="uploadAttachment($event, item)"></label><button class="tag" :class="item.status === '已提交' || item.status === '免交' ? 'tag-green' : 'tag-orange'" @click="markSubmitted(item)">{{ item.status === '已提交' ? '已提交' : item.status === '免交' ? '免交' : '未提交' }}</button></div></div></div><div v-else class="empty-state">选择一个任务查看收集进度</div>
+        <div v-if="activeTask" class="card-title"><span>{{ activeTask.title }}</span><span class="tag" :class="activeTask.status === '已完成' ? 'tag-green' : activeTask.timing_state === '已逾期' ? 'tag-red' : 'tag-orange'">{{ activeTask.status === '进行中' ? activeTask.timing_state : activeTask.status }}</span><button v-if="activeTask.can_close" class="btn btn-outline task-close" @click="openClose"><Check :size="14" /> 完成任务</button><button class="btn btn-outline" aria-label="删除班级任务" @click="removeTask"><Trash2 :size="14" /></button></div>
+        <div v-if="activeTask" class="task-detail"><div class="hint">{{ activeTask.material_name || '无指定材料' }} · {{ activeTask.description || '无补充说明' }} · {{ activeTask.progress }}%</div><div class="task-progress-bar"><i :style="{ width: `${activeTask.progress}%` }"></i></div><div class="task-item-toolbar"><div class="task-status-tabs"><button v-for="filter in [['未提交', itemCounts.未提交], ['已提交', itemCounts.已提交], ['免交', itemCounts.免交], ['全部', itemCounts.all]]" :key="filter[0]" class="filter-pill" :class="{ active: itemFilter === filter[0] }" @click="setItemFilter(filter[0])">{{ filter[0] }} {{ filter[1] }}</button></div><div v-if="activeTask.status === '进行中' && visibleItems.length" class="task-bulk-actions"><button class="task-selection-toggle" :class="{ active: allVisibleItemsSelected }" :title="selectionActionLabel" :aria-label="selectionActionLabel" @click="toggleVisibleItems"><ListChecks :size="15" aria-hidden="true" /><span>{{ selectionActionLabel }}</span></button><span v-if="selectedItemIds.length" class="hint">已选 {{ selectedItemIds.length }} 人</span><button v-if="selectedItemIds.length" class="btn btn-sm btn-outline" :disabled="bulkUpdating" @click="bulkUpdateItems('已提交')">标记已提交</button><button v-if="selectedItemIds.length" class="btn btn-sm btn-outline" :disabled="bulkUpdating" @click="bulkUpdateItems('免交')">标记免交</button></div></div><div v-if="activeTask.closed_with_missing_count" class="hint">完成时仍有 {{ activeTask.closed_with_missing_count }} 名学生未提交，已记录为例外关闭</div><div v-for="item in visibleItems" :key="item.id" class="collection-row"><label v-if="activeTask.status === '进行中'" class="task-item-check"><input v-model="selectedItemIds" type="checkbox" :value="item.student_id" :aria-label="`选择${item.姓名}`"></label><div><strong>{{ item.姓名 }}</strong><span>{{ item.学号 }} · {{ item.note || '暂无备注' }}<template v-if="item.submitted_at"> · {{ item.submitted_at }} 提交</template></span><span v-if="item.attachments?.length"><Paperclip :size="12" /> <a v-for="attachment in item.attachments" :key="attachment.id" :href="attachment.download_path" target="_blank">{{ attachment.original_name }}</a></span></div><div class="record-actions"><label class="btn btn-sm btn-outline"><Paperclip :size="13" /> 上传<input type="file" hidden @change="uploadAttachment($event, item)"></label><button class="tag" :class="item.status === '已提交' || item.status === '免交' ? 'tag-green' : 'tag-orange'" @click="markSubmitted(item)">{{ item.status === '已提交' ? '已提交' : item.status === '免交' ? '免交' : '未提交' }}</button></div></div><div v-if="!visibleItems.length" class="empty-state">当前筛选没有学生</div></div><div v-else class="empty-state">选择一个任务查看收集进度</div>
       </div>
     </div>
 

@@ -207,6 +207,7 @@ def attendance_stats(
     month_stats: dict[str, dict] = {}
     week_stats: dict[str, dict] = {}
     anomalies = []
+    session_keys = set()
 
     def empty_bucket(label: str) -> dict:
         return {'label': label, '出勤': 0, '迟到': 0, '请假': 0, '早退': 0,
@@ -214,6 +215,7 @@ def attendance_stats(
 
     for row in rows:
         status = row['status']
+        session_keys.add((row['attendance_date'], row['scene']))
         status_count[status] = status_count.get(status, 0) + 1
         day = date_stats.setdefault(row['attendance_date'], empty_bucket(row['attendance_date']))
         month_key = row['attendance_date'][:7]
@@ -243,20 +245,27 @@ def attendance_stats(
             })
     for item in student_stats.values():
         attended = item['出勤'] + item['迟到'] + item['早退']
-        item['attendance_rate'] = round(attended * 100 / item['总记录'], 1) if item['总记录'] else 0
+        item['应到次数'] = item['总记录']
+        item['正常出勤'] = item['出勤']
+        item['到勤次数'] = attended
+        item['punctual_rate'] = round(item['出勤'] * 100 / item['总记录'], 1) if item['总记录'] else 0
+        item['presence_rate'] = round(attended * 100 / item['总记录'], 1) if item['总记录'] else 0
+        # 保留旧字段，避免已有导出或外部调用失效。
+        item['attendance_rate'] = item['presence_rate']
     students = sorted(
         student_stats.values(),
         key=lambda item: (-item['异常'], item['学号'] or '', item['student_id']),
     )
     return {
         'date_from': date_from, 'date_to': date_to, 'scene': scene,
-        'total_records': len(rows), 'status_count': status_count,
+        'total_records': len(rows), 'total_sessions': len(session_keys),
+        'status_count': status_count,
         'date_stats': [date_stats[key] for key in sorted(date_stats, reverse=True)],
         'student_stats': students,
         'month_stats': [month_stats[key] for key in sorted(month_stats, reverse=True)],
         'week_stats': [week_stats[key] for key in sorted(week_stats, reverse=True)],
         'anomalies': anomalies[:500],
-        'definition': '出勤率=(出勤+迟到+早退)/总记录；请假和缺勤不计入出勤。',
+        'definition': '按时出勤率=正常出勤/应到次数；到勤率=(正常出勤+迟到+早退)/应到次数；请假和缺勤不计入到勤。',
     }
 
 

@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import DATA_DIR, DB_PATH
 
 BASE_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 24
+CURRENT_SCHEMA_VERSION = 25
 
 _connections: dict[int, tuple[str, sqlite3.Connection]] = {}
 _lock = threading.Lock()
@@ -1650,6 +1650,11 @@ def _migration_24(conn: sqlite3.Connection):
     ''')
 
 
+def _migration_25(conn: sqlite3.Connection):
+    """为学生档案增加头像文件的相对路径。"""
+    _add_column(conn, 'students', 'photo_path', "TEXT NOT NULL DEFAULT ''")
+
+
 MIGRATIONS = {
     2: _migration_2,
     3: _migration_3,
@@ -1674,6 +1679,7 @@ MIGRATIONS = {
     22: _migration_22,
     23: _migration_23,
     24: _migration_24,
+    25: _migration_25,
 }
 
 

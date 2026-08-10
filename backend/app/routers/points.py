@@ -56,15 +56,17 @@ def get_points(
     date_from: str = '',
     date_to: str = '',
     status: str = '',
+    academic_year: str = '',
     include_legacy: bool = True,
     limit: int = Query(500, ge=1, le=5000),
 ):
     try:
         return {
-            'summary': points_service.class_summary(),
+            'summary': points_service.class_summary(academic_year=academic_year),
             'entries': points_service.list_entries(
                 student_id=student_id, date_from=date_from, date_to=date_to,
-                status=status, include_legacy=include_legacy, limit=limit),
+                status=status, academic_year=academic_year,
+                include_legacy=include_legacy, limit=limit),
         }
     except points_service.PointsError as exc:
         _error(exc)

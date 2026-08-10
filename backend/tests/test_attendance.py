@@ -54,10 +54,13 @@ class AttendanceWorkflowTest(unittest.TestCase):
         self.assertEqual(all_stats['status_count']['早退'], 1)
         self.assertEqual(len(all_stats['anomalies']), 2)
         self.assertEqual(all_stats['student_stats'][0]['异常'], 1)
+        self.assertEqual(all_stats['total_sessions'], 2)
+        self.assertEqual(all_stats['student_stats'][0]['punctual_rate'], 50.0)
+        self.assertEqual(all_stats['student_stats'][0]['presence_rate'], 100.0)
         self.assertEqual(len(all_stats['month_stats']), 1)
         self.assertEqual(len(all_stats['week_stats']), 1)
         self.assertEqual(early_stats['total_records'], 2)
-        self.assertIn('出勤率=', all_stats['definition'])
+        self.assertIn('按时出勤率=', all_stats['definition'])
         self.assertEqual(attendance.dashboard_counts('2026-08-03')['早退'], 1)
 
     def test_save_automatically_evaluates_rule_without_duplicate_task(self):

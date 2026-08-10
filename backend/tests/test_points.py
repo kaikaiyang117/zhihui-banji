@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db
-from app.services import points, work_items
+from app.services import class_context, points, work_items
 from backend.tests.helpers import enroll_all_students
 
 
@@ -84,6 +84,44 @@ class PointsLedgerTest(unittest.TestCase):
         buffer, filename = export_sheet('日常行为积分')
         self.assertEqual(filename, '行为积分流水.xlsx')
         self.assertGreater(len(buffer.getvalue()), 100)
+
+    def test_academic_year_summary_spans_terms_and_excludes_other_years(self):
+        current = class_context.get_current_scope()
+        fall_term = class_context.create_term(
+            current['class_id'], '2025 秋季', '2025-09-01', '2026-01-31')
+        conn = db.get_conn()
+        conn.executemany(
+            '''INSERT INTO student_enrollments(student_id, class_id, term_id, status)
+               VALUES(?,?,?,'在读')''',
+            [(1, current['class_id'], fall_term), (2, current['class_id'], fall_term)],
+        )
+        conn.commit()
+        token = class_context.bind_request_scope(current['class_id'], fall_term)
+        try:
+            points.create_entry(
+                student_id=1, amount=4, occurred_at='2025-10-01', category='品德', reason='秋季表现')
+            points.create_entry(
+                student_id=2, amount=2, occurred_at='2025-12-01', category='劳动', reason='秋季值日')
+        finally:
+            class_context.reset_request_scope(token)
+        token = class_context.bind_request_scope(current['class_id'], current['term_id'])
+        try:
+            points.create_entry(
+                student_id=1, amount=3, occurred_at='2026-03-01', category='学习', reason='春季表现')
+            points.create_entry(
+                student_id=1, amount=9, occurred_at='2026-09-01', category='学习', reason='下一学年')
+            summary = points.class_summary(
+                academic_year='2025-2026', reference_date='2026-04-15')
+            entries = points.list_entries(academic_year='2025-2026')
+        finally:
+            class_context.reset_request_scope(token)
+        first = next(item for item in summary['students'] if item['学号'] == 'P001')
+        second = next(item for item in summary['students'] if item['学号'] == 'P002')
+        self.assertEqual(first['total'], 7)
+        self.assertEqual(second['total'], 2)
+        self.assertEqual(summary['totals']['valid_entries'], 3)
+        self.assertEqual(summary['academic_year'], '2025-2026')
+        self.assertEqual(len(entries), 3)
 
 
 if __name__ == '__main__':

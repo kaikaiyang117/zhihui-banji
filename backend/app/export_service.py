@@ -38,7 +38,7 @@ def _sheet_bytes(title: str, headers: list[str], rows: list[list]) -> io.BytesIO
     return buf
 
 
-def export_sheet(sheet: str) -> tuple[io.BytesIO, str]:
+def export_sheet(sheet: str, *, academic_year: str = '') -> tuple[io.BytesIO, str]:
     """通用工作表导出（含派生计算列）"""
     if sheet == '座位表':
         return export_seating()
@@ -48,7 +48,7 @@ def export_sheet(sheet: str) -> tuple[io.BytesIO, str]:
                    '原因', '备注', '考勤场景']
         return _sheet_bytes(sheet, headers, [row['data'] for row in rows]), f'{sheet}.xlsx'
     if sheet == '日常行为积分':
-        return export_points()
+        return export_points(academic_year=academic_year)
     if sheet == '班费管理':
         return export_funds()
     if sheet == '评语管理':
@@ -59,9 +59,9 @@ def export_sheet(sheet: str) -> tuple[io.BytesIO, str]:
     return _sheet_bytes(sheet, headers, [r['data'] for r in rows]), f'{sheet}.xlsx'
 
 
-def export_points() -> tuple[io.BytesIO, str]:
+def export_points(*, academic_year: str = '') -> tuple[io.BytesIO, str]:
     """导出完整积分流水，保留已撤销记录以便核对；排名只使用有效流水。"""
-    entries = points.list_entries(limit=5_000)
+    entries = points.list_entries(academic_year=academic_year, limit=5_000)
     headers = ['日期', '周期', '学号', '姓名', '分类', '分值', '原因', '状态',
                '撤销原因', '来源', '规则']
     rows = [[

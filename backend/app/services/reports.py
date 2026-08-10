@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, timedelta
+from collections import Counter
 import io
 import json
 
@@ -152,7 +153,88 @@ def _communications(conn, class_id, term_id, start, end, student_id=None):
     ).fetchall()]
 
 
-def _summary(report_type, start, end, student_id=None, conn=None):
+def _term_analysis(score_summary, students, attendance_rows, items, meetings, activities, diaries,
+                   events, communications):
+    """Build teacher-facing analysis from existing structured services.
+
+    This intentionally returns evidence and comparisons, not inferred judgments about
+    class atmosphere or student motivation. Those parts remain teacher-editable.
+    """
+    attendance_exception_rows = [row for row in attendance_rows if row.get('status') != '出勤']
+    attendance_students = {int(row['student_id']) for row in attendance_exception_rows if row.get('student_id')}
+    status_counts = Counter(row.get('status') for row in attendance_exception_rows if row.get('status'))
+    task_status_counts = Counter(row.get('status') for row in items if row.get('status'))
+    score_students = []
+    improved, declined = [], []
+    for student in score_summary.get('students', []):
+        complete = [item for item in student.get('exams', []) if item.get('total') is not None]
+        if len(complete) < 2:
+            continue
+        change = round(float(complete[-1]['total']) - float(complete[0]['total']), 2)
+        result = {
+            'student_id': student.get('student_id'),
+            'student_name': student.get('姓名', ''),
+            'first_exam': complete[0].get('exam_name', ''),
+            'last_exam': complete[-1].get('exam_name', ''),
+            'change': change,
+        }
+        score_students.append(result)
+        (improved if change > 0 else declined if change < 0 else []).append(result)
+
+    subjects_by_id = {int(item['id']): item for item in score_summary.get('subjects', []) if item.get('id')}
+    combinations = Counter()
+    for student in score_summary.get('students', []):
+        if not student.get('selection_configured'):
+            continue
+        names = [subjects_by_id[item].get('name', '') for item in student.get('selected_subject_ids', []) if item in subjects_by_id]
+        if names:
+            combinations[' + '.join(names)] += 1
+
+    latest_exam = score_summary.get('exams', [])[-1] if score_summary.get('exams') else None
+    latest_subjects = latest_exam.get('subject_stats', []) if latest_exam else []
+    return {
+        'class_overview': {
+            'student_count': len(students),
+            'meetings': len(meetings),
+            'activities': len(activities),
+            'diary_entries': len(diaries),
+            'events': len(events),
+            'communications': len(communications),
+        },
+        'academic': {
+            'exam_count': len(score_summary.get('exams', [])),
+            'subject_count': len(score_summary.get('subjects', [])),
+            'exams': [{
+                'name': item.get('name', ''),
+                'date': item.get('exam_date', ''),
+                'class_average_total': item.get('class_average_total'),
+                'complete_count': item.get('complete_count', 0),
+                'student_count': item.get('student_count', 0),
+                'missing_count': item.get('missing_count', 0),
+            } for item in score_summary.get('exams', [])],
+            'latest_subjects': latest_subjects,
+            'selection_combinations': [{'name': name, 'student_count': count} for name, count in combinations.most_common()],
+            'improved_students': sorted(improved, key=lambda item: item['change'], reverse=True)[:8],
+            'declined_students': sorted(declined, key=lambda item: item['change'])[:8],
+            'comparison_count': len(score_students),
+            'definition': score_summary.get('definition', {}),
+        },
+        'attendance': {
+            'total_records': len(attendance_rows),
+            'exception_records': len(attendance_exception_rows),
+            'exception_student_count': len(attendance_students),
+            'status_counts': dict(status_counts),
+        },
+        'tasks': {
+            'total': len(items),
+            'completed': task_status_counts.get('已完成', 0),
+            'open': sum(count for status, count in task_status_counts.items() if status in {'待处理', '处理中', '待复查'}),
+            'status_counts': dict(task_status_counts),
+        },
+    }
+
+
+def _summary(report_type, start, end, student_id=None, conn=None, class_summary='', teacher_summary='', next_term_plan=''):
     conn = _conn(conn)
     scope = _scope(conn)
     class_id, term_id = scope['class_id'], scope['term_id']
@@ -169,6 +251,7 @@ def _summary(report_type, start, end, student_id=None, conn=None):
     valid_points = [row for row in point_rows if row.get('status') == '有效']
     exam_rows = scores.list_records(student_id=student_id, conn=conn)
     exam_rows = [row for row in exam_rows if start <= str(row.get('exam_date') or '')[:10] <= end]
+    score_summary = scores.score_summary(student_id=student_id, conn=conn)
     comment_rows = comments.list_comments(student_id=student_id, limit=500, conn=conn)
     meetings, activities, diaries = _education_sources(conn, class_id, term_id, start, end, student_id)
     events = _events(conn, class_id, term_id, start, end, student_id)
@@ -225,6 +308,15 @@ def _summary(report_type, start, end, student_id=None, conn=None):
             'events': events,
             'communications': communications,
         },
+        'analysis': _term_analysis(
+            score_summary, students, attendance_rows, items, meetings, activities,
+            diaries, events, communications,
+        ),
+        'manual': {
+            'class_summary': str(class_summary or ''),
+            'teacher_summary': str(teacher_summary or ''),
+            'next_term_plan': str(next_term_plan or ''),
+        },
         'source_refs': source_refs,
         'data_notes': [
             '成绩统计沿用结构化成绩服务的缺考、免考和未录入口径。',
@@ -235,15 +327,19 @@ def _summary(report_type, start, end, student_id=None, conn=None):
     return report
 
 
-def build_report(report_type: str, period_start: str = '', period_end: str = '', student_id: int | None = None, conn=None):
+def build_report(report_type: str, period_start: str = '', period_end: str = '', student_id: int | None = None,
+                 conn=None, class_summary: str = '', teacher_summary: str = '', next_term_plan: str = ''):
     conn = _conn(conn)
     start, end = _period(report_type, period_start, period_end, conn=conn)
-    return _summary(report_type, start, end, student_id=student_id, conn=conn)
+    return _summary(report_type, start, end, student_id=student_id, conn=conn,
+                    class_summary=class_summary, teacher_summary=teacher_summary, next_term_plan=next_term_plan)
 
 
-def create_archive(report_type: str, period_start: str = '', period_end: str = '', student_id: int | None = None, conn=None):
+def create_archive(report_type: str, period_start: str = '', period_end: str = '', student_id: int | None = None,
+                   conn=None, class_summary: str = '', teacher_summary: str = '', next_term_plan: str = ''):
     conn = _conn(conn)
-    report = build_report(report_type, period_start, period_end, student_id, conn=conn)
+    report = build_report(report_type, period_start, period_end, student_id, conn=conn,
+                          class_summary=class_summary, teacher_summary=teacher_summary, next_term_plan=next_term_plan)
     scope = report['scope']
     title = report['report_label'] + (f' · {report["student"]["姓名"]}' if report.get('student') else '')
     row = conn.execute(
