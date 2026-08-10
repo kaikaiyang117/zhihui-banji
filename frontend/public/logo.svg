@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">美美大王工作台 Logo</title>
+  <desc id="desc">薰衣草蓝底色上的王冠与工作台勾选标记</desc>
+  <defs>
+    <linearGradient id="surface" x1="28" y1="20" x2="228" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6878D0"/>
+      <stop offset="1" stop-color="#4B5AB0"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="77" y1="97" x2="179" y2="190" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF0FF"/>
+    </linearGradient>
+  </defs>
+  <g id="logo-mark">
+    <rect width="256" height="256" rx="62" fill="url(#surface)"/>
+    <path d="M63 72 86 91l42-42 42 42 23-19-8 58H71l-8-58Z" fill="#FFF" opacity=".98"/>
+    <path d="M71 126h114l-7 64H78l-7-64Z" fill="url(#paper)"/>
+    <path d="M91 151h42M91 170h25" stroke="#6674C8" stroke-width="10" stroke-linecap="round"/>
+    <path d="m146 163 10 10 22-24" fill="none" stroke="#34C759" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="86" cy="72" r="8" fill="#34C759"/>
+    <circle cx="170" cy="72" r="8" fill="#34C759"/>
+    <path d="M78 201h100" stroke="#3F4C9A" stroke-width="10" stroke-linecap="round" opacity=".75"/>
+  </g>
+</svg>

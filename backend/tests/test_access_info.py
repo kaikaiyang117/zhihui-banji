@@ -65,11 +65,13 @@ class AccessInfoTest(unittest.TestCase):
             'assets': [
                 {
                     'name': 'MeimeiWorkbench-macOS-arm64.dmg',
+                    'url': 'https://api.example.test/assets/1',
                     'browser_download_url': 'https://example.test/workbench.dmg',
                     'size': 123,
                 },
                 {
                     'name': 'SHA256SUMS.txt',
+                    'url': 'https://api.example.test/assets/checksums',
                     'browser_download_url': 'https://example.test/SHA256SUMS.txt',
                     'size': 80,
                 },
@@ -99,6 +101,7 @@ class AccessInfoTest(unittest.TestCase):
         self.assertTrue(result['update_available'])
         self.assertTrue(result['downloadable'])
         self.assertEqual(result['asset']['sha256'], 'abc123')
+        self.assertIn('api.example.test/assets/1', result['asset']['url'])
 
     def test_update_check_falls_back_to_manifest_after_api_limit(self):
         manifest = {

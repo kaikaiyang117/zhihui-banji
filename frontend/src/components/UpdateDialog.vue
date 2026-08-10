@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onUnmounted, ref, watch } from 'vue'
-import { CheckCircle, Download, ExternalLink, LoaderCircle, RefreshCw, X } from 'lucide-vue-next'
+import { CheckCircle, Download, ExternalLink, Key, LoaderCircle, RefreshCw, X } from 'lucide-vue-next'
 import { get, post } from '../api'
 
 const props = defineProps({ open: Boolean })
@@ -15,6 +15,12 @@ const dialog = ref(null)
 const closeButton = ref(null)
 let previousActiveEl = null
 
+const showTokenInput = ref(false)
+const tokenValue = ref('')
+const tokenSaving = ref(false)
+const tokenConfigured = ref(false)
+const tokenMessage = ref('')
+
 function clearPoll() {
   if (pollTimer) window.clearTimeout(pollTimer)
   pollTimer = null
@@ -25,12 +31,44 @@ async function checkUpdate() {
   errorMessage.value = ''
   updateStatus.value = null
   try {
-    result.value = await get('/api/system/update/check')
-    if (result.value.error) errorMessage.value = result.value.error
+    const [statusRes, updateRes] = await Promise.all([
+      get('/api/system/update/github-token').catch(() => ({ configured: false })),
+      get('/api/system/update/check'),
+    ])
+    tokenConfigured.value = statusRes.configured
+    result.value = updateRes
+    if (updateRes.error) errorMessage.value = updateRes.error
   } catch (error) {
     errorMessage.value = error.message
   } finally {
     checking.value = false
+  }
+}
+
+async function saveToken() {
+  if (!tokenValue.value.trim()) return
+  tokenSaving.value = true
+  tokenMessage.value = ''
+  try {
+    await fetch('/api/system/update/github-token', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: tokenValue.value.trim() }),
+    })
+    tokenConfigured.value = true
+    tokenValue.value = ''
+    showTokenInput.value = false
+    tokenMessage.value = 'Token 已保存'
+    checkUpdate()
+  } catch (error) {
+    let msg = error.message
+    try {
+      const body = JSON.parse(msg)
+      msg = body.detail || msg
+    } catch {}
+    tokenMessage.value = msg
+  } finally {
+    tokenSaving.value = false
   }
 }
 
@@ -118,7 +156,22 @@ onUnmounted(clearPoll)
       </div>
       <div v-else-if="errorMessage" class="update-state update-state-error">
         <div>{{ errorMessage }}</div>
-        <button class="btn btn-outline" type="button" @click="checkUpdate"><RefreshCw :size="15" /> 重试</button>
+        <div class="update-actions" style="justify-content: center;">
+          <button class="btn btn-outline" type="button" @click="checkUpdate"><RefreshCw :size="15" /> 重试</button>
+          <button v-if="!tokenConfigured" class="btn btn-outline" type="button" @click="showTokenInput = !showTokenInput"><Key :size="15" /> 配置 Token</button>
+        </div>
+      </div>
+      <div v-if="showTokenInput" class="update-token-section">
+        <div class="update-token-title">配置 GitHub Token（私有仓库必需）</div>
+        <div class="update-token-desc">前往 GitHub Settings → Developer settings → Personal access tokens 生成，需勾选 repo 权限。</div>
+        <div class="update-token-row">
+          <input v-model="tokenValue" type="password" class="update-token-input" placeholder="ghp_ 或 github_pat_" @keydown.enter="saveToken" />
+          <button class="btn btn-primary btn-sm" type="button" :disabled="!tokenValue.trim() || tokenSaving" @click="saveToken">
+            <LoaderCircle v-if="tokenSaving" class="spin" :size="13" />
+            <span v-else>保存</span>
+          </button>
+        </div>
+        <div v-if="tokenMessage" class="update-token-msg" :class="{ 'update-token-msg-ok': tokenConfigured }">{{ tokenMessage }}</div>
       </div>
       <template v-else-if="result">
         <div class="update-version-row">
@@ -152,6 +205,9 @@ onUnmounted(clearPoll)
           <button v-else class="btn btn-outline" type="button" @click="checkUpdate">
             <RefreshCw :size="15" /> 重新检查
           </button>
+          <button v-if="tokenConfigured" class="btn btn-outline" type="button" @click="showTokenInput = !showTokenInput" title="GitHub Token 已配置">
+            <Key :size="14" /> 已配置
+          </button>
         </div>
         <div v-if="result.update_available && !result.downloadable" class="update-warning">当前系统的安装包或校验文件暂不可用，请打开发布页手动下载。</div>
       </template>
@@ -177,6 +233,15 @@ onUnmounted(clearPoll)
 .update-notes { max-height: 130px; margin-top: 14px; padding: 11px 12px; overflow: auto; border-radius: 10px; background: var(--bg); color: var(--text-secondary); font-size: 12px; line-height: 1.55; white-space: pre-line; }
 .update-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 .update-warning { margin-top: 12px; color: var(--warning); font-size: 11px; line-height: 1.5; }
+.update-token-section { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); }
+.update-token-title { font-weight: 600; font-size: 13px; }
+.update-token-desc { margin-top: 4px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.update-token-row { display: flex; gap: 8px; margin-top: 10px; }
+.update-token-input { flex: 1; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; font-family: monospace; outline: none; }
+.update-token-input:focus { border-color: var(--primary); }
+.update-token-msg { margin-top: 6px; font-size: 11px; color: var(--danger); }
+.update-token-msg-ok { color: var(--success); }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
 .spin { animation: update-spin 900ms linear infinite; }
 @keyframes update-dialog-in { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes update-spin { to { transform: rotate(360deg); } }

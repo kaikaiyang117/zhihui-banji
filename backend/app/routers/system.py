@@ -128,12 +128,24 @@ def logout_device(request: Request, response: Response):
     return {'ok': True}
 
 
+def _github_token() -> str:
+    """优先读环境变量，其次读数据库存储的 token。"""
+    token = os.environ.get('WORKBENCH_GITHUB_TOKEN', '')
+    if token:
+        return token
+    return db.get_agent_setting('github_token', '')
+
+
 def _fetch_json(url: str):
-    request = urllib.request.Request(url, headers={
+    headers = {
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'MeimeiWorkbench-Updater',
-    })
-    with urllib.request.urlopen(request, timeout=8) as response:
+    }
+    token = _github_token()
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=10) as response:
         return json.loads(response.read().decode('utf-8'))
 
 
@@ -183,12 +195,19 @@ def check_for_update():
         None,
     )
     checksum = str(asset.get('sha256', '')).lower() if asset else ''
-    if asset and checksum_asset:
+    if asset and checksum_asset and checksum_asset.get('url'):
+        checksum_headers = {
+            'Accept': 'application/octet-stream',
+            'User-Agent': 'MeimeiWorkbench-Updater',
+        }
+        token = _github_token()
+        if token:
+            checksum_headers['Authorization'] = f'Bearer {token}'
         request = urllib.request.Request(
-            checksum_asset.get('browser_download_url', ''),
-            headers={'User-Agent': 'MeimeiWorkbench-Updater'},
+            checksum_asset.get('url', ''),
+            headers=checksum_headers,
         )
-        with urllib.request.urlopen(request, timeout=8) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:
             checksum = _checksum_for(response.read().decode('utf-8'), asset.get('name', ''))
 
     return {
@@ -199,7 +218,7 @@ def check_for_update():
         'release_notes': release.get('body') or '',
         'asset': {
             'name': asset.get('name', '') if asset else '',
-            'url': asset.get('browser_download_url', '') if asset else '',
+            'url': asset.get('url', '') if asset else '',
             'size': asset.get('size', 0) if asset else 0,
             'sha256': checksum,
         },
@@ -211,6 +230,27 @@ def check_for_update():
 def update_check():
     try:
         return check_for_update()
+    except urllib.error.HTTPError as exc:
+        detail = ''
+        try:
+            detail = exc.read().decode('utf-8', errors='replace')[:300]
+        except Exception:
+            pass
+        if exc.code == 404:
+            hint = '尚未找到任何发布版本。如果仓库为私有，请在下方配置 GitHub Token。'
+        elif exc.code == 403:
+            hint = 'GitHub API 访问受限或触发限流，请稍后重试。'
+        elif exc.code == 401:
+            hint = 'GitHub Token 无效或已过期，请重新配置。'
+        else:
+            hint = f'服务器返回 {exc.code}'
+        return {
+            'current_version': APP_VERSION,
+            'latest_version': '',
+            'update_available': False,
+            'downloadable': False,
+            'error': f'暂时无法检查更新：{hint}',
+        }
     except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as exc:
         return {
             'current_version': APP_VERSION,
@@ -219,6 +259,27 @@ def update_check():
             'downloadable': False,
             'error': f'暂时无法检查更新：{exc}',
         }
+
+
+class GithubTokenBody(BaseModel):
+    token: str
+
+
+@router.get('/update/github-token')
+def get_github_token_status():
+    token = _github_token()
+    return {'configured': bool(token)}
+
+
+@router.put('/update/github-token')
+def save_github_token(body: GithubTokenBody):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(400, 'Token 不能为空')
+    if not token.startswith(('ghp_', 'github_pat_')):
+        raise HTTPException(400, 'Token 格式不正确，应为 ghp_ 或 github_pat_ 开头')
+    db.set_agent_setting('github_token', token)
+    return {'ok': True}
 
 
 def _set_update_state(status: str, message: str = '', error: str = '', asset_name: str = ''):
@@ -238,7 +299,14 @@ def update_status():
 
 
 def _download_asset(url: str, destination: str):
-    request = urllib.request.Request(url, headers={'User-Agent': 'MeimeiWorkbench-Updater'})
+    headers = {
+        'Accept': 'application/octet-stream',
+        'User-Agent': 'MeimeiWorkbench-Updater',
+    }
+    token = _github_token()
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    request = urllib.request.Request(url, headers=headers)
     temporary = f'{destination}.download'
     try:
         with urllib.request.urlopen(request, timeout=30) as response, open(temporary, 'wb') as output:

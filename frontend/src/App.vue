@@ -524,6 +524,7 @@ onBeforeUnmount(() => {
     <div class="app-body">
       <aside class="sidebar">
         <div class="sidebar-header">
+          <img class="brand-logo" src="/logo.svg" alt="" aria-hidden="true" />
           <h2>{{ activeNav.title }}</h2>
           <div class="sub">{{ activeNav.school }}</div>
         </div>
