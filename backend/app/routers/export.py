@@ -22,10 +22,10 @@ def _response(buf, fname: str):
 
 
 @router.get('/sheet/{name}')
-def export_work_sheet(name: str):
+def export_work_sheet(name: str, academic_year: str = ''):
     if name not in SHEET_META:
         raise HTTPException(404, f'工作表 "{name}" 不存在')
-    buf, fname = export_sheet(name)
+    buf, fname = export_sheet(name, academic_year=academic_year)
     return _response(buf, fname)
 
 

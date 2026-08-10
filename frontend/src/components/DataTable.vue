@@ -55,7 +55,12 @@ function fmt(v) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, ri) in filtered" :key="row.row_no" @click="$emit('row-click', row)">
+          <tr v-for="(row, ri) in filtered" :key="row.row_no"
+            class="data-row-clickable" tabindex="0" role="link"
+            :aria-label="`打开第 ${ri + 1} 行详情`"
+            @click="$emit('row-click', row)"
+            @keydown.enter.prevent="$emit('row-click', row)"
+            @keydown.space.prevent="$emit('row-click', row)">
             <td class="idx">{{ ri + 1 }}</td>
             <td v-for="(h, ci) in headers" :key="ci"
               :class="highlight.includes(ci) ? 'cell-strong' : ''">

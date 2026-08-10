@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import db
 from app.routers.p1 import (
     ClassTaskBody,
+    ClassTaskBulkItemUpdate,
     ClassTaskItemUpdate,
     ClassTaskUpdate,
     DutyBody,
@@ -20,6 +21,7 @@ from app.routers.p1 import (
     list_class_tasks,
     list_duty,
     update_class_task,
+    update_class_task_items_bulk,
     update_class_task_item,
     update_duty,
 )
@@ -80,6 +82,13 @@ class Core04WorkflowTest(unittest.TestCase):
         item = list_class_tasks()['tasks'][0]['items'][0]
         self.assertEqual(item['attachment_count'], 1)
         self.assertEqual(item['reminder_count'], 1)
+
+    def test_bulk_updates_task_items(self):
+        created = create_class_task(ClassTaskBody(title='批量收材料', student_ids=[1, 2, 3]))
+        updated = update_class_task_items_bulk(
+            created['task_id'], ClassTaskBulkItemUpdate(student_ids=[1, 2], status='已提交'))
+        items = {item['student_id']: item['status'] for item in updated['task']['items']}
+        self.assertEqual(items, {1: '已提交', 2: '已提交', 3: '未提交'})
 
     def test_duty_conflict_completion_and_rotation(self):
         first = create_duty(DutyBody(duty_date='2026-08-07', area='教室', student_id=1))

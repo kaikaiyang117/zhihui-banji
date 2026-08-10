@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageCircle, RefreshCw, Send } from 'lucide-vue-next'
+import { MessageCircle, RefreshCw, Send, Settings } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
@@ -400,6 +400,10 @@ onBeforeUnmount(() => {
         <component :is="renderIcon('LogOut')" :size="16" />
         <span>退出设备</span>
       </button>
+      <button class="ai-settings-button" type="button" aria-label="打开 AI 设置" @click="router.push('/agent')">
+        <Settings :size="16" />
+        <span>AI 设置</span>
+      </button>
       <button class="update-button" type="button" aria-label="检查软件更新" @click="updateOpen = true">
         <component :is="renderIcon('Download')" :size="16" />
         <span>更新</span>
@@ -616,6 +620,25 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .device-logout-button:active { transform: scale(.97); }
+.ai-settings-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 7px 0 7px 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(91,106,191,.2);
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+  touch-action: manipulation;
+}
+.ai-settings-button:hover { background: rgba(91,106,191,.14); }
+.ai-settings-button:active { transform: scale(.97); }
 .update-button {
   display: inline-flex;
   align-items: center;
@@ -799,6 +822,8 @@ onBeforeUnmount(() => {
   .device-logout-button span { display: none; }
   .update-button { margin-left: 6px; padding: 0 10px; }
   .update-button span { display: none; }
+  .ai-settings-button { margin-left: 6px; padding: 0 10px; }
+  .ai-settings-button span { display: none; }
   .access-scrim { align-items: end; padding: 0; }
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); }

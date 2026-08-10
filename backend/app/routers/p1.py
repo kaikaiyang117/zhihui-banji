@@ -183,6 +183,11 @@ class StudentScoreSubjectsBody(BaseModel):
     subject_ids: list[int] = []
 
 
+class BatchStudentScoreSubjectsBody(BaseModel):
+    student_ids: list[int] = []
+    subject_ids: list[int] = []
+
+
 @router.put('/score-config/settings')
 def edit_score_settings(body: ScoreSettingsBody):
     try:
@@ -191,10 +196,27 @@ def edit_score_settings(body: ScoreSettingsBody):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post('/score-config/presets/sichuan-312')
+def apply_sichuan_score_preset():
+    try:
+        return scores_service.apply_sichuan_312_preset()
+    except scores_service.ScoreError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.put('/score-config/students/{student_id}/subjects')
 def edit_student_score_subjects(student_id: int, body: StudentScoreSubjectsBody):
     try:
         return scores_service.save_student_subjects(student_id, body.subject_ids)
+    except scores_service.ScoreError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put('/score-config/student-subjects/batch')
+def edit_student_score_subjects_batch(body: BatchStudentScoreSubjectsBody):
+    try:
+        return scores_service.save_student_subjects_batch(
+            body.student_ids, body.subject_ids)
     except scores_service.ScoreError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -342,6 +364,12 @@ class ClassTaskItemUpdate(BaseModel):
     note: str = ''
 
 
+class ClassTaskBulkItemUpdate(BaseModel):
+    student_ids: list[int] = Field(min_length=1)
+    status: str = '已提交'
+    note: str = ''
+
+
 class ClassTaskReminderBody(BaseModel):
     student_ids: Optional[list[int]] = None
 
@@ -418,6 +446,16 @@ def update_class_task(task_id: int, body: ClassTaskUpdate):
         raise HTTPException(409, {'message': str(exc), 'missing_students': exc.missing}) from exc
     except class_tasks_service.ClassTaskError as exc:
         status_code = 404 if '不存在' in str(exc) else 400
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.put('/class-tasks/{task_id}/items/bulk')
+def update_class_task_items_bulk(task_id: int, body: ClassTaskBulkItemUpdate):
+    try:
+        return {'ok': True, 'task': class_tasks_service.update_items(
+            task_id, body.student_ids, status=body.status, note=body.note)}
+    except class_tasks_service.ClassTaskError as exc:
+        status_code = 404 if '没有所选学生' in str(exc) or '不存在' in str(exc) else 400
         raise HTTPException(status_code, str(exc)) from exc
 
 

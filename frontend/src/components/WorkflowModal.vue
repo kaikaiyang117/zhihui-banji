@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { Clock3, History, X } from 'lucide-vue-next'
 import { get, put } from '../api'
 
-const props = defineProps({ sourceType: String, sourceId: Number, title: String })
+const props = defineProps({ sourceType: String, sourceId: Number, title: String, actionLabel: String, initialStatus: String })
 const emit = defineEmits(['close', 'success'])
 const data = ref(null)
 const loading = ref(true)
@@ -18,6 +18,7 @@ const configs = {
   focus: { next: '下次复查日期', result: '阶段结论', fields: [] }
 }
 const config = computed(() => configs[props.sourceType] || configs.event)
+const modalLabel = computed(() => props.actionLabel || (props.sourceType === 'focus' ? '更新关注进展' : props.sourceType === 'event' ? '查看事件跟进' : '更新沟通进展'))
 const closing = computed(() => data.value?.closed_statuses?.includes(form.value.status))
 const linkedOpen = computed(() => data.value?.linked_work_item && !['已完成', '已取消'].includes(data.value.linked_work_item.status))
 
@@ -30,7 +31,7 @@ async function load() {
     for (const item of config.value.fields) fields[item.key] = source[item.key] || ''
     const nextKey = props.sourceType === 'event' ? 'followup_due' : props.sourceType === 'communication' ? 'followup_at' : 'next_review_at'
     form.value = {
-      status: source.status, progress: '', result: source.result || source.conclusion || '',
+      status: props.initialStatus || source.status, progress: '', result: source.result || source.conclusion || '',
       next_action_at: source[nextKey] || '', task_action: '', fields
     }
     nextTick(() => dialog.value?.focus())
@@ -64,7 +65,7 @@ onMounted(load)
     <div class="modal-overlay show workflow-overlay" @click.self="$emit('close')" @keydown.esc="$emit('close')">
       <section ref="dialog" class="modal workflow-modal" role="dialog" aria-modal="true" tabindex="-1">
         <button class="workflow-close" aria-label="关闭" @click="$emit('close')"><X :size="18" /></button>
-        <div class="modal-kicker">处理与复查</div>
+        <div class="modal-kicker">{{ modalLabel }}</div>
         <h3>{{ title }}</h3>
         <div v-if="loading" class="loading">加载中…</div>
         <template v-else-if="data">

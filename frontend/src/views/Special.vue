@@ -14,6 +14,10 @@ const sourceId = Number(route.query.source_id || 0)
 const reviewDue = String(route.query.review_due || '').slice(0, 10)
 const workflowTarget = ref(null)
 
+function openWorkflow(item, initialStatus = '') {
+  workflowTarget.value = { item, initialStatus, actionLabel: initialStatus === '已结束' ? '结束关注' : '更新关注进展' }
+}
+
 async function load() {
   loading.value = true
   const query = sourceId ? `source_id=${sourceId}` : 'limit=200'
@@ -35,7 +39,7 @@ onMounted(load)
 
 <template>
   <div>
-    <div class="page-title-bar"><div><div class="page-title">关注事项</div><div class="page-subtitle">{{ reviewDue ? `复查日期不晚于 ${reviewDue}` : '关注的是一件具体的事，不给学生贴永久标签' }}</div></div><button class="btn btn-primary" @click="showAdd = true"><Plus :size="14" /> 添加关注</button></div>
+    <div class="page-title-bar"><div><div class="page-title">关注事项</div><div class="page-subtitle">{{ reviewDue ? `复查日期不晚于 ${reviewDue}` : '持续关注需要跟进的问题，设置下次复查，不给学生贴永久标签' }}</div></div><button class="btn btn-primary" @click="showAdd = true"><Plus :size="14" /> 添加关注</button></div>
     <div class="card">
       <div class="card-title"><Tag :size="16" /> 进行中的关注 <span class="count">{{ focus.filter(f => f.status !== '已结束').length }} 项</span></div>
       <div v-if="loading" class="loading">加载中…</div>
@@ -45,11 +49,11 @@ onMounted(load)
           <div class="focus-card-head"><div><span class="focus-topic">{{ item.topic }}</span><span class="focus-student">{{ item.student_name }}</span></div><span class="tag" :class="item.status === '已结束' ? 'tag-green' : 'tag-orange'">{{ item.status }}</span></div>
           <div class="focus-reason">{{ item.reason }}</div>
           <div class="focus-meta">下次检查：{{ item.next_review_at || '未设置' }}<span v-if="item.action_plan"> · 计划：{{ item.action_plan }}</span></div>
-          <div class="record-actions"><button class="btn btn-sm btn-outline" @click="workflowTarget = item">处理与复查</button><button class="btn btn-sm btn-outline" aria-label="删除关注事项" @click="removeFocus(item)"><Trash2 :size="13" /></button></div>
+          <div class="record-actions"><button class="btn btn-sm btn-outline" @click="openWorkflow(item)">更新进展</button><button v-if="item.status !== '已结束'" class="btn btn-sm btn-outline" @click="openWorkflow(item, '已结束')">结束关注</button><button class="btn btn-sm btn-outline focus-trash-action" aria-label="移入回收站" @click="removeFocus(item)"><Trash2 :size="13" /> 移入回收站</button></div>
         </div>
       </div>
     </div>
     <QuickRecordModal v-if="showAdd" mode="focus" @success="showAdd = false; load()" @close="showAdd = false" />
-    <WorkflowModal v-if="workflowTarget" source-type="focus" :source-id="workflowTarget.id" :title="`${workflowTarget.student_name} · ${workflowTarget.topic}`" @close="workflowTarget = null" @success="workflowTarget = null; load()" />
+    <WorkflowModal v-if="workflowTarget" source-type="focus" :source-id="workflowTarget.item.id" :initial-status="workflowTarget.initialStatus" :action-label="workflowTarget.actionLabel" :title="`${workflowTarget.item.student_name} · ${workflowTarget.item.topic}`" @close="workflowTarget = null" @success="workflowTarget = null; load()" />
   </div>
 </template>

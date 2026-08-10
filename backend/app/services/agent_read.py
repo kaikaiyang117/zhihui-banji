@@ -9,7 +9,7 @@ from typing import Optional
 
 from .. import db
 from .class_context import scope_ids
-from . import attendance, scores, school_calendar, work_items
+from . import attendance, comment_ai, scores, school_calendar, work_items
 
 
 STUDENT_QUERY_FIELDS = {
@@ -372,3 +372,17 @@ def get_school_calendar(
     """查询当前学期校历，不返回学生敏感信息。"""
     return school_calendar.query_calendar(
         date_from=date_from, date_to=date_to, day_type=day_type, limit=limit)
+
+
+def get_student_term_comment_context(
+    student_ids: list[int] | None = None,
+    limit: int = 30,
+) -> dict:
+    """返回生成学期评语所需的安全事实摘要，不包含家庭电话、住址或沟通原文。"""
+    selected = [int(value) for value in (student_ids or [])]
+    if not selected:
+        raise ValueError('请至少提供一名学生')
+    if len(selected) > min(int(limit), 30):
+        raise ValueError('一次最多整理30名学生的学期评语事实')
+    contexts = comment_ai.build_student_term_contexts(selected)
+    return {'period': contexts[0]['period'] if contexts else {}, 'students': contexts}

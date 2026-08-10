@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from ..agent import comment_drafter
 from ..services import class_context, comments as comments_service
 
 router = APIRouter(prefix='/api/comments')
@@ -31,6 +32,21 @@ class CommentGenerationBody(BaseModel):
     student_ids: list[int] = []
     comment_type: str = ''
     confirm_missing: bool = False
+
+
+class AICommentPreviewBody(BaseModel):
+    student_ids: list[int] = Field(default_factory=list)
+    comment_type: str = '学期评语'
+    tone: str = '温和、客观、鼓励'
+    length: str = '120-160字'
+    instruction: str = ''
+
+
+class AICommentSaveBody(BaseModel):
+    rows: list[dict] = Field(default_factory=list)
+    comment_type: str = '学期评语'
+    model: str = ''
+    period: dict = Field(default_factory=dict)
 
 
 class CommentEntryBody(BaseModel):
@@ -112,6 +128,22 @@ def preview_comment_generation(body: CommentGenerationBody):
 def generate_comments(body: CommentGenerationBody):
     try:
         return {'ok': True, **comments_service.generate_batch(**body.model_dump())}
+    except comments_service.CommentError as exc:
+        _error(exc)
+
+
+@router.post('/ai/preview')
+async def preview_ai_comments(body: AICommentPreviewBody):
+    try:
+        return await comment_drafter.preview_generation(**body.model_dump())
+    except comment_drafter.CommentAIDraftError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/ai/generate')
+def generate_ai_comments(body: AICommentSaveBody):
+    try:
+        return {'ok': True, **comments_service.save_ai_drafts(**body.model_dump())}
     except comments_service.CommentError as exc:
         _error(exc)
 

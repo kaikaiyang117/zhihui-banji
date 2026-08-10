@@ -4,7 +4,8 @@ import { get, post } from '../api'
 
 const props = defineProps({
   mode: { type: String, default: 'event' },
-  studentId: { type: [Number, String], default: null }
+  studentId: { type: [Number, String], default: null },
+  businessDate: { type: String, default: '' }
 })
 const emit = defineEmits(['success', 'close'])
 
@@ -12,15 +13,16 @@ const students = ref([])
 const submitting = ref(false)
 const errorMsg = ref('')
 
-function nowInput() {
+function nowInput(dateOverride = '') {
   const d = new Date()
   const pad = v => String(v).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const date = dateOverride || `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return `${date}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 const form = reactive({
   student_id: props.studentId || '',
-  occurred_at: nowInput(),
+  occurred_at: nowInput(props.businessDate),
   event_type: '日常表现',
   description: '',
   handling: '',
@@ -33,7 +35,7 @@ const form = reactive({
   due_at: '',
   priority: '普通',
   notes: '',
-  communicated_at: nowInput(),
+  communicated_at: nowInput(props.businessDate),
   method: '电话',
   reason: '',
   summary: '',

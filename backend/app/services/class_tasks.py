@@ -394,6 +394,48 @@ def update_item(task_id: int, student_id: int, *, status: str, note: str = '', c
     return get_task(task_id, conn=conn)
 
 
+def update_items(task_id: int, student_ids: list[int], *, status: str, note: str = '', conn=None) -> dict:
+    conn = _conn(conn)
+    with _write_lock:
+        task = _task_row(task_id, write=True, conn=conn)
+        if task['status'] != '进行中':
+            raise ClassTaskError('已关闭的班级任务不能修改提交状态')
+        if status not in ITEM_STATUSES:
+            raise ClassTaskError('材料提交状态不合法')
+        ids = sorted({int(student_id) for student_id in (student_ids or [])})
+        if not ids:
+            raise ClassTaskError('至少选择一名学生')
+        for student_id in ids:
+            class_context.ensure_student_in_scope(student_id, write=True, conn=conn)
+        placeholders = ','.join('?' for _ in ids)
+        rows = conn.execute(
+            f'SELECT student_id FROM class_task_items WHERE task_id=? AND student_id IN ({placeholders})',
+            (int(task_id), *ids),
+        ).fetchall()
+        if len(rows) != len(ids):
+            raise ClassTaskError('任务中没有所选学生')
+        submitted_at = _now() if status in {'已提交', '免交'} else ''
+        try:
+            conn.execute(
+                f'''UPDATE class_task_items SET status=?, note=?, submitted_at=?,
+                       updated_at=datetime('now','localtime')
+                   WHERE task_id=? AND student_id IN ({placeholders})''',
+                (status, _text(note), submitted_at, int(task_id), *ids),
+            )
+            class_id, term_id = _scope(write=True, conn=conn)
+            audit.record(
+                'class_task', task_id, 'bulk_update_items',
+                summary=f'批量更新材料提交状态：{status}（{len(ids)}名学生）',
+                params={'student_ids': ids, 'status': status},
+                class_id=class_id, term_id=term_id, conn=conn, commit=False,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return get_task(task_id, conn=conn)
+
+
 def remind(task_id: int, student_ids: list[int] | None = None, *, conn=None) -> dict:
     conn = _conn(conn)
     with _write_lock:

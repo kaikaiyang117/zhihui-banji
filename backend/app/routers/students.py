@@ -3,7 +3,7 @@
 import urllib.parse
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .. import db
@@ -15,7 +15,7 @@ from ..import_service import (
     preview_students,
 )
 from ..export_service import export_students
-from ..services import audit, class_context, recycle
+from ..services import audit, class_context, recycle, student_photos
 
 router = APIRouter(prefix='/api/students')
 
@@ -83,6 +83,64 @@ def list_students(keyword: str = ''):
 @router.get('/directory')
 def list_student_directory():
     return {'students': class_context.list_student_directory()}
+
+
+@router.post('/{sid}/photo')
+async def upload_student_photo(sid: int, file: UploadFile = File(...)):
+    try:
+        student = class_context.ensure_student_in_scope(sid, write=True, conn=db.get_conn())
+        saved = student_photos.save(sid, await file.read())
+        conn = db.get_conn()
+        old_path = student.get('photo_path')
+        conn.execute(
+            "UPDATE students SET photo_path=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (saved['relative_path'], sid))
+        audit.record('student', sid, 'photo_update', summary=f"更新学生头像：{student.get('姓名', '')}",
+                     params={'size_bytes': saved['size_bytes'], 'content_type': saved['content_type']},
+                     conn=conn, commit=False)
+        conn.commit()
+        student_photos.remove(old_path)
+        return {'ok': True, 'photo_url': f'/api/students/{sid}/photo'}
+    except class_context.ArchivedScopeError:
+        raise
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except student_photos.StudentPhotoError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get('/{sid}/photo')
+def get_student_photo(sid: int):
+    try:
+        student = class_context.ensure_student_in_scope(sid, conn=db.get_conn())
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    path = student_photos.path(student.get('photo_path'))
+    if not path:
+        raise HTTPException(404, '该学生尚未上传头像')
+    return FileResponse(path)
+
+
+@router.delete('/{sid}/photo')
+def delete_student_photo(sid: int):
+    try:
+        student = class_context.ensure_student_in_scope(sid, write=True, conn=db.get_conn())
+    except class_context.ArchivedScopeError:
+        raise
+    except class_context.ScopeError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    old_path = student.get('photo_path')
+    if not old_path:
+        return {'ok': True}
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE students SET photo_path='', updated_at=datetime('now','localtime') WHERE id=?",
+        (sid,))
+    audit.record('student', sid, 'photo_remove', summary=f"移除学生头像：{student.get('姓名', '')}",
+                 conn=conn, commit=False)
+    conn.commit()
+    student_photos.remove(old_path)
+    return {'ok': True}
 
 
 @router.post('')

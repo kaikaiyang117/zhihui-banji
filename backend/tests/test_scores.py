@@ -152,6 +152,49 @@ class ScoreServiceTest(unittest.TestCase):
         self.assertEqual(chemistry['eligible_count'], 1)
         self.assertEqual(chemistry['missing_count'], 0)
 
+    def test_sichuan_312_preset_preserves_existing_scores_and_full_score(self):
+        physics = scores.create_subject(name='物理', full_score=80)['subject_id']
+        exam = scores.create_exam(
+            name='入学测试', exam_date='2026-09-01', subject_ids=[physics])['exam_id']
+
+        result = scores.apply_sichuan_312_preset()
+        config = result['config']
+        subject_by_name = {item['name']: item for item in config['subjects']}
+
+        self.assertTrue(config['sichuan_312']['ready'])
+        self.assertEqual(config['settings']['mode'], '3+1+2')
+        self.assertEqual(len(config['sichuan_312']['combinations']), 12)
+        self.assertEqual(subject_by_name['物理']['full_score'], 80)
+        self.assertEqual(subject_by_name['物理']['subject_group'], '首选')
+        self.assertEqual(subject_by_name['化学']['score_type'], '等级赋分')
+        self.assertEqual(next(item for item in config['exams'] if item['id'] == exam)['subject_ids'], [physics])
+        with self.assertRaisesRegex(scores.ScoreError, '由系统维护'):
+            scores.update_subject(physics, subject_group='必考')
+        scores.update_subject(physics, full_score=90)
+        updated_physics = next(
+            item for item in scores.list_config()['subjects'] if item['id'] == physics)
+        self.assertEqual(updated_physics['full_score'], 90)
+
+    def test_sichuan_312_rejects_invalid_selection_and_supports_batch_assignment(self):
+        config = scores.apply_sichuan_312_preset()['config']
+        subject_by_name = {item['name']: item for item in config['subjects']}
+        valid_ids = [subject_by_name[name]['id'] for name in ('物理', '化学', '生物')]
+
+        with self.assertRaisesRegex(scores.ScoreError, '二选一'):
+            scores.save_student_subjects(
+                1, [subject_by_name[name]['id'] for name in ('物理', '历史', '化学')]
+            )
+        with self.assertRaisesRegex(scores.ScoreError, '选择两科'):
+            scores.save_student_subjects(
+                1, [subject_by_name[name]['id'] for name in ('物理', '化学')]
+            )
+
+        result = scores.save_student_subjects_batch([1, 2], valid_ids)
+        summary = scores.score_summary()
+        self.assertEqual(result['updated_count'], 2)
+        self.assertTrue(all(item['selection_status'] == '有效' for item in summary['students']))
+        self.assertTrue(all(item['selected_subject_ids'] == valid_ids for item in summary['students']))
+
     def test_rule_is_idempotent_handled_resolved_and_reopened(self):
         for key, exam_name, exam_date, score in (
             ('rule-exam-1', '第一次月考', '2026-09-10', 90),

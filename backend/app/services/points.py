@@ -67,6 +67,40 @@ def _period_key(occurred_at: str) -> str:
     return f'{iso.year}-W{iso.week:02d}'
 
 
+def academic_year_label(reference: date | None = None) -> str:
+    current = reference or clock.today()
+    start_year = current.year if current.month >= 9 else current.year - 1
+    return f'{start_year}-{start_year + 1}'
+
+
+def academic_year_range(value: str = '', *, reference: date | None = None) -> tuple[str, date, date]:
+    label = _text(value) or academic_year_label(reference)
+    parts = label.split('-')
+    try:
+        start_year, end_year = int(parts[0]), int(parts[1])
+        if len(parts) != 2 or end_year != start_year + 1:
+            raise ValueError
+        start = date(start_year, 9, 1)
+        end = date(end_year, 8, 31)
+    except (IndexError, TypeError, ValueError) as exc:
+        raise PointsError('学年格式不正确，应为 YYYY-YYYY') from exc
+    return label, start, end
+
+
+def _academic_years(*, class_id: int, conn) -> list[str]:
+    years = {academic_year_label(clock.today())}
+    rows = conn.execute(
+        "SELECT occurred_at FROM point_ledger WHERE class_id=? AND occurred_at<>''",
+        (class_id,),
+    ).fetchall()
+    for row in rows:
+        try:
+            years.add(academic_year_label(date.fromisoformat(row['occurred_at'][:10])))
+        except (TypeError, ValueError):
+            continue
+    return sorted(years, reverse=True)
+
+
 def _serialize(row: dict) -> dict:
     item = dict(row)
     amount = _amount(item.get('amount'))
@@ -263,12 +297,21 @@ def get_entry(entry_id: int, *, conn=None) -> dict:
 
 
 def list_entries(*, student_id: int | None = None, date_from: str = '', date_to: str = '',
-                 status: str = '', include_legacy: bool = True, limit: int = 500, conn=None) -> list[dict]:
+                 status: str = '', academic_year: str = '', include_legacy: bool = True,
+                 limit: int = 500, conn=None) -> list[dict]:
     conn = _conn(conn)
     ensure_legacy_migrated(conn=conn)
-    class_id, term_id = _scope(conn=conn)
-    where = ["p.class_id=?", "p.term_id=?", "p.status IN ('有效','已撤销')", "s.deleted_at='' "]
-    params: list = [class_id, term_id]
+    scope = class_context.get_current_scope(conn=conn)
+    class_id, term_id = int(scope['class_id']), int(scope['term_id'])
+    where = ["p.class_id=?", "p.status IN ('有效','已撤销')", "s.deleted_at='' "]
+    params: list = [class_id]
+    if academic_year:
+        _, period_start, period_end = academic_year_range(academic_year)
+        where.extend(['p.occurred_at>=?', 'p.occurred_at<=?'])
+        params.extend((period_start.isoformat(), period_end.isoformat()))
+    else:
+        where.append('p.term_id=?')
+        params.append(term_id)
     if student_id:
         _ensure_student(student_id, conn=conn)
         where.append('p.student_id=?')
@@ -287,14 +330,24 @@ def list_entries(*, student_id: int | None = None, date_from: str = '', date_to:
     if not include_legacy:
         where.append("p.source_type<>'legacy_sheet'")
     rows = conn.execute(
-        '''SELECT p.*, s.学号, s.姓名, r.name AS rule_name
+        '''SELECT p.*, s.学号, s.姓名, r.name AS rule_name,
+                  t.name AS term_name, t.status AS term_status
            FROM point_ledger p JOIN students s ON s.id=p.student_id
+           JOIN terms t ON t.id=p.term_id
            LEFT JOIN point_rules r ON r.id=p.rule_id
            WHERE ''' + ' AND '.join(where) +
         ' ORDER BY CASE WHEN p.occurred_at=\'\' THEN 0 ELSE 1 END, p.occurred_at DESC, p.id DESC LIMIT ?',
         (*params, max(1, min(int(limit), 5_000))),
     ).fetchall()
-    return [_serialize(dict(row)) for row in rows]
+    result = []
+    for row in rows:
+        item = _serialize(dict(row))
+        item['can_revoke'] = (
+            int(item.get('term_id') or 0) == term_id and
+            scope['term_status'] != '已归档' and scope['class_status'] != '已归档'
+        )
+        result.append(item)
+    return result
 
 
 def revoke_entry(entry_id: int, reason: str, *, conn=None) -> dict:
@@ -582,8 +635,27 @@ def _period_buckets(reference: date, count: int = 8):
             for index in range(count)]
 
 
-def _summary_for_student(student: dict, entries: list[dict], *, reference: date, count: int = 8) -> dict:
+def _month_buckets(start: date, count: int = 12):
+    buckets = []
+    for offset in range(count):
+        year = start.year + (start.month - 1 + offset) // 12
+        month = (start.month - 1 + offset) % 12 + 1
+        first = date(year, month, 1)
+        if month == 12:
+            next_first = date(year + 1, 1, 1)
+        else:
+            next_first = date(year, month + 1, 1)
+        buckets.append((first, next_first - timedelta(days=1)))
+    return buckets
+
+
+def _summary_for_student(student: dict, entries: list[dict], *, reference: date,
+                         period_start: date | None = None, period_end: date | None = None,
+                         count: int = 8) -> dict:
     valid = [item for item in entries if item['status'] == '有效']
+    if period_start and period_end:
+        valid = [item for item in valid if item.get('occurred_at') and
+                 period_start.isoformat() <= item['occurred_at'][:10] <= period_end.isoformat()]
     total = sum(float(item['amount'] or 0) for item in valid)
     buckets = _period_buckets(reference, count)
     weekly = []
@@ -596,33 +668,96 @@ def _summary_for_student(student: dict, entries: list[dict], *, reference: date,
         legacy = {int(item['period_key'].split('-W')[-1]): item['amount']
                   for item in valid if item.get('period_key', '').startswith('legacy-W')}
         weekly = [_amount(legacy.get(index, 0)) or 0 for index in range(1, count + 1)]
+    positive_total = sum(float(item['amount'] or 0) for item in valid if float(item['amount'] or 0) > 0)
+    negative_total = sum(float(item['amount'] or 0) for item in valid if float(item['amount'] or 0) < 0)
+    monthly = []
+    if period_start and period_end:
+        for start, end in _month_buckets(period_start):
+            monthly.append(_amount(sum(
+                float(item['amount'] or 0) for item in valid
+                if item.get('occurred_at') and start.isoformat() <= item['occurred_at'][:10] <= end.isoformat())) or 0)
     return {
         'student_id': student['id'], '学号': student['学号'], 'name': student['姓名'],
         'weekly': weekly, 'total': _amount(total) or 0,
+        'positive_total': _amount(positive_total) or 0,
+        'negative_total': _amount(negative_total) or 0,
+        'monthly': monthly,
         'entry_count': len(valid), 'revoked_count': len(entries) - len(valid),
     }
 
 
-def class_summary(*, reference_date: str = '', conn=None) -> dict:
+def class_summary(*, reference_date: str = '', academic_year: str = '', conn=None) -> dict:
     conn = _conn(conn)
     ensure_legacy_migrated(conn=conn)
     reference = date.fromisoformat(_date(reference_date, default_today=True))
     students = _active_students(conn=conn)
     class_id, term_id = _scope(conn=conn)
-    rows = [dict(row) for row in conn.execute(
+    year_label = ''
+    period_start = period_end = None
+    if academic_year:
+        year_label, period_start, period_end = academic_year_range(academic_year, reference=reference)
+    else:
+        year_label = academic_year_label(reference)
+    query = (
         '''SELECT p.*, s.学号, s.姓名 FROM point_ledger p JOIN students s ON s.id=p.student_id
-           WHERE p.class_id=? AND p.term_id=? AND s.deleted_at='' ''',
-        (class_id, term_id),
+           WHERE p.class_id=? AND s.deleted_at='' '''
+    )
+    params: list = [class_id]
+    if period_start and period_end:
+        query += ' AND p.occurred_at>=? AND p.occurred_at<=?'
+        params.extend((period_start.isoformat(), period_end.isoformat()))
+    else:
+        query += ' AND p.term_id=?'
+        params.append(term_id)
+    rows = [dict(row) for row in conn.execute(
+        query, tuple(params),
     ).fetchall()]
     by_student: dict[int, list[dict]] = {}
     for row in rows:
         by_student.setdefault(int(row['student_id']), []).append(_serialize(row))
-    summaries = [_summary_for_student(student, by_student.get(student['id'], []), reference=reference)
+    summaries = [_summary_for_student(
+        student, by_student.get(student['id'], []), reference=reference,
+        period_start=period_start, period_end=period_end)
                  for student in students]
     summaries.sort(key=lambda item: (-float(item['total']), item['学号']))
     for index, item in enumerate(summaries, 1):
         item['rank'] = index if item['entry_count'] else None
-    return {'reference_date': reference.isoformat(), 'students': summaries,
+    valid_rows = [row for row in rows if row['status'] == '有效']
+    category_totals: dict[str, dict[str, int]] = {}
+    for row in valid_rows:
+        category = _text(row.get('category')) or '未分类'
+        item = category_totals.setdefault(category, {'category': category, 'total': 0, 'positive': 0, 'negative': 0})
+        amount = float(row.get('amount') or 0)
+        item['total'] = _amount(item['total'] + amount) or 0
+        if amount > 0:
+            item['positive'] = _amount(item['positive'] + amount) or 0
+        elif amount < 0:
+            item['negative'] = _amount(item['negative'] + amount) or 0
+    monthly = []
+    if period_start and period_end:
+        for start, end in _month_buckets(period_start):
+            month_rows = [row for row in valid_rows if row.get('occurred_at') and
+                          start.isoformat() <= row['occurred_at'][:10] <= end.isoformat()]
+            monthly.append({
+                'label': f'{start.year}-{start.month:02d}',
+                'total': _amount(sum(float(row['amount'] or 0) for row in month_rows)) or 0,
+                'positive': _amount(sum(float(row['amount'] or 0) for row in month_rows if float(row['amount'] or 0) > 0)) or 0,
+                'negative': _amount(sum(float(row['amount'] or 0) for row in month_rows if float(row['amount'] or 0) < 0)) or 0,
+            })
+    return {'reference_date': reference.isoformat(), 'academic_year': year_label,
+            'academic_year_start': period_start.isoformat() if period_start else '',
+            'academic_year_end': period_end.isoformat() if period_end else '',
+            'academic_years': _academic_years(class_id=class_id, conn=conn),
+            'students': summaries,
+            'totals': {
+                'valid_entries': len(valid_rows),
+                'students_with_entries': sum(1 for item in summaries if item['entry_count']),
+                'total': _amount(sum(float(row['amount'] or 0) for row in valid_rows)) or 0,
+                'positive': _amount(sum(float(row['amount'] or 0) for row in valid_rows if float(row['amount'] or 0) > 0)) or 0,
+                'negative': _amount(sum(float(row['amount'] or 0) for row in valid_rows if float(row['amount'] or 0) < 0)) or 0,
+            },
+            'monthly': monthly,
+            'categories': sorted(category_totals.values(), key=lambda item: (-abs(item['total']), item['category'])),
             'migration': migration_report(conn=conn), 'rules': list_rules(conn=conn),
             'hits': list_rule_hits(status='新命中', conn=conn)}
 

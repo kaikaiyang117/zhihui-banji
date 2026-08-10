@@ -75,6 +75,11 @@ def dashboard(date: str | None = None):
         "WHERE c.class_id=? AND c.term_id=? AND c.deleted_at='' AND s.deleted_at='' AND c.followup_at != '' "
         'AND c.status NOT IN (\'已完成\',\'已解决\') '
         'ORDER BY c.followup_at, c.id DESC LIMIT 20', (class_id, term_id)).fetchall()]
+    pending_communication_count = conn.execute(
+        '''SELECT COUNT(*) AS n FROM communications c JOIN students s ON s.id=c.student_id
+           WHERE c.class_id=? AND c.term_id=? AND c.deleted_at='' AND s.deleted_at='' AND c.followup_at != ''
+             AND c.status NOT IN ('已完成','已解决')''',
+        (class_id, term_id)).fetchone()['n']
 
     material_tasks = []
     for row in conn.execute(
@@ -128,6 +133,7 @@ def dashboard(date: str | None = None):
             'focus': focus,
             'recent_events': recent_events,
             'pending_communications': pending_communications,
+            'pending_communication_count': pending_communication_count,
             'calendar': calendar_data}
 
 

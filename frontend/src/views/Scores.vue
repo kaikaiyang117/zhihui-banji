@@ -10,7 +10,10 @@ import { del, get, post, put, upload } from '../api'
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
 const summary = ref({ exams: [], subjects: [], students: [], records: [], definition: {} })
-const config = ref({ exams: [], subjects: [] })
+const config = ref({
+  exams: [], subjects: [], settings: { mode: '固定科目' },
+  sichuan_312: { ready: false, issues: [], combinations: [], standard_subject_ids: [] },
+})
 const rules = ref([])
 const recentRuns = ref([])
 const loading = ref(true)
@@ -30,10 +33,26 @@ const newRule = ref({ name: '总分明显下降', metric: '总分下降', subjec
 const detailStudentId = ref(0)
 const studentKeyword = ref('')
 const selectionDraft = ref({})
+const selectionFilter = ref('all')
+const selectedSelectionStudentIds = ref([])
+const batchCombinationCode = ref('')
+const applyingPreset = ref(false)
+const batchSaving = ref(false)
 const detailSection = ref(null)
 
 const selectedExam = computed(() => summary.value.exams.find(item => Number(item.id) === Number(selectedExamId.value)) || null)
 const selectedRecords = computed(() => summary.value.records.filter(item => Number(item.exam_id) === Number(selectedExamId.value)))
+const selectedRawSubjects = computed(() => selectedExam.value?.subject_stats || [])
+const rawRecordMap = computed(() => new Map(
+  selectedRecords.value.map(row => [
+    `${row.student_id}:${row.configured_subject_name || row.subject}`,
+    row,
+  ])
+))
+const rawStudentRows = computed(() => {
+  const studentIds = new Set(selectedRecords.value.map(row => Number(row.student_id)))
+  return summary.value.students.filter(student => studentIds.has(Number(student.student_id)))
+})
 const previewRows = computed(() => preview.value?.rows || [])
 const commitRows = computed(() => previewRows.value.filter(item => item.valid && item.action !== '跳过'))
 const studentOverviewRows = computed(() => {
@@ -72,13 +91,30 @@ const selectedStudentSubjects = computed(() => summary.value.subjects.map(subjec
     return { exam, score: item?.score, status: selected ? (item?.status || '未录入') : '未选科' }
   }),
 })))
-const selectableSubjects = computed(() => config.value.subjects.filter(
-  subject => subject.enabled && subject.subject_group !== '必考'
-))
+const combinationOptions = computed(() => config.value.sichuan_312?.combinations || [])
 const selectionStudents = computed(() => summary.value.students.map(student => ({
   ...student,
   selected_subject_ids: selectionDraft.value[student.student_id] || [],
 })))
+const selectionCounts = computed(() => ({
+  all: selectionStudents.value.length,
+  unset: selectionStudents.value.filter(student => !student.selection_configured).length,
+  invalid: selectionStudents.value.filter(
+    student => student.selection_configured && student.selection_status !== '有效'
+  ).length,
+}))
+const filteredSelectionStudents = computed(() => selectionStudents.value.filter(student => {
+  if (selectionFilter.value === 'unset') return !student.selection_configured
+  if (selectionFilter.value === 'invalid') {
+    return student.selection_configured && student.selection_status !== '有效'
+  }
+  return true
+}))
+const allFilteredSelectionStudentsSelected = computed(() => (
+  filteredSelectionStudents.value.length > 0
+  && filteredSelectionStudents.value.every(student => selectedSelectionStudentIds.value.includes(student.student_id))
+))
+const standardSubjectIds = computed(() => new Set(config.value.sichuan_312?.standard_subject_ids || []))
 const trendSummary = computed(() => {
   if (!summary.value.exams.length) return '暂无成绩趋势数据。'
   const complete = summary.value.students.reduce((count, student) =>
@@ -95,6 +131,10 @@ function formatChange(value, suffix = '') {
   if (value > 0) return `↑ ${value}${suffix}`
   if (value < 0) return `↓ ${Math.abs(value)}${suffix}`
   return `持平${suffix}`
+}
+
+function rawRecordFor(studentId, subjectName) {
+  return rawRecordMap.value.get(`${studentId}:${subjectName}`)
 }
 
 async function scrollToDetail() {
@@ -121,12 +161,22 @@ async function load() {
     selectionDraft.value = Object.fromEntries(
       data.students.map(student => [student.student_id, [...(student.selected_subject_ids || [])]])
     )
+    const currentStudentIds = new Set(data.students.map(student => student.student_id))
+    selectedSelectionStudentIds.value = selectedSelectionStudentIds.value.filter(
+      studentId => currentStudentIds.has(studentId)
+    )
+    if (!batchCombinationCode.value && configData.sichuan_312?.combinations?.length) {
+      batchCombinationCode.value = configData.sichuan_312.combinations[0].code
+    }
     rules.value = ruleData.rules || []
     recentRuns.value = ruleData.recent_runs || []
     if (!selectedExamId.value || !data.exams.some(item => Number(item.id) === Number(selectedExamId.value))) {
       selectedExamId.value = data.exams.at(-1)?.id || 0
     }
-    if (!detailStudentId.value || !data.students.some(item => String(item.student_id) === String(detailStudentId.value))) {
+    const requestedStudentId = Number(route.query.student_id || 0)
+    if (requestedStudentId && data.students.some(item => Number(item.student_id) === requestedStudentId)) {
+      detailStudentId.value = requestedStudentId
+    } else if (!detailStudentId.value || !data.students.some(item => String(item.student_id) === String(detailStudentId.value))) {
       detailStudentId.value = data.students[0]?.student_id || 0
     }
   } catch (error) {
@@ -209,12 +259,38 @@ async function saveSubject(subject) {
   } catch (error) { message.value = error.message }
 }
 
-async function saveTermSettings() {
+function combinationForSubjectIds(subjectIds) {
+  const key = [...(subjectIds || [])].map(Number).sort((a, b) => a - b).join(',')
+  return combinationOptions.value.find(item => (
+    [...item.subject_ids].map(Number).sort((a, b) => a - b).join(',') === key
+  )) || null
+}
+
+function isStandardSubject(subject) {
+  return standardSubjectIds.value.has(Number(subject.id))
+}
+
+function toggleFilteredSelectionStudents() {
+  const selected = new Set(selectedSelectionStudentIds.value)
+  if (allFilteredSelectionStudentsSelected.value) {
+    filteredSelectionStudents.value.forEach(student => selected.delete(student.student_id))
+  } else {
+    filteredSelectionStudents.value.forEach(student => selected.add(student.student_id))
+  }
+  selectedSelectionStudentIds.value = [...selected]
+}
+
+async function applySichuanPreset() {
+  applyingPreset.value = true
   try {
-    await put('/api/score-config/settings', config.value.settings)
-    message.value = '选科模式已保存'
+    await post('/api/score-config/presets/sichuan-312', {})
+    message.value = '四川3+1+2标准科目已准备好，可以开始登记学生选科'
     await load()
-  } catch (error) { message.value = error.message }
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    applyingPreset.value = false
+  }
 }
 
 async function saveStudentSelection(student) {
@@ -224,7 +300,36 @@ async function saveStudentSelection(student) {
     })
     message.value = `${student.姓名}的选科已保存`
     await load()
-  } catch (error) { message.value = error.message }
+  } catch (error) {
+    message.value = error.message
+    await load()
+  }
+}
+
+async function saveStudentCombination(student, combinationCode) {
+  const combination = combinationOptions.value.find(item => item.code === combinationCode)
+  if (!combination) return
+  selectionDraft.value[student.student_id] = [...combination.subject_ids]
+  await saveStudentSelection(student)
+}
+
+async function applyBatchCombination() {
+  const combination = combinationOptions.value.find(item => item.code === batchCombinationCode.value)
+  if (!combination || !selectedSelectionStudentIds.value.length) return
+  batchSaving.value = true
+  try {
+    const result = await put('/api/score-config/student-subjects/batch', {
+      student_ids: selectedSelectionStudentIds.value,
+      subject_ids: combination.subject_ids,
+    })
+    message.value = `已为 ${result.updated_count} 名学生登记“${combination.code}”组合`
+    selectedSelectionStudentIds.value = []
+    await load()
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    batchSaving.value = false
+  }
 }
 
 async function addExam() {
@@ -243,15 +348,6 @@ async function saveExam(exam) {
       subject_ids: exam.subject_ids, enabled: exam.enabled
     })
     message.value = '考试配置已保存'
-    await load()
-  } catch (error) { message.value = error.message }
-}
-
-async function removeScore(row) {
-  if (!confirm(`删除“${row.姓名} · ${row.exam_name} · ${row.subject}”成绩并移入回收站吗？`)) return
-  try {
-    await del(`/api/records/exam/${row.id}`)
-    message.value = '成绩已移入回收站'
     await load()
   } catch (error) { message.value = error.message }
 }
@@ -320,70 +416,148 @@ onMounted(load)
     <div v-if="message" class="inline-message">{{ message }}</div>
 
     <section v-if="configOpen" class="card score-config-card">
-      <div class="card-title"><Settings2 :size="16" /> 考试与科目配置</div>
-      <div class="score-mode-settings">
-        <label>成绩制度<select v-model="config.settings.mode" class="form-select" @change="saveTermSettings"><option>固定科目</option><option>3+1+2</option><option>3+3</option><option>自定义</option></select></label>
-        <p>启用选科模式后，必考科目计入所有学生；首选、再选或选考科目按学生的选科记录计入总分。</p>
-      </div>
-      <div class="score-config-grid">
-        <div>
-          <h3>科目</h3>
-          <div class="config-create-row subject-create">
-            <input v-model.trim="newSubject.name" class="form-input" placeholder="科目名称">
-            <input v-model.number="newSubject.full_score" class="form-input" type="number" min="0" placeholder="满分">
-            <select v-model="newSubject.subject_group" class="form-select" aria-label="科目分组"><option>必考</option><option>首选</option><option>再选</option><option>选考</option></select>
-            <select v-model="newSubject.score_type" class="form-select" aria-label="成绩口径"><option>原始分</option><option>等级赋分</option></select>
-            <button class="btn btn-primary" :disabled="!newSubject.name" @click="addSubject">添加</button>
-          </div>
-          <div class="config-list">
-            <div v-for="subject in config.subjects" :key="subject.id" class="config-row">
-              <input v-model="subject.name" class="form-input" aria-label="科目名称">
-              <input v-model.number="subject.full_score" class="form-input" type="number" min="0" aria-label="科目满分">
-              <select v-model="subject.subject_group" class="form-select" aria-label="科目分组"><option>必考</option><option>首选</option><option>再选</option><option>选考</option></select>
-              <select v-model="subject.score_type" class="form-select" aria-label="成绩口径"><option>原始分</option><option>等级赋分</option></select>
-              <label><input v-model="subject.enabled" type="checkbox"> 启用</label>
-              <button class="btn btn-sm btn-outline" @click="saveSubject(subject)">保存</button>
+      <div class="card-title"><Settings2 :size="16" /> 选科与考试设置</div>
+
+      <div class="sichuan-mode-card" :class="{ ready: config.sichuan_312?.ready }">
+        <div class="sichuan-mode-main">
+          <div class="sichuan-mode-icon"><CheckCircle :size="20" /></div>
+          <div>
+            <div class="sichuan-mode-title">
+              四川新高考 · 3+1+2
+              <span>{{ config.sichuan_312?.ready ? '标准配置已启用' : '需要初始化' }}</span>
+            </div>
+            <p>语数英必考，物理/历史二选一，化学、生物、政治、地理四选二。</p>
+            <div v-if="config.sichuan_312?.issues?.length" class="sichuan-mode-issues">
+              {{ config.sichuan_312.issues.slice(0, 3).join('；') }}<template v-if="config.sichuan_312.issues.length > 3">等 {{ config.sichuan_312.issues.length }} 项</template>
             </div>
           </div>
         </div>
-        <div>
-          <h3>考试</h3>
-          <div class="config-create-row exam-create">
-            <input v-model.trim="newExam.name" class="form-input" placeholder="考试名称">
-            <input v-model="newExam.exam_date" class="form-input" type="date" aria-label="考试日期">
+        <button v-if="!config.sichuan_312?.ready" class="btn btn-primary" :disabled="applyingPreset" @click="applySichuanPreset">
+          {{ applyingPreset ? '正在准备…' : '应用标准配置' }}
+        </button>
+      </div>
+
+      <section v-if="config.sichuan_312?.ready" class="score-selection-workspace" aria-labelledby="score-selection-title">
+        <div class="score-selection-heading">
+          <div>
+            <h3 id="score-selection-title">学生选科</h3>
+            <p>先选择学生，再统一分配组合；个别学生可在名单中直接修改。</p>
           </div>
-          <div class="subject-checks">
-            <label v-for="subject in config.subjects.filter(item => item.enabled)" :key="subject.id">
-              <input v-model="newExam.subject_ids" type="checkbox" :value="subject.id"> {{ subject.name }}
-            </label>
-            <button class="btn btn-primary" :disabled="!newExam.name || !newExam.subject_ids.length" @click="addExam">添加考试</button>
-          </div>
-          <div class="config-list exam-config-list">
-            <details v-for="exam in config.exams" :key="exam.id">
-              <summary>{{ exam.name }} · {{ exam.exam_date || '日期未填' }} · {{ exam.subject_ids.length }} 科</summary>
-              <div class="exam-edit-grid">
-                <input v-model="exam.name" class="form-input" aria-label="考试名称">
-                <input v-model="exam.exam_date" class="form-input" type="date" aria-label="考试日期">
-                <label><input v-model="exam.enabled" type="checkbox"> 启用</label>
-              </div>
-              <div class="subject-checks">
-                <label v-for="subject in config.subjects.filter(item => item.enabled)" :key="subject.id">
-                  <input v-model="exam.subject_ids" type="checkbox" :value="subject.id"> {{ subject.name }}
-                </label>
-                <button class="btn btn-sm btn-outline" @click="saveExam(exam)">保存考试</button>
-              </div>
-            </details>
+          <div class="score-selection-progress">
+            <strong>{{ selectionCounts.all - selectionCounts.unset }}</strong> / {{ selectionCounts.all }} 已登记
           </div>
         </div>
-      </div>
-      <details v-if="selectableSubjects.length" class="score-selection-settings">
-        <summary>学生选科设置 <span class="count">{{ selectableSubjects.length }} 门选考科目</span></summary>
-        <p class="hint">首选/再选/选考科目不再默认要求全班统一成绩；请为已确定选科的学生勾选科目。未配置的学生继续兼容旧版“考试配置中的全部科目”口径。</p>
+
+        <div class="score-selection-toolbar">
+          <div class="score-selection-filters" role="group" aria-label="筛选学生选科状态">
+            <button :class="{ active: selectionFilter === 'all' }" @click="selectionFilter = 'all'">全部 {{ selectionCounts.all }}</button>
+            <button :class="{ active: selectionFilter === 'unset' }" @click="selectionFilter = 'unset'">未配置 {{ selectionCounts.unset }}</button>
+            <button :class="{ active: selectionFilter === 'invalid' }" @click="selectionFilter = 'invalid'">待确认 {{ selectionCounts.invalid }}</button>
+          </div>
+          <div class="score-batch-assign">
+            <select v-model="batchCombinationCode" class="form-select" aria-label="批量选择选科组合">
+              <option v-for="combination in combinationOptions" :key="combination.code" :value="combination.code">
+                {{ combination.code }} · {{ combination.label }}
+              </option>
+            </select>
+            <button class="btn btn-primary" :disabled="batchSaving || !selectedSelectionStudentIds.length" @click="applyBatchCombination">
+              {{ batchSaving ? '正在登记…' : `应用到已选 ${selectedSelectionStudentIds.length} 人` }}
+            </button>
+          </div>
+        </div>
+
         <div class="table-wrap score-selection-table-wrap">
           <table class="data-table score-selection-table">
-            <thead><tr><th>学生</th><th v-for="subject in selectableSubjects" :key="subject.id">{{ subject.name }}<small class="table-sub">{{ subject.subject_group }}</small></th><th>操作</th></tr></thead>
-            <tbody><tr v-for="student in selectionStudents" :key="student.student_id"><td><strong>{{ student.姓名 }}</strong><small class="table-sub">{{ student.学号 }}</small></td><td v-for="subject in selectableSubjects" :key="subject.id"><label class="selection-check"><input v-model="selectionDraft[student.student_id]" type="checkbox" :value="subject.id"><span>{{ subject.subject_group }}</span></label></td><td><span class="score-status" :class="student.selection_configured && student.selection_status !== '有效' ? 'status-incomplete' : student.selection_configured ? 'status-stable' : 'status-unset'">{{ student.selection_configured ? student.selection_status : '未配置' }}</span><button class="btn btn-sm btn-outline" type="button" @click="saveStudentSelection(student)">保存</button></td></tr></tbody>
+            <thead>
+              <tr>
+                <th class="selection-checkbox-column">
+                  <label class="selection-select-current">
+                    <input type="checkbox" :checked="allFilteredSelectionStudentsSelected" @change="toggleFilteredSelectionStudents">
+                    <span>选择当前名单</span>
+                  </label>
+                </th>
+                <th>学生</th><th>当前组合</th><th>快速修改</th><th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="student in filteredSelectionStudents" :key="student.student_id">
+                <td class="selection-checkbox-column">
+                  <input v-model="selectedSelectionStudentIds" type="checkbox" :value="student.student_id" :aria-label="`选择${student.姓名}`">
+                </td>
+                <td><strong>{{ student.姓名 }}</strong><small class="table-sub">{{ student.学号 }}</small></td>
+                <td>
+                  <template v-if="combinationForSubjectIds(student.selected_subject_ids)">
+                    <strong class="combination-code">{{ combinationForSubjectIds(student.selected_subject_ids).code }}</strong>
+                    <small class="table-sub">{{ combinationForSubjectIds(student.selected_subject_ids).label }}</small>
+                  </template>
+                  <span v-else class="selection-empty">尚未登记</span>
+                </td>
+                <td>
+                  <select class="form-select student-combination-select" :value="combinationForSubjectIds(student.selected_subject_ids)?.code || ''" :aria-label="`修改${student.姓名}的选科组合`" @change="saveStudentCombination(student, $event.target.value)">
+                    <option value="" disabled>选择组合</option>
+                    <option v-for="combination in combinationOptions" :key="combination.code" :value="combination.code">{{ combination.code }}</option>
+                  </select>
+                </td>
+                <td><span class="score-status" :class="student.selection_configured && student.selection_status !== '有效' ? 'status-incomplete' : student.selection_configured ? 'status-stable' : 'status-unset'">{{ student.selection_configured ? student.selection_status : '未配置' }}</span></td>
+              </tr>
+            </tbody>
           </table>
+          <div v-if="!filteredSelectionStudents.length" class="empty-state compact">当前筛选下没有学生。</div>
+        </div>
+      </section>
+
+      <details class="score-advanced-config">
+        <summary>高级科目与考试设置 <span>日常登记选科无需进入这里</span></summary>
+        <div class="score-config-grid">
+          <div>
+            <h3>科目</h3>
+            <div class="config-create-row subject-create">
+              <input v-model.trim="newSubject.name" class="form-input" placeholder="科目名称">
+              <input v-model.number="newSubject.full_score" class="form-input" type="number" min="0" placeholder="满分">
+              <select v-model="newSubject.subject_group" class="form-select" aria-label="科目分组"><option>必考</option><option>首选</option><option>再选</option><option>选考</option></select>
+              <select v-model="newSubject.score_type" class="form-select" aria-label="成绩口径"><option>原始分</option><option>等级赋分</option></select>
+              <button class="btn btn-primary" :disabled="!newSubject.name" @click="addSubject">添加</button>
+            </div>
+            <div class="config-list">
+              <div v-for="subject in config.subjects" :key="subject.id" class="config-row">
+                <input v-model="subject.name" class="form-input" aria-label="科目名称" :disabled="isStandardSubject(subject)">
+                <input v-model.number="subject.full_score" class="form-input" type="number" min="0" aria-label="科目满分">
+                <select v-model="subject.subject_group" class="form-select" aria-label="科目分组" :disabled="isStandardSubject(subject)"><option>必考</option><option>首选</option><option>再选</option><option>选考</option></select>
+                <select v-model="subject.score_type" class="form-select" aria-label="成绩口径" :disabled="isStandardSubject(subject)"><option>原始分</option><option>等级赋分</option></select>
+                <label><input v-model="subject.enabled" type="checkbox" :disabled="isStandardSubject(subject)"> 启用</label>
+                <button class="btn btn-sm btn-outline" @click="saveSubject(subject)">保存</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3>考试</h3>
+            <div class="config-create-row exam-create">
+              <input v-model.trim="newExam.name" class="form-input" placeholder="考试名称">
+              <input v-model="newExam.exam_date" class="form-input" type="date" aria-label="考试日期">
+            </div>
+            <div class="subject-checks">
+              <label v-for="subject in config.subjects.filter(item => item.enabled)" :key="subject.id">
+                <input v-model="newExam.subject_ids" type="checkbox" :value="subject.id"> {{ subject.name }}
+              </label>
+              <button class="btn btn-primary" :disabled="!newExam.name || !newExam.subject_ids.length" @click="addExam">添加考试</button>
+            </div>
+            <div class="config-list exam-config-list">
+              <details v-for="exam in config.exams" :key="exam.id">
+                <summary>{{ exam.name }} · {{ exam.exam_date || '日期未填' }} · {{ exam.subject_ids.length }} 科</summary>
+                <div class="exam-edit-grid">
+                  <input v-model="exam.name" class="form-input" aria-label="考试名称">
+                  <input v-model="exam.exam_date" class="form-input" type="date" aria-label="考试日期">
+                  <label><input v-model="exam.enabled" type="checkbox"> 启用</label>
+                </div>
+                <div class="subject-checks">
+                  <label v-for="subject in config.subjects.filter(item => item.enabled)" :key="subject.id">
+                    <input v-model="exam.subject_ids" type="checkbox" :value="subject.id"> {{ subject.name }}
+                  </label>
+                  <button class="btn btn-sm btn-outline" @click="saveExam(exam)">保存考试</button>
+                </div>
+              </details>
+            </div>
+          </div>
         </div>
       </details>
     </section>
@@ -416,22 +590,21 @@ onMounted(load)
     <div class="score-student-workspace">
     <section class="card score-class-overview-card">
       <div class="score-section-head">
-        <div><div class="card-title"><Users :size="16" /> 班级学生总览</div><p class="chart-text-summary">{{ trendSummary }} 点击学生后查看各科、各次考试的详细成绩。</p></div>
+        <div><div class="card-title"><Users :size="16" /> 班级学生总览</div><p class="chart-text-summary">{{ trendSummary }} 点击学生行切换右侧详情。</p></div>
         <label class="score-student-search">搜索学生<input v-model.trim="studentKeyword" class="form-input" placeholder="姓名或学号"></label>
       </div>
       <div v-if="loading" class="loading">加载中…</div>
       <div v-else-if="!studentOverviewRows.length" class="empty-state">还没有匹配的学生成绩。</div>
       <div v-else class="table-wrap score-student-overview-wrap">
         <table class="data-table score-student-overview-table">
-          <thead><tr><th>学生</th><th>最近总分</th><th>分数变化</th><th>排名</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>学生</th><th>最近总分</th><th>分数变化</th><th>排名</th><th>状态</th></tr></thead>
           <tbody>
-            <tr v-for="student in studentOverviewRows" :key="student.student_id" :class="{ active: selectedStudent?.student_id === student.student_id }">
-              <td><div class="student-overview-name"><router-link :to="`/student/${student.student_id}`" class="table-link">{{ student.姓名 }}</router-link><small class="table-sub">{{ student.学号 }}</small></div></td>
+            <tr v-for="student in studentOverviewRows" :key="student.student_id" class="score-student-row" :class="{ active: selectedStudent?.student_id === student.student_id }" tabindex="0" :aria-current="selectedStudent?.student_id === student.student_id ? 'true' : undefined" @click="selectStudent(student)" @keydown.enter.prevent="selectStudent(student)" @keydown.space.prevent="selectStudent(student)">
+              <td><div class="student-overview-name"><strong>{{ student.姓名 }}</strong><small class="table-sub">{{ student.学号 }}</small></div></td>
               <td><strong>{{ student.latest?.total ?? '—' }}</strong><small class="table-sub">{{ summary.exams.at(-1)?.name }}</small></td>
               <td :class="student.latest?.total_change < 0 ? 'score-change-down' : 'score-change-up'">{{ formatChange(student.latest?.total_change, ' 分') }}</td>
               <td>{{ student.latest?.rank ?? '—' }}<small v-if="student.latest?.stratum" class="table-sub">{{ student.latest.stratum }}</small></td>
               <td><span class="score-status" :class="student.status === '需要关注' ? 'status-attention' : ['数据不完整', '选科待确认'].includes(student.status) ? 'status-incomplete' : 'status-stable'">{{ student.status }}</span></td>
-              <td><button class="btn btn-sm btn-outline" type="button" @click="selectStudent(student)">查看详情</button></td>
             </tr>
           </tbody>
         </table>
@@ -477,9 +650,14 @@ onMounted(load)
     </section>
 
     <details class="card score-raw-records">
-      <summary><span class="card-title"><Users :size="16" /> 原始成绩记录 <span class="count">{{ selectedRecords.length }} 条 · {{ selectedExam?.name || '当前考试' }}</span></span><span class="raw-records-hint">用于核对和删除单条记录</span></summary>
+      <summary><span class="card-title"><Users :size="16" /> 原始成绩记录 <span class="count">{{ selectedRecords.length }} 条 · {{ selectedExam?.name || '当前考试' }}</span></span><span class="raw-records-hint">按考试核对各科成绩，删除单条记录</span></summary>
+      <div v-if="summary.exams.length" class="score-raw-exam-tabs" role="tablist" aria-label="选择原始成绩考试">
+        <button v-for="exam in summary.exams" :key="exam.id" type="button" role="tab" :aria-selected="Number(selectedExamId) === Number(exam.id)" :class="{ active: Number(selectedExamId) === Number(exam.id) }" @click="selectedExamId = exam.id">
+          <span>{{ exam.name }}</span><small>{{ exam.exam_date || '日期未填' }}</small>
+        </button>
+      </div>
       <div v-if="!selectedRecords.length" class="empty-state compact">当前考试还没有成绩记录</div>
-      <div v-else class="table-wrap" style="max-height:420px"><table class="data-table"><thead><tr><th>学生</th><th>科目</th><th>分数/状态</th><th>备注</th><th>操作</th></tr></thead><tbody><tr v-for="row in selectedRecords" :key="row.id"><td>{{ row.姓名 }}<small class="table-sub">{{ row.学号 }}</small></td><td>{{ row.subject }}</td><td><strong>{{ row.record_status === '正常' ? row.score : row.record_status }}</strong></td><td>{{ row.note || '—' }}</td><td><button class="icon-btn danger" aria-label="删除成绩" @click="removeScore(row)"><Trash2 :size="14" /></button></td></tr></tbody></table></div>
+      <div v-else class="table-wrap score-raw-record-table-wrap"><table class="data-table score-raw-record-table"><thead><tr><th>学生</th><th v-for="subject in selectedRawSubjects" :key="subject.subject_id">{{ subject.subject }}<small class="table-sub">满分 {{ subject.full_score || '未设置' }}</small></th></tr></thead><tbody><tr v-for="student in rawStudentRows" :key="student.student_id"><td><strong>{{ student.姓名 }}</strong><small class="table-sub">{{ student.学号 }}</small></td><td v-for="subject in selectedRawSubjects" :key="subject.subject_id" class="score-raw-cell"><template v-if="rawRecordFor(student.student_id, subject.subject)"><strong :class="rawRecordFor(student.student_id, subject.subject).record_status === '正常' ? '' : 'score-raw-status'">{{ rawRecordFor(student.student_id, subject.subject).record_status === '正常' ? rawRecordFor(student.student_id, subject.subject).score : rawRecordFor(student.student_id, subject.subject).record_status }}</strong><small v-if="rawRecordFor(student.student_id, subject.subject).note" class="table-sub">{{ rawRecordFor(student.student_id, subject.subject).note }}</small></template><span v-else class="score-raw-empty">—</span></td></tr></tbody></table></div>
     </details>
 
     <p v-if="summary.definition?.missing" class="score-definition">{{ summary.definition.missing }} {{ summary.definition.total }} {{ summary.definition.rank }} {{ summary.definition.stratum }}</p>
@@ -499,11 +677,33 @@ onMounted(load)
 <style scoped>
 .scores-actions { margin-bottom: 0; }
 .score-config-card { border-color: rgba(82,95,192,.2); }
-.score-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.score-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; }
 .score-config-grid h3 { margin: 0 0 10px; font-size: 13px; }
-.score-mode-settings { display: flex; align-items: end; gap: 12px; margin: 14px 0 18px; padding: 11px 13px; border-radius: 10px; background: var(--primary-bg); }
-.score-mode-settings label { display: grid; min-width: 150px; gap: 5px; color: var(--text-secondary); font-size: 11px; }
-.score-mode-settings p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.sichuan-mode-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 14px 0 18px; padding: 15px 16px; border: 1px solid rgba(82,95,192,.18); border-radius: 14px; background: linear-gradient(135deg, rgba(82,95,192,.08), rgba(82,95,192,.025)); }
+.sichuan-mode-card.ready { border-color: rgba(34,170,90,.2); background: linear-gradient(135deg, rgba(34,170,90,.08), rgba(34,170,90,.025)); }
+.sichuan-mode-main { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.sichuan-mode-icon { display: grid; flex: 0 0 38px; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #fff; color: var(--primary); box-shadow: var(--shadow-sm); }
+.sichuan-mode-card.ready .sichuan-mode-icon { color: var(--success); }
+.sichuan-mode-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 700; }
+.sichuan-mode-title span { padding: 3px 7px; border-radius: 999px; background: rgba(82,95,192,.1); color: var(--primary); font-size: 10px; font-weight: 650; }
+.sichuan-mode-card.ready .sichuan-mode-title span { background: rgba(34,170,90,.11); color: var(--success); }
+.sichuan-mode-card p { margin: 5px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.sichuan-mode-issues { margin-top: 6px; color: var(--warning); font-size: 11px; }
+.score-selection-workspace { margin-top: 16px; padding: 17px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
+.score-selection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.score-selection-heading h3 { margin: 0; font-size: 15px; }
+.score-selection-heading p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; }
+.score-selection-progress { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.score-selection-progress strong { color: var(--text); font-size: 18px; }
+.score-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 16px 0 12px; }
+.score-selection-filters { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: var(--surface-subtle); }
+.score-selection-filters button { padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.score-selection-filters button.active { background: #fff; color: var(--primary); box-shadow: var(--shadow-sm); font-weight: 650; }
+.score-batch-assign { display: flex; align-items: center; gap: 8px; }
+.score-batch-assign .form-select { min-width: 210px; }
+.score-advanced-config { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.score-advanced-config > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 650; }
+.score-advanced-config > summary span { color: var(--text-secondary); font-size: 10px; font-weight: 400; }
 .config-create-row { display: grid; grid-template-columns: 1fr 105px auto; gap: 8px; }
 .config-create-row.subject-create { grid-template-columns: minmax(100px, 1fr) 80px 100px 100px auto; }
 .config-create-row.exam-create { grid-template-columns: 1fr 145px; }
@@ -524,13 +724,17 @@ onMounted(load)
 .export-score-card { border: 1px dashed var(--primary); color: var(--primary); align-items: center; justify-content: center; cursor: pointer; font: inherit; font-size: 12px; }
 .score-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .score-section-head .chart-text-summary { margin-bottom: 0; }
-.score-student-workspace { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(390px, .9fr); align-items: start; gap: 16px; }
-.score-student-workspace > .card { min-width: 0; }
+.score-student-workspace { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(390px, .9fr); align-items: stretch; gap: 16px; }
+.score-student-workspace > .card { min-width: 0; height: min(680px, calc(100vh - 120px)); overflow: hidden; }
+.score-class-overview-card { display: flex; flex-direction: column; }
 .score-student-search { display: grid; flex: 0 1 260px; gap: 5px; color: var(--text-secondary); font-size: 11px; }
-.score-student-overview-wrap { max-height: 560px; overflow: auto; margin-top: 14px; }
+.score-student-overview-wrap { flex: 1; min-height: 0; overflow: auto; margin-top: 14px; }
 .score-student-overview-table { min-width: 700px; }
-.score-student-overview-table tbody tr { transition: background .15s ease; }
-.score-student-overview-table tbody tr.active { background: var(--primary-bg); }
+.score-student-overview-table tbody tr.score-student-row { cursor: pointer; transition: background .15s ease, box-shadow .15s ease; }
+.score-student-overview-table tbody tr.score-student-row:hover { background: var(--surface-subtle); }
+.score-student-overview-table tbody tr.score-student-row:active { background: var(--primary-bg); }
+.score-student-overview-table tbody tr.score-student-row.active { background: var(--primary-bg); }
+.score-student-overview-table tbody tr.score-student-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .student-overview-name { display: grid; gap: 2px; }
 .score-change-down { color: var(--danger); }
 .score-change-up { color: var(--success); }
@@ -539,8 +743,9 @@ onMounted(load)
 .status-incomplete { color: var(--warning); background: rgba(210, 145, 20, .11); }
 .status-stable { color: var(--success); background: rgba(34, 170, 90, .1); }
 .status-unset { color: var(--text-secondary); background: var(--surface-subtle); }
-.score-student-detail-card { position: sticky; top: 78px; max-height: calc(100vh - 98px); overflow: auto; border-color: rgba(82, 95, 192, .2); scroll-margin-top: 78px; }
+.score-student-detail-card { position: sticky; top: 78px; display: flex; min-height: 0; flex-direction: column; overflow: hidden; border-color: rgba(82, 95, 192, .2); scroll-margin-top: 78px; }
 .score-student-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.score-student-detail-head, .student-detail-summary { flex-shrink: 0; }
 .score-student-detail-head h2 { margin: 12px 0 3px; font-size: 19px; }
 .score-student-detail-head h2 small { margin-left: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
 .score-student-detail-head p { margin: 0; }
@@ -549,19 +754,23 @@ onMounted(load)
 .student-detail-summary > div { display: grid; gap: 3px; padding: 11px 13px; border-radius: 10px; background: var(--surface-subtle); }
 .student-detail-summary span, .student-detail-summary small { color: var(--text-secondary); font-size: 11px; }
 .student-detail-summary strong { font-size: 20px; line-height: 1.15; }
-.score-student-detail-wrap { overflow-x: auto; }
+.score-student-detail-wrap { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-color: rgba(82, 95, 192, .42) rgba(82, 95, 192, .08); scrollbar-width: thin; }
+.score-student-detail-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
+.score-student-detail-wrap::-webkit-scrollbar-thumb { background: rgba(82, 95, 192, .42); border-radius: 4px; }
+.score-student-detail-wrap::-webkit-scrollbar-track { background: rgba(82, 95, 192, .08); border-radius: 4px; }
 .score-student-detail-table { min-width: 680px; }
 .score-student-detail-table th, .score-student-detail-table td { white-space: nowrap; }
 .score-detail-cell { min-width: 92px; text-align: center; }
 .score-not-selected { color: var(--text-secondary); font-size: 11px; }
-.score-selection-settings { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
-.score-selection-settings summary { cursor: pointer; font-size: 12px; font-weight: 650; }
-.score-selection-settings > .hint { margin: 8px 0 12px; }
 .score-selection-table-wrap { max-height: 360px; overflow: auto; }
-.score-selection-table { min-width: 720px; }
-.selection-check { display: grid; justify-items: center; gap: 3px; color: var(--text-secondary); font-size: 10px; }
-.selection-check input { margin: 0; }
-.score-selection-table td:last-child { display: flex; align-items: center; gap: 7px; }
+.score-selection-table { min-width: 760px; }
+.score-selection-table th { position: sticky; top: 0; z-index: 1; background: #fff; }
+.selection-checkbox-column { width: 128px; }
+.selection-select-current { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 10px; font-weight: 500; }
+.selection-select-current input, .score-selection-table td > input { margin: 0; }
+.combination-code { color: var(--primary); font-size: 13px; }
+.selection-empty { color: var(--text-secondary); font-size: 11px; }
+.student-combination-select { min-width: 108px; }
 .score-raw-records { padding: 0; overflow: hidden; }
 .score-raw-records > summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 17px 18px; cursor: pointer; list-style: none; }
 .score-raw-records > summary::-webkit-details-marker { display: none; }
@@ -569,7 +778,19 @@ onMounted(load)
 .score-raw-records[open] > summary::after { content: '收起'; }
 .score-raw-records > summary .card-title { margin: 0; }
 .raw-records-hint { margin-left: auto; color: var(--text-secondary); font-size: 11px; }
+.score-raw-exam-tabs { display: flex; gap: 7px; margin: 0 18px 12px; overflow-x: auto; padding: 0 0 3px; }
+.score-raw-exam-tabs button { display: grid; gap: 2px; min-width: 112px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); color: var(--text-secondary); text-align: left; cursor: pointer; }
+.score-raw-exam-tabs button.active { border-color: var(--primary); background: var(--primary-bg); color: var(--primary); box-shadow: var(--shadow-sm); }
+.score-raw-exam-tabs span { font-size: 11px; font-weight: 650; }
+.score-raw-exam-tabs small { font-size: 10px; opacity: .78; }
 .score-raw-records > .table-wrap, .score-raw-records > .empty-state { margin: 0 18px 18px; }
+.score-raw-record-table-wrap { max-height: 420px; }
+.score-raw-record-table { min-width: 720px; }
+.score-raw-record-table th, .score-raw-record-table td { white-space: nowrap; }
+.score-raw-cell { min-width: 118px; }
+.score-raw-cell > strong, .score-raw-cell > small { display: block; }
+.score-raw-cell .score-raw-status { color: var(--warning); font-size: 11px; }
+.score-raw-empty { color: var(--text-tertiary); }
 .score-rule-create { display: grid; grid-template-columns: minmax(150px, 1.3fr) 120px minmax(100px, .8fr) 90px 95px auto; gap: 8px; margin-bottom: 13px; }
 .card-title-action { margin-left: auto; }
 .score-rule-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 18px; padding: 14px 0; border-top: 1px solid var(--border); }
@@ -607,16 +828,25 @@ onMounted(load)
 @media (max-width: 900px) {
   .score-config-grid { grid-template-columns: 1fr; }
   .score-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .score-mode-settings { align-items: stretch; flex-direction: column; }
-  .score-mode-settings label { width: 100%; }
+  .score-selection-toolbar { align-items: stretch; flex-direction: column; }
+  .score-batch-assign { width: 100%; }
+  .score-batch-assign .form-select { min-width: 0; flex: 1; }
   .score-student-workspace { grid-template-columns: 1fr; }
-  .score-student-detail-card { position: static; max-height: none; overflow: visible; }
+  .score-student-workspace > .card { height: auto; overflow: visible; }
+  .score-student-overview-wrap { flex: none; max-height: 560px; }
+  .score-student-detail-card { position: static; display: block; overflow: visible; }
+  .score-student-detail-wrap { flex: none; min-height: 0; }
   .score-section-head, .score-student-detail-head { flex-direction: column; }
   .score-student-search, .score-student-detail-head > label { width: 100%; max-width: none; }
   .score-rule-create { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 680px) {
   .scores-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .sichuan-mode-card, .score-selection-heading { align-items: stretch; flex-direction: column; }
+  .sichuan-mode-card > .btn { width: 100%; }
+  .score-selection-workspace { padding: 14px; }
+  .score-selection-filters { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .score-batch-assign { display: grid; grid-template-columns: 1fr; }
   .config-create-row, .config-create-row.exam-create, .config-row, .exam-edit-grid { grid-template-columns: 1fr 1fr; }
   .config-create-row.subject-create { grid-template-columns: 1fr 1fr; }
   .config-row label { align-self: center; }

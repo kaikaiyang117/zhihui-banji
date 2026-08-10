@@ -242,11 +242,28 @@ def student_detail(student_id: int):
         timeline.append({'kind': 'communication', 'id': row['id'], 'at': row['communicated_at'],
                          'title': f"家校沟通 · {row['method']}", 'summary': row['summary'],
                          'status': row['status']})
+    attendance_groups = {}
     for row in attendance:
-        timeline.append({'kind': 'attendance', 'id': row['id'], 'at': row['date'],
-                         'title': f"考勤 · {row['scene']} · {row['status']}",
-                         'summary': row['reason'] or row['note'] or '无备注',
-                         'status': row['status']})
+        if row['status'] not in {'迟到', '早退', '请假', '缺勤'}:
+            continue
+        attendance_groups.setdefault(row['status'], []).append(row)
+    for status, rows in attendance_groups.items():
+        rows.sort(key=lambda item: str(item['date'] or ''), reverse=True)
+        latest = rows[0]
+        dates = [str(item['date']) for item in rows[:4] if item.get('date')]
+        summary = f"共 {len(rows)} 次，最近一次 {latest['date']}（{latest['scene']}）"
+        reason = latest['reason'] or latest['note']
+        if reason:
+            summary += f"：{reason}"
+        if len(rows) > 1 and dates:
+            summary += f"；记录日期：{'、'.join(dates)}"
+            if len(rows) > len(dates):
+                summary += '…'
+        timeline.append({
+            'kind': 'attendance', 'id': f'attendance-{status}', 'at': latest['date'],
+            'title': f'考勤异常 · {status}', 'summary': summary,
+            'status': f'{len(rows)} 次',
+        })
     for row in tasks:
         if row.get('source_type') not in {'attendance_rule', 'score_rule'} or not row.get('result'):
             continue
@@ -348,6 +365,8 @@ def student_detail(student_id: int):
             '暂无阶段结论；完成一次跟进后可在这里回顾结果。',
     }
 
+    photo_path = student.pop('photo_path', '')
+    student['photo_url'] = f'/api/students/{student_id}/photo' if photo_path else ''
     return {'student': student, 'events': events, 'tasks': tasks, 'focus': focus,
             'communications': communications, 'attendance': attendance,
             'workflow_updates': workflow_updates,
@@ -528,7 +547,8 @@ def create_communication(body: CommunicationBody):
 
 
 @router.get('/communications')
-def list_communications(status: Optional[str] = None, source_id: Optional[int] = None,
+def list_communications(status: Optional[str] = None, student_id: Optional[int] = None,
+                        source_id: Optional[int] = None,
                         limit: int = Query(100, ge=1, le=500)):
     class_id, term_id = _scope()
     sql = 'SELECT c.*, s.姓名 AS student_name FROM communications c JOIN students s ON s.id=c.student_id'
@@ -537,6 +557,9 @@ def list_communications(status: Optional[str] = None, source_id: Optional[int] =
     if status:
         sql += ' AND c.status=?'
         params.append(status)
+    if student_id:
+        sql += ' AND c.student_id=?'
+        params.append(student_id)
     if source_id:
         sql += ' AND c.id=?'
         params.append(source_id)

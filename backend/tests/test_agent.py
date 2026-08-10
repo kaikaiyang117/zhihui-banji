@@ -55,6 +55,7 @@ class AgentFoundationTest(unittest.TestCase):
                 'scores_summary',
                 'student_get_profile',
                 'student_get_timeline',
+                'student_term_comment_context',
                 'students_aggregate',
                 'students_query',
                 'students_search',
@@ -77,6 +78,9 @@ class AgentFoundationTest(unittest.TestCase):
         self.assertIn('exams', invoke_tool('scores_summary'))
         self.assertIn('tasks', invoke_tool('tasks_list'))
         self.assertIn('communications', invoke_tool('communications_list'))
+        context = invoke_tool('student_term_comment_context', {'student_ids': [1]})
+        self.assertEqual(context['students'][0]['姓名'], '张三')
+        self.assertNotIn('家庭住址', context['students'][0])
 
     def test_write_requires_confirmation_backup_and_is_idempotent(self):
         pending = invoke_tool(

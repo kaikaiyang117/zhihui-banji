@@ -195,8 +195,8 @@ watch(() => [route.query.bucket, route.query.task, route.query.action], async ()
   <div>
     <div class="page-title-bar">
       <div>
-        <div class="page-title">提醒中心</div>
-        <div class="page-subtitle">汇总所有下一步行动，到期处理后记录结果</div>
+        <div class="page-title">待办跟进</div>
+        <div class="page-subtitle">汇总需要推进的下一步行动，完成后记录结果</div>
       </div>
       <button class="btn btn-primary" @click="showAdd = true"><Plus :size="14" /> 新建工作项</button>
     </div>
@@ -246,8 +246,8 @@ watch(() => [route.query.bucket, route.query.task, route.query.action], async ()
             </div>
             <div class="work-meta">
               <span>{{ task.student_name || '班级事务' }}</span>
-              <button v-if="task.source_path" type="button" @click="goSource(task)">{{ task.source_label }} <ExternalLink :size="11" /></button>
-              <span v-else>{{ task.source_label }}</span>
+              <span v-if="task.source_path" class="work-source"><span class="work-source-label">来源：</span><button type="button" @click="goSource(task)">{{ task.source_label }} <ExternalLink :size="11" /></button></span>
+              <span v-else><span class="work-source-label">来源：</span>{{ task.source_label }}</span>
               <span>负责人：{{ task.owner || '班主任' }}</span>
               <span>截止：{{ displayDate(task.due_at) }}</span>
             </div>
@@ -267,7 +267,7 @@ watch(() => [route.query.bucket, route.query.task, route.query.action], async ()
           <div class="calendar-date"><CalendarDays :size="15" /><strong>{{ displayDate(group.date) }}</strong><span>{{ group.items.length }} 项</span></div>
           <button v-for="task in group.items" :key="task.id" class="calendar-item" @click="openEditor(task)">
             <span :class="{ overdue: task.timing_state === '已逾期' }"></span>
-            <div><strong>{{ task.title }}</strong><small>{{ task.student_name || '班级事务' }} · {{ task.source_label }}</small></div>
+            <div><strong>{{ task.title }}</strong><small>{{ task.student_name || '班级事务' }} · 来源：{{ task.source_label }}</small></div>
             <em>{{ task.status }}</em>
           </button>
         </section>
@@ -335,6 +335,8 @@ watch(() => [route.query.bucket, route.query.task, route.query.action], async ()
 .work-title-line { display: flex; align-items: center; gap: 8px; }
 .work-title-line strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .work-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 6px; color: var(--text-secondary); font-size: 11px; }
+.work-source { display: inline-flex; align-items: center; gap: 2px; }
+.work-source-label { color: var(--text-tertiary); }
 .work-meta button { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 0; background: transparent; color: var(--primary); cursor: pointer; font: inherit; }
 .work-result { margin: 7px 0 0; color: var(--text-secondary); font-size: 12px; }
 .work-actions { display: flex; align-items: center; gap: 6px; }
