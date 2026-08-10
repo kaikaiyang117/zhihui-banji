@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import {
-  AlertTriangle, ArrowRight, CalendarDays, CheckCircle, ClipboardList,
+  AlertTriangle, Archive, ArrowRight, CalendarDays, CheckCircle, ClipboardList,
   FileText, Phone, Plus, ShieldCheck, Tag, TrendingUp, Upload, UserRound, Users
 } from 'lucide-vue-next'
 import FullCalendar from '@fullcalendar/vue3'
@@ -15,6 +15,7 @@ const stats = ref(null)
 const errorMsg = ref('')
 const modalMode = ref(null)
 const fileInput = ref(null)
+const migrationInput = ref(null)
 const backupMessage = ref('')
 const selectedDate = ref('')
 
@@ -102,6 +103,31 @@ async function restore(event) {
   }
 }
 
+async function exportMigration() {
+  backupMessage.value = '正在整理迁移包（数据库、附件和知识库）…'
+  try {
+    const result = await post('/api/system/migration/export', {})
+    backupMessage.value = `迁移包已生成：${result.filename}`
+    window.open(`/api/system/migration/${encodeURIComponent(result.filename)}`, '_blank')
+  } catch (error) {
+    backupMessage.value = `迁移包生成失败：${error.message}`
+  }
+}
+
+async function importMigration(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || !confirm('导入迁移包会替换当前数据库，并覆盖同名照片、附件和知识库文件。系统会先自动备份当前数据库，确定继续吗？')) return
+  backupMessage.value = '正在导入迁移包…'
+  try {
+    await upload('/api/system/migration/import', file)
+    backupMessage.value = '迁移包导入完成，页面数据已刷新'
+    await load()
+  } catch (error) {
+    backupMessage.value = `迁移包导入失败：${error.message}`
+  }
+}
+
 function taskRoute(task, action = 'edit', bucket = 'open') {
   return { path: '/tasks', query: { bucket, task: task.id, action } }
 }
@@ -133,9 +159,12 @@ onMounted(load)
           <div class="dashboard-more-menu">
             <button @click="backup"><ShieldCheck :size="14" /> 备份数据</button>
             <button @click="fileInput?.click()"><Upload :size="14" /> 恢复数据</button>
+            <button @click="exportMigration" title="包含数据库、业务附件和知识库，不包含模型密钥和微信凭证"><Archive :size="14" /> 导出迁移包</button>
+            <button @click="migrationInput?.click()"><Archive :size="14" /> 导入迁移包</button>
           </div>
         </details>
         <input ref="fileInput" type="file" accept=".db" hidden @change="restore">
+        <input ref="migrationInput" type="file" accept=".zip" hidden @change="importMigration">
       </div>
     </div>
 

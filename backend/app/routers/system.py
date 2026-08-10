@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from .. import db
 from .. import clock
 from ..config import APP_VERSION, IS_FROZEN, RESOURCE_ROOT, UPDATE_API_URL, UPDATE_MANIFEST_URL
-from ..services import devices
+from ..services import devices, migration
 
 router = APIRouter(prefix='/api/system')
 
@@ -375,6 +375,34 @@ def download_backup(filename: str):
     return FileResponse(_safe_backup(filename), filename=filename, media_type='application/octet-stream')
 
 
+def _safe_migration(name: str) -> str:
+    clean = os.path.basename(name)
+    if not clean.endswith('.zip') or clean != name:
+        raise HTTPException(400, '迁移包文件名不合法')
+    path = os.path.abspath(os.path.join(_backup_dir(), clean))
+    if os.path.dirname(path) != os.path.abspath(_backup_dir()):
+        raise HTTPException(400, '迁移包文件路径不合法')
+    if not os.path.isfile(path):
+        raise HTTPException(404, '迁移包不存在')
+    return path
+
+
+@router.post('/migration/export')
+def create_migration_package(request: Request):
+    _require_local(request)
+    try:
+        filename = migration.create_package()
+    except migration.MigrationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'ok': True, 'filename': filename}
+
+
+@router.get('/migration/{filename}')
+def download_migration_package(filename: str, request: Request):
+    _require_local(request)
+    return FileResponse(_safe_migration(filename), filename=filename, media_type='application/zip')
+
+
 @router.post('/restore')
 async def restore_backup(file: UploadFile = File(...)):
     data = await file.read()
@@ -402,3 +430,13 @@ async def restore_backup(file: UploadFile = File(...)):
     os.replace(temp_path, db.DB_PATH)
     db.get_conn()
     return {'ok': True, 'pre_restore_backup': pre_restore}
+
+
+@router.post('/migration/import')
+async def restore_migration_package(request: Request, file: UploadFile = File(...)):
+    _require_local(request)
+    data = await file.read()
+    try:
+        return migration.restore_package(data)
+    except migration.MigrationError as exc:
+        raise HTTPException(400, str(exc)) from exc
