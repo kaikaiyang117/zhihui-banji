@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(SPECPATH).resolve().parent
 APP_NAME = 'MeimeiWorkbench'
 APP_VERSION = os.environ.get('APP_VERSION', '0.0.0-dev').lstrip('v')
 VERSION_FILE = Path(PROJECT_ROOT / 'build' / 'app-version.json')
+ICON_FILE = Path(PROJECT_ROOT / 'packaging' / 'logo.ico')
 VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
 VERSION_FILE.write_text(json.dumps({'version': APP_VERSION}, ensure_ascii=False), encoding='utf-8')
 
@@ -24,6 +25,7 @@ a = Analysis(
     datas=[
         (str(PROJECT_ROOT / 'backend' / 'static'), 'backend/static'),
         (str(VERSION_FILE), 'backend/static'),
+        (str(ICON_FILE), 'assets'),
         (str(PROJECT_ROOT / 'packaging' / 'macos-updater.sh'), 'updater'),
     ],
     hiddenimports=collect_submodules('app'),
@@ -45,7 +47,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=sys.platform != 'darwin',
+    icon=str(ICON_FILE) if sys.platform == 'win32' and ICON_FILE.exists() else None,
+    console=sys.platform not in ('darwin', 'win32'),
     exclude_binaries=True,
 )
 

@@ -69,7 +69,18 @@ def main(argv=None):
     if open_browser:
         browser_url = f'http://127.0.0.1:{port}/'
         threading.Timer(0.8, lambda: webbrowser.open(browser_url)).start()
-    uvicorn.run(application, host=host, port=port, reload=False)
+    if IS_FROZEN:
+        config = uvicorn.Config(application, host=host, port=port, reload=False)
+        server = uvicorn.Server(config)
+        server_thread = threading.Thread(target=server.run, name='workbench-server', daemon=True)
+        server_thread.start()
+        try:
+            from app.tray import DesktopTray
+            DesktopTray(f'http://127.0.0.1:{port}/', server, server_thread).run()
+        except ImportError:
+            server_thread.join()
+    else:
+        uvicorn.run(application, host=host, port=port, reload=False)
 
 
 if __name__ == '__main__':

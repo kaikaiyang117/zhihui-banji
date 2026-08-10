@@ -138,8 +138,12 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           $expected = $env:EXPECTED_VERSION -replace '^v', ''
-          $actual = & .\dist\MeimeiWorkbench\MeimeiWorkbench.exe --version
-          if ($actual -notmatch [regex]::Escape($expected)) {
+          $versionFile = Get-ChildItem .\dist\MeimeiWorkbench -Recurse -Filter app-version.json | Select-Object -First 1
+          if (-not $versionFile) {
+            throw "未找到打包版本文件"
+          }
+          $actual = (Get-Content $versionFile.FullName -Raw | ConvertFrom-Json).version
+          if ($actual -ne $expected) {
             throw "版本号不一致：期望 $expected，实际 $actual"
           }
 
