@@ -1,5 +1,5 @@
 /* MIG-04 系统审计：渠道/操作者上下文、敏感参数脱敏、缺省写审计。
- * 与 backend/app/services/audit.py 语义一致（列表截断 20 项、字符串截断 200 字符）。
+ * 列表截断 20 项、字符串截断 200 字符。
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Database } from 'better-sqlite3';

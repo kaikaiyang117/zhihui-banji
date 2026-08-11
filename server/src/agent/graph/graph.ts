@@ -1,5 +1,5 @@
 /* AGENT-01 LangGraph 图：确定性意图路由 → 计划 → 执行 → 验证 → 纠错 → 回答。
- * 语义与 backend/app/agent/runner.py 完全一致，用 StateGraph 表达：
+ * 用 StateGraph 表达：
  *   load_context → route（直接工具 / 计划 / 模型循环）
  *   计划路径：plan → execute_plan →（恢复/重建一次）→ plan_final
  *   通用路径：model_loop（工具调用 + 一次重试 + 熔断）

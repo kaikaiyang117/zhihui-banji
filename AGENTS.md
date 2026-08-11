@@ -8,7 +8,7 @@
 
 - 这是一个面向班主任和教师的本地个人工作台，包含教师工作台、个人工作台和知识库。
 - 采用“本地桌面主程序 + 局域网移动访问端”模式。结构化数据保存在本地 SQLite，知识库保存在本地 Markdown 文件，Excel 只用于导入和导出。
-- 后端使用 FastAPI + Uvicorn，前端使用 Vue 3 + Vite + Vue Router，桌面打包配置位于 `packaging/`。
+- 后端使用 Node.js + Fastify + TypeScript，前端使用 Vue 3 + Vite + Vue Router，桌面打包配置位于 `packaging/`。
 - 详细的产品功能、完整项目结构和发布说明见 [README.md](README.md)；本文件只记录 AI 修改代码时必须遵守的规则和容易忽略的约束。
 
 ## 修改原则
@@ -34,27 +34,20 @@
 .\scripts\setup-dev.ps1
 ```
 
-脚本会检查 Python 3.11+ 和 Node.js 20+，创建项目 `.venv`，安装后端依赖和前端依赖，并处理 esbuild 的脚本许可。
+脚本会检查 Node.js 20+，安装前端、Node 后端和 Electron 依赖，并处理 esbuild 的脚本许可。
 
 手动安装和启动：
 
 ```bash
-# 1. 后端依赖
-cd backend
-pip install -r requirements.txt
-
-# 2. 首次迁移旧 Excel 数据（已有数据时会保留数据）
-python migrate.py
-
-# 3. 前端依赖与构建
-cd ../frontend
+# 1. 前端依赖与构建
+cd frontend
 npm install
 npm approve-scripts esbuild          # 首次安装且 npm 支持该命令时执行
 npm run build                         # 输出到 ../backend/static/
 
-# 4. 启动服务
-cd ../backend
-python run.py                         # 默认访问 http://localhost:5000
+# 2. Node 后端与桌面依赖
+cd ../server && npm install && npm run build:server
+cd ../desktop && npm install && npm run dev
 ```
 
 也可以双击 `启动工作台.bat` 或 `启动工作台.command` 启动桌面工作台。Windows/macOS 打包版本通过系统托盘管理后台服务：桌面快捷方式启动时不显示终端，托盘菜单提供“打开工作台”和“退出工作台”；`启动工作台.bat` 仍是开发/调试入口，保留可见终端和 `Ctrl+C` 停止方式。
@@ -64,7 +57,7 @@ python run.py                         # 默认访问 http://localhost:5000
 局域网开发模式：
 
 ```bash
-python backend/run.py --lan
+npm run dev -- --lan
 ```
 
 局域网模式下，本机点击“手机访问”生成 5 分钟有效、仅可使用一次的配对二维码；配对成功后设备获得可撤销凭证。只能在可信局域网中使用，不要把端口映射到公网。端口冲突时，启动入口会自动寻找可用端口。
@@ -84,7 +77,7 @@ Agent 核心层：planner / runner / tools / session / audit
 - 系统业务能力层负责学生、成绩、考勤、待办、家校沟通、班级任务、积分、班费、评语、教育记录、报告和健康等真实业务逻辑，并同时服务于用户点击操作和 Agent 调用。
 - Agent 核心层负责模型客户端、规划、工具执行、上下文、重试、权限和审计；它不复制业务逻辑。
 - 渠道适配层负责网页或微信的消息收发、会话身份、输出格式和渠道限制；网页端与微信端共享同一个 Agent 核心。
-- `backend/app/services/` 是业务能力的唯一实现位置；Agent 工具调用业务服务，不直接调用 FastAPI 路由，也不直接操作数据库。
+- `server/src/services/` 是业务能力的唯一实现位置；Agent 工具调用业务服务，不直接调用 HTTP 路由，也不直接操作数据库。
 - 业务服务不依赖 Agent、微信或前端；依赖方向只能是“渠道 → Agent → 工具 → 业务服务 → 数据库”。
 - 新功能必须先完成业务服务，再实现系统 API 和页面，然后明确评估是否封装为 Agent 工具，最后接入网页和微信渠道。
 - 开始新增或重构系统业务功能前，必须先读取 [docs/系统功能开发计划.md](docs/系统功能开发计划.md)，按依赖顺序选择工作包，并在全部验收条件满足后更新其状态。
@@ -145,9 +138,9 @@ Agent 核心层：planner / runner / tools / session / audit
 ### 数据与数据库
 
 - SQLite 数据库是运行时唯一的数据源：开发模式默认是 `data/workbench.db`，打包模式位于系统用户数据目录。
-- Excel 文件只由导入/导出逻辑使用，`openpyxl` 不承担运行时存储职责。
-- SQLite 使用 WAL 模式。FastAPI 同步接口在线程池中运行，`backend/app/db.py` 为每个工作线程维护独立连接，并在退出或测试切库时关闭整个连接注册表；WAL 和 `busy_timeout` 负责连接间协调。不要改回跨线程共享单连接，否则并发 API 请求会触发 `sqlite3.InterfaceError`；未经并发和迁移测试也不要改成每请求连接。
-- 数据库结构通过 `backend/app/db.py` 中的迁移机制维护。修改表结构时必须增加迁移版本、处理已有数据库，并运行后端测试；不要直接手改真实数据库结构。
+- Excel 文件只由导入/导出逻辑使用，`exceljs` 不承担运行时存储职责。
+- SQLite 使用 WAL 模式。Node 后端通过 `server/src/db/connection.ts` 管理连接和迁移；WAL 和 `busy_timeout` 负责连接间协调。修改连接策略前必须通过并发和迁移测试。
+- 数据库结构通过 `server/src/db/schema.ts` 中的迁移机制维护。修改表结构时必须增加迁移版本、处理已有数据库，并运行 Node 后端测试；不要直接手改真实数据库结构。
 - `WORKBENCH_DATA_DIR` 可以指定数据目录，测试或临时验证时应使用隔离目录，避免修改 `data/workbench.db`。
 - `WORKBENCH_KB_DIR` 可以指定知识库目录。知识库是 Markdown 文件，不由 SQLite 管理。
 - `WORKBENCH_BUSINESS_DATE` 可以指定开发/测试业务日期（格式 `YYYY-MM-DD`）；生产环境不应设置该变量。
@@ -155,7 +148,7 @@ Agent 核心层：planner / runner / tools / session / audit
 ### 派生数据
 
 - 成绩总分、积分排名、班费余额、腰臀比等派生列在读取时计算，不存入数据库。
-- 派生逻辑集中在 `backend/app/derived.py`。新增派生列时，在 `DERIVERS` 字典中按工作表名称添加函数，并补充对应测试。
+- 派生逻辑集中在 `server/src/services/sheets.ts`。新增派生列时按工作表名称添加函数，并补充对应测试。
 - 导出 Excel 时才把派生列写入导出结果；不要为了导出方便把派生值持久化。
 
 ### 学生导入
@@ -166,10 +159,10 @@ Agent 核心层：planner / runner / tools / session / audit
 
 ### 后端模块
 
-- API 路由放在 `backend/app/routers/`；可复用的业务逻辑放在 `backend/app/services/` 或已有 service 文件中。
-- 通用工作表逻辑集中在 `sheets.py`、`config.py`、`db.py` 和 `derived.py`，不要在多个路由中复制同一套数据逻辑。
-- Agent 和微信相关代码分别位于 `backend/app/agent/`、`backend/app/wechat/` 及对应路由中；涉及工具调用、消息去重或审计时，保留现有本地状态记录机制。
-- FastAPI 自动提供 API 文档，接口修改后可通过 `/docs` 检查路由和请求结构。
+- API 路由放在 `server/src/http/routes/`；可复用的业务逻辑放在 `server/src/services/`。
+- 通用工作表逻辑集中在 `server/src/services/sheets.ts`、`server/src/config/sheets.ts` 和数据库模块，不要在多个路由中复制同一套数据逻辑。
+- Agent 和微信相关代码分别位于 `server/src/agent/`、`server/src/wechat/` 及对应路由中；涉及工具调用、消息去重或审计时，保留现有本地状态记录机制。
+- Fastify 自动提供 API 文档，接口修改后可通过 `/docs` 检查路由和请求结构。
 
 ### 前端模块
 
@@ -183,7 +176,7 @@ Agent 核心层：planner / runner / tools / session / audit
 
 - `desktop/` 是 Electron 桌面壳：窗口、托盘、单实例、后端子进程、下载/外部协议、更新安装协调和退出清理都集中在 `desktop/main.js`；`desktop/preload.js` 只暴露逐项白名单 IPC，不暴露完整 `ipcRenderer`。
 - 后端以 Node.js 方式启动（`--desktop-child --lan`）：开发模式用系统 Node 运行 `server/dist/entry.js`（`server/node_modules` 为系统 Node ABI）；打包模式用 Electron `utilityProcess` 运行 `resources/server/dist/entry.js`（`build/server-bundle/` 内 better-sqlite3 已重建为打包 Electron ABI）。启动契约不变：打印单行 `WORKBENCH_URL=http://127.0.0.1:<port>` 后由 Electron 轮询 `/api/system/health` 判断就绪；异常退出最多自动重启 2 次，之后给出重启/退出选择。
-- Electron 是唯一桌面宿主：托盘、退出权和更新安装权都在 Electron；Python 托盘（`backend/app/tray.py`）和 Python sidecar 只在旧打包模式下使用。退出时必须由 Electron 终止后端，等待端口释放；`--desktop-child` 模式正常退出会清理 `.workbench-ready` 标记。
+- Electron 是唯一桌面宿主：托盘、退出权和更新安装权都在 Electron。退出时必须由 Electron 终止 Node 后端，等待端口释放；`--desktop-child` 模式正常退出会清理 `.workbench-ready` 标记。
 - 更新所有权边界：后端只负责检查、升级前备份、下载和 SHA-256 校验，校验通过后进入 `ready_to_install` 状态；Electron 通过受限 IPC 调用 `/api/system/update/installer-path`（仅本机）取得安装包后关闭应用并启动安装器。后端不得再自行启动安装器或 `os._exit`。
 - Electron 安全基线：`nodeIntegration: false`、`contextIsolation: true`、`sandbox: true`、不关闭 `webSecurity`；主窗口只加载后端回环地址，非白名单导航一律拦截，外部链接仅放行 http(s) 与 `obsidian://`；同源 `window.open` 视为下载交给下载策略，不打开外部浏览器。
 - Electron 的 `userData` 使用独立的 `MeimeiWorkbench-Electron` 目录，不能与后端数据目录（`MeimeiWorkbench`）混用；打包时 Node 后端资源（`build/server-bundle`）放在 `extraResources`，不能打进 `app.asar`。应用版本唯一来源为构建时的 `APP_VERSION`，写入 `server-bundle/static/app-version.json` 并同步 Electron 版本与安装包名称。
@@ -208,7 +201,10 @@ const routes = [
 后端测试使用隔离 SQLite 数据，不应修改真实的 `data/workbench.db`：
 
 ```bash
-python -m unittest discover -s backend/tests -p 'test_*.py' -v
+cd server
+npm run typecheck:server
+npm run test:server
+npm run build:server
 ```
 
 涉及数据库、API、Agent、微信、导入导出或学生管理的后端改动，至少运行这组测试。
@@ -242,7 +238,7 @@ cd desktop
 npm test
 ```
 
-该测试用临时 `WORKBENCH_DATA_DIR`/`WORKBENCH_KB_DIR` 启动 Electron，检查窗口标题、手机访问/更新入口、后端健康检查，退出后确认端口释放。涉及 `desktop/`、`backend/run.py` 启动契约、健康检查或更新安装边界的改动，应执行该测试和对应后端测试。
+该测试用临时 `WORKBENCH_DATA_DIR`/`WORKBENCH_KB_DIR` 启动 Electron，检查窗口标题、手机访问/更新入口、Node 后端健康检查，退出后确认端口释放。涉及 `desktop/`、`server/src/entry.ts` 启动契约、健康检查或更新安装边界的改动，应执行该测试和对应 Node 后端测试。
 
 ### CI
 
@@ -275,24 +271,24 @@ npm test
 | 用途 | 路径 |
 |------|------|
 | 项目概览与完整结构 | `README.md` |
-| 服务端入口 | `backend/run.py` |
-| 数据库结构、连接与迁移 | `backend/app/db.py` |
-| 应用配置与工作表元数据 | `backend/app/config.py` → `SHEET_META` |
-| 派生列 | `backend/app/derived.py` |
-| 学生导入逻辑 | `backend/app/import_service.py` |
-| Excel 导出 | `backend/app/export_service.py` |
-| API 路由 | `backend/app/routers/` |
-| 业务服务 | `backend/app/services/` |
-| 报告、教育记录和健康服务 | `backend/app/services/reports.py`、`education.py`、`health.py` |
-| Agent 模块 | `backend/app/agent/` |
-| 微信模块 | `backend/app/wechat/` |
-| Agent 核心状态机 | `backend/app/agent/planner.py`、`runner.py`、`actions.py`、`tool_registry.py` |
-| Agent/微信配置 | `backend/app/agent/model_config.py`、`backend/app/wechat/config.py` |
+| 服务端入口 | `server/src/entry.ts` |
+| 数据库结构、连接与迁移 | `server/src/db/connection.ts`、`server/src/db/schema.ts` |
+| 应用配置与工作表元数据 | `server/src/config/index.ts`、`server/src/config/sheets.ts` |
+| 派生列 | `server/src/services/sheets.ts` |
+| 学生导入逻辑 | `server/src/services/importService.ts` |
+| Excel 导出 | `server/src/services/exportService.ts` |
+| API 路由 | `server/src/http/routes/` |
+| 业务服务 | `server/src/services/` |
+| 报告、教育记录和健康服务 | `server/src/services/reports.ts`、`education.ts`、`health.ts` |
+| Agent 模块 | `server/src/agent/` |
+| 微信模块 | `server/src/wechat/` |
+| Agent 核心状态机 | `server/src/agent/graph/`、`runner.ts`、`actions.ts` |
+| Agent/微信配置 | `server/src/agent/modelConfig.ts`、`server/src/wechat/config.ts` |
 | Electron 桌面壳 | `desktop/main.js`、`desktop/preload.js`、`desktop/electron-builder.yml` |
 | Electron 冒烟测试 | `desktop/tests/smoke.mjs` |
 | 系统功能开发计划 | `docs/系统功能开发计划.md` |
 | Agent 能力矩阵 | `docs/Agent能力矩阵.md` |
-| 后端测试 | `backend/tests/` |
+| 后端测试 | `server/tests/` |
 | 前端 API 封装 | `frontend/src/api.js` |
 | 导航配置与工作表字段 | `frontend/src/sheets.js` |
 | Vue 入口与页面外壳 | `frontend/src/main.js`、`frontend/src/App.vue` |

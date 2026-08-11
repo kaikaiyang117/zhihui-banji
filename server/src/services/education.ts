@@ -1,5 +1,5 @@
 /* 班会、活动、日志的结构化记录与统一行动关联。
- * 与 backend/app/services/education.py 语义一致。
+ * 提供结构化记录和统一行动关联。
  */
 import fs from 'node:fs';
 import { randomBytes } from 'node:crypto';

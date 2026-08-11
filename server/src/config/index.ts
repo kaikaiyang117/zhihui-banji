@@ -1,6 +1,6 @@
 /* MIG-02 配置：路径、端口、版本、业务日期、环境变量。
  *
- * 与 Python 后端保持同名环境变量语义：
+ * 环境变量：
  *   WORKBENCH_HOST / WORKBENCH_PORT / WORKBENCH_DATA_DIR / WORKBENCH_KB_DIR
  *   WORKBENCH_BUSINESS_DATE / WORKBENCH_VERSION / WORKBENCH_STATIC_DIR
  *   WORKBENCH_LAN_URL_BASE（由启动入口生成，本模块只读取）
@@ -54,7 +54,7 @@ export function loadAppVersion(): string {
   return '0.0.0-dev';
 }
 
-/** 默认数据目录：与 Python 后端一致（开发在项目根 data/，打包在系统用户目录）。 */
+/** 默认数据目录：开发在项目根 data/，打包在系统用户目录。 */
 function defaultDataDir(): string {
   const configured = env('WORKBENCH_DATA_DIR');
   if (configured) return path.resolve(configured);
@@ -79,7 +79,7 @@ function defaultKbDir(dataDir: string): string {
     : path.join(PROJECT_ROOT, '知识库');
 }
 
-/** Vue 构建产物目录：默认 server/static，缺失时回退 backend/static。 */
+/** Vue 构建产物目录：默认 server/static，开发构建时回退 backend/static。 */
 function resolveStaticDir(): string {
   const configured = env('WORKBENCH_STATIC_DIR');
   if (configured) return path.resolve(configured);
@@ -88,7 +88,7 @@ function resolveStaticDir(): string {
   return path.join(PROJECT_ROOT, 'backend', 'static');
 }
 
-/** 校验业务日期格式；非法时抛错（与 Python clock.today() 启动校验一致）。 */
+/** 校验业务日期格式；非法时抛错。 */
 export function validateBusinessDate(value: string): void {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {

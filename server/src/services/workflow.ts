@@ -1,5 +1,5 @@
 /* MIG-06 来源过程记录与状态联动：事件/沟通/关注的更新、幂等与工作项回写。
- * 与 backend/app/services/workflow.py 语义一致。
+ * 提供来源过程记录、幂等和工作项回写。
  */
 import type { Database } from 'better-sqlite3';
 

@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：逐条移植 backend/app/db.py 的基础 schema 与全部历史迁移（v1→v25）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v25）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。

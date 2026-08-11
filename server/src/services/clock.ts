@@ -1,5 +1,5 @@
 /* MIG-04 业务时钟：开发/测试可覆盖业务日期，审计与系统时间仍使用真实时钟。
- * 与 backend/app/clock.py 语义一致。 */
+ * 审计与系统时间仍使用真实时钟。 */
 export const ENV_NAME = 'WORKBENCH_BUSINESS_DATE';
 
 export function todayString(): string {

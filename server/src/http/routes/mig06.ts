@@ -1,5 +1,5 @@
 /* MIG-06 路由：事件、工作项、关注、家校沟通、考勤保存、学生详情与流程。
- * 与 backend/app/routers/p0.py + workflow.py 对应实现一致。
+ * 提供行动闭环相关 HTTP 入口。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 

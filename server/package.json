@@ -3,15 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "美美大王工作台 Node.js/TypeScript 后端（MIG-02 起逐步替换 FastAPI）",
+  "description": "美美大王工作台 Node.js/TypeScript 后端",
   "main": "dist/entry.js",
   "scripts": {
     "typecheck:server": "tsc --noEmit",
     "test:server": "vitest run",
     "build:server": "tsc -p tsconfig.build.json",
     "start": "node dist/entry.js",
-    "dev": "tsx src/entry.ts",
-    "test:contract": "vitest run tests/contract"
+    "dev": "tsx src/entry.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

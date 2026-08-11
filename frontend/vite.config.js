@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
-// 构建产物输出到 backend/static，由 FastAPI 托管
+// 构建产物输出到 backend/static，由 Node 服务托管
 export default defineConfig({
   plugins: [vue()],
   resolve: {

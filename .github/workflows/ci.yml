@@ -19,19 +19,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies
-        run: python -m pip install -r backend/requirements.txt
-
-      - name: Run backend tests
-        run: python -m unittest discover -s backend/tests -p 'test_*.py' -v
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -66,16 +53,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies (for baseline generation)
-        run: python -m pip install -r backend/requirements.txt
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -87,12 +64,6 @@ jobs:
         working-directory: server
         run: npm ci
 
-      - name: Generate database baselines (MIG-00 fixtures)
-        run: python migrate/baseline/02_db_baselines.py
-
-      - name: Generate API golden cases (MIG-11 contract fixture)
-        run: python migrate/baseline/03_api_golden.py
-
       - name: Typecheck
         working-directory: server
         run: npm run typecheck:server
@@ -100,10 +71,6 @@ jobs:
       - name: Run server tests
         working-directory: server
         run: npm run test:server
-
-      - name: Run contract replay (MIG-11)
-        working-directory: server
-        run: npm run test:contract
 
       - name: Build server
         working-directory: server
@@ -150,70 +117,3 @@ jobs:
       - name: Run Electron smoke test
         working-directory: desktop
         run: xvfb-run -a node tests/smoke.mjs
-
-  mig-01-experiments:
-    name: MIG-01 experiments (${{ matrix.os }})
-    needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            shell: bash
-            electron_wrap: xvfb-run -a
-          - os: macos-15
-            shell: bash
-            electron_wrap: ''
-          - os: windows-latest
-            shell: pwsh
-            electron_wrap: ''
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies (for baseline generation)
-        run: python -m pip install -r backend/requirements.txt
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: |
-            desktop/package-lock.json
-            migrate/mig-01/package-lock.json
-
-      - name: Install desktop dependencies (Electron for ABI test)
-        working-directory: desktop
-        run: npm ci
-
-      - name: Install experiment dependencies
-        working-directory: migrate/mig-01
-        run: npm ci
-
-      - name: Generate golden baselines
-        run: python migrate/baseline/01_openapi.py && python migrate/baseline/02_db_baselines.py && python migrate/mig-01/scripts/generate-golden-excel.py
-
-      - name: Install Electron runtime libraries (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2
-
-      - name: Run SQLite / Excel / LangGraph experiments
-        working-directory: migrate/mig-01
-        shell: ${{ matrix.shell }}
-        run: npm test
-
-      - name: Run Electron ABI experiment
-        working-directory: migrate/mig-01
-        shell: bash
-        run: ${{ matrix.electron_wrap }} bash scripts/run-electron-abi.sh

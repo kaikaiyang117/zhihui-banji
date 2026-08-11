@@ -1,5 +1,5 @@
 /* MIG-06 统一工作项：创建、来源幂等、筛选、状态变更与来源回写。
- * 与 backend/app/services/work_items.py 语义一致。
+ * 提供统一工作项和来源关联能力。
  * 来源特定回写（考勤/成绩/班级任务/值日/积分）通过 hooks 注册表接入，由 MIG-07/08 填充。
  */
 import type { Database } from 'better-sqlite3';

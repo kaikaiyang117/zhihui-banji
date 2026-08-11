@@ -1,5 +1,5 @@
 /* MIG-06 行动闭环服务：事件、家校沟通、关注、考勤保存、学生详情与时间线。
- * 与 backend/app/routers/p0.py + services 对应部分语义一致。
+ * 提供事件、沟通、关注、考勤和学生时间线能力。
  * 积分汇总为 MIG-08 前的最小实现（与 timeline 无关部分从简）。
  */
 import type { Database } from 'better-sqlite3';

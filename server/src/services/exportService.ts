@@ -1,4 +1,4 @@
-/* MIG-05 学生导出（与 backend/app/export_service.export_students 一致）。 */
+/* MIG-05 学生导出。 */
 import { getDb, scopeIds } from './context.js';
 import { STUDENT_COLUMNS } from '../config/sheets.js';
 import { sheetBytes } from './exportXlsx.js';

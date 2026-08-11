@@ -1,4 +1,4 @@
-/* 回收站与审计路由（与 backend/app/routers/recycle.py 对应）。 */
+/* 回收站与审计路由。 */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import * as recycle from '../../services/recycle.js';

@@ -1,4 +1,4 @@
-/* 统计路由：仪表盘 / 考勤 / 成绩 / 积分 / 班费（与 backend/app/routers/stats.py 对应）。 */
+/* 统计路由：仪表盘 / 考勤 / 成绩 / 积分 / 班费。 */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import * as attendance from '../../services/attendance.js';

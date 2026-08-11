@@ -1,4 +1,4 @@
-/* MIG-09 更新检查与安装包下载校验（与 backend/app/routers/system.py 对应部分一致）。
+/* MIG-09 更新检查与安装包下载校验。
  * 安装所有权归 Electron 桌面壳：本服务只负责检查、备份、下载与 SHA-256 校验，
  * 校验通过后进入 ready_to_install，由 Electron 通过 installer-path 取得安装包。
  */

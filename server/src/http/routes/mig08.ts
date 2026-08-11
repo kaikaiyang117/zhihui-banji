@@ -1,5 +1,5 @@
 /* MIG-08 路由：积分、班费、评语、教育记录、知识库。
- * 与 backend/app/routers/ 对应实现一致。AI 草稿端点（AGENT-00 接入）先返回提示。
+ * AI 草稿端点（AGENT-00 接入）先返回提示。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 

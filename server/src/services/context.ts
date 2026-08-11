@@ -1,5 +1,5 @@
 /* MIG-04 请求级班级/学期上下文（AsyncLocalStorage）。
- * 与 backend/app/services/class_context.py 的请求范围部分语义一致：
+ * 请求范围规则：
  * - 默认（无请求）时取"使用中"班级 + "进行中"学期，否则最近学期。
  * - 归档班级/学期写操作抛 ArchivedScopeError（HTTP 409）。
  * - 本模块只提供上下文与范围解析，班级/学期 CRUD 在 MIG-05 移植。

@@ -1,5 +1,5 @@
 /* MIG-07 结构化考勤：记录、统计、规则评估与考勤提醒工作项联动。
- * 与 backend/app/services/attendance.py 语义一致。
+ * 提供记录、统计、规则评估与提醒联动。
  * save_daily 保留在 p0Service.saveDailyAttendance；考勤提醒回写通过
  * workItems.sourceTransitionHooks['attendance_rule'] 接入。
  */

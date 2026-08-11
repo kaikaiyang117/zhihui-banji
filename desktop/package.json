@@ -2,7 +2,7 @@
   "name": "meimei-workbench-desktop",
   "version": "0.0.0",
   "private": true,
-  "description": "Electron 桌面壳：美美大王工作台（启动 FastAPI sidecar 并加载本地页面）",
+  "description": "Electron 桌面壳：美美大王工作台（启动 Node.js 后端并加载本地页面）",
   "main": "main.js",
   "scripts": {
     "dev": "electron .",

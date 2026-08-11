@@ -9,9 +9,6 @@ if (-not (Test-Path 'backend/static/index.html')) {
   throw '未找到前端构建产物，请先执行：cd frontend && npm run build'
 }
 
-python packaging/create-logo-ico.py --out packaging/logo.ico
-if ($LASTEXITCODE -ne 0) { throw "Logo icon generation failed: $LASTEXITCODE" }
-
 if (Test-Path 'dist\MeimeiWorkbench') { Remove-Item -Recurse -Force 'dist\MeimeiWorkbench' }
 if (Test-Path 'build\server-bundle') { Remove-Item -Recurse -Force 'build\server-bundle' }
 if (Test-Path 'desktop\dist') { Remove-Item -Recurse -Force 'desktop\dist' }

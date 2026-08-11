@@ -1,5 +1,5 @@
 /* MIG-04 局域网设备：短时配对、凭证校验、过期与即时撤权。
- * 与 backend/app/services/devices.py 语义一致（哈希、TTL、审计、last_seen 更新）。
+ * 负责哈希、TTL、审计和 last_seen 更新。
  */
 import { createHash, randomBytes } from 'node:crypto';
 import type { Database } from 'better-sqlite3';

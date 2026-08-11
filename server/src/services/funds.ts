@@ -1,5 +1,5 @@
 /* 班费分类账、结算、冲正、凭证和旧通用表迁移服务。
- * 与 backend/app/services/funds.py 语义一致。
+ * 提供完整账务生命周期管理。
  */
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';

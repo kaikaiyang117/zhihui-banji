@@ -6,7 +6,7 @@
 
 ## 固定样例集
 
-样例文件为 `backend/tests/fixtures/agent_regression.json`，由 `backend/tests/test_agent_regression.py` 自动读取并执行，当前覆盖：
+Agent 回归测试位于 `server/tests/integration/agent*.test.ts`，使用隔离 SQLite 和 `server/tests/fixtures/` 夹具，当前覆盖：
 
 - 班级人数查询和学生搜索的工具结果结构。
 - 微信渠道敏感学生档案拒绝。
@@ -17,14 +17,14 @@
 
 ## 安全写入回归
 
-`backend/tests/test_agent.py` 覆盖创建待办的预览、确认、取消边界、10 分钟失效、确认参数绑定、重复确认幂等、写入前备份和失败留痕；同时覆盖网页/微信渠道权限、未知工具、模型重复失败熔断和工具调用恢复。
+Node Agent 集成测试覆盖创建待办的预览、确认、取消边界、10 分钟失效、确认参数绑定、重复确认幂等、写入前备份和失败留痕；同时覆盖网页/微信渠道权限、未知工具、模型重复失败熔断和工具调用恢复。
 
 ## 执行结果
 
 ```text
-PYTHONPATH=. python -m unittest discover -s backend/tests -p 'test_*.py' -v
-Ran 123 tests ...
-OK
+cd server && npm run test:server
+Test Files ... passed
+Tests ... passed
 ```
 
 前端 `npm run build` 通过；报告、Agent 设置/会话管理、健康追踪页面和 390px 窄屏主流程通过浏览器验证。宽屏工作台和座位网格的可用宽度检查也已通过；真实移动设备和微信 iLink 长时间运行仍待人工验收。

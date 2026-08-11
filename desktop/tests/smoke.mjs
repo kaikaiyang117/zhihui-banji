@@ -63,6 +63,7 @@ function waitHealthOk(url, timeoutMs = 60000) {
 }
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'workbench-electron-smoke-'));
+const electronUserDataDir = mkdtempSync(path.join(tmpdir(), 'workbench-electron-user-data-'));
 console.log(`临时数据目录：${dataDir}`);
 
 const env = {
@@ -74,7 +75,7 @@ const env = {
   WORKBENCH_NO_TRAY: '1',
 };
 
-const args = ['.'];
+const args = ['.', `--user-data-dir=${electronUserDataDir}`];
 if (process.platform === 'linux') args.push('--no-sandbox');
 /* detached 进程组：超时清理时整组 kill，避免 Electron 主进程（.bin/electron 的
  * shim 子进程）孤儿化后持有单实例锁，阻塞后续测试。 */
@@ -166,5 +167,6 @@ if (backendUrl) {
 }
 
 rmSync(dataDir, { recursive: true, force: true });
+rmSync(electronUserDataDir, { recursive: true, force: true });
 console.log('\nElectron 冒烟测试通过：窗口、页面入口、后端生命周期、端口释放均正常。');
 process.exit(0);

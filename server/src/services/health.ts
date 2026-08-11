@@ -104,14 +104,14 @@ function rows(sheet: string, start: string, end: string): HealthRecord[] {
   return result;
 }
 
-function pythonJson(value: unknown): string {
+function readableJson(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return String(value);
-  if (Array.isArray(value)) return `[${value.map((item) => pythonJson(item)).join(', ')}]`;
+  if (Array.isArray(value)) return `[${value.map((item) => readableJson(item)).join(', ')}]`;
   const entries = Object.entries(value as Record<string, unknown>)
-    .map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`);
+    .map(([key, item]) => `${JSON.stringify(key)}: ${readableJson(item)}`);
   return `{${entries.join(', ')}}`;
 }
 
@@ -401,7 +401,7 @@ export async function exportSummary(
     detail.getCell('A1').font = { bold: true };
     detail.getCell('B1').font = { bold: true };
     for (let i = 0; i < recordRows.length; i += 1) {
-      detail.getRow(i + 2).values = [recordRows[i].date ?? '', pythonJson(recordRows[i].data)];
+      detail.getRow(i + 2).values = [recordRows[i].date ?? '', readableJson(recordRows[i].data)];
     }
     detail.getColumn(1).width = 16;
     detail.getColumn(2).width = 80;

@@ -1,5 +1,5 @@
 /* MIG-05 学生 Excel 导入：模板 + 预览 + 按学号合并提交（整批回滚、故障行报告）。
- * 与 backend/app/import_service.py 语义一致。
+ * 提供整批回滚和故障行报告。
  */
 import ExcelJS from 'exceljs';
 

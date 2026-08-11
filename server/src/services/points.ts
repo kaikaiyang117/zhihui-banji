@@ -1,5 +1,5 @@
 /* MIG-08 行为积分：流水、规则、周期命中与旧快照迁移。
- * 与 backend/app/services/points.py 语义一致。
+ * 提供流水、规则、周期命中与旧快照迁移能力。
  */
 import type { Database } from 'better-sqlite3';
 

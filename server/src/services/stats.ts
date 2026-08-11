@@ -1,4 +1,4 @@
-/* 统计服务：仪表盘聚合与个人工作台日历（与 backend/app/services/dashboard.py 语义一致）。 */
+/* 统计服务：仪表盘聚合与个人工作台日历。 */
 import { getDb, scopeIds } from './context.js';
 import { todayString } from './clock.js';
 import * as attendance from './attendance.js';
@@ -138,7 +138,7 @@ export function calendar(options: {
   };
 }
 
-/** 工作台仪表盘聚合（与 backend/app/routers/stats.py 的 /dashboard 语义一致）。 */
+/** 工作台仪表盘聚合。 */
 export function dashboard(date: string | undefined, options: { conn?: Database } = {}): Record<string, unknown> {
   const conn = options.conn ?? getDb().connInstance;
   const [classId, termId] = scopeIds({ conn });

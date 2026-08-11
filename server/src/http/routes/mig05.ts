@@ -1,5 +1,5 @@
 /* MIG-05 路由：班级/学期/在班关系、学生、通用工作表、座位表。
- * 与 backend/app/routers/ 对应实现一致（错误映射：409 冲突/归档、400 业务、404 不存在）。
+ * 错误映射：409 冲突/归档、400 业务、404 不存在。
  */
 import type { FastifyInstance } from 'fastify';
 import type { FastifyReply, FastifyRequest } from 'fastify';

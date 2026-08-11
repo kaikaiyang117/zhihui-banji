@@ -1,5 +1,5 @@
 /* MIG-04 核心业务记录软删除、回收站恢复与受控永久删除。
- * 与 backend/app/services/recycle.py 语义一致（含联动工作项、审计、二次确认）。
+ * 包含联动工作项、审计和二次确认。
  */
 import type { Database } from 'better-sqlite3';
 

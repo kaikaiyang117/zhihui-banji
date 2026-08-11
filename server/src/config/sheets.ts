@@ -1,4 +1,4 @@
-/* MIG-05 工作表元数据与学生列定义（与 backend/app/config.py 一致）。 */
+/* MIG-05 工作表元数据与学生列定义。 */
 export interface SheetMeta {
   category: string;
   group: 'teacher' | 'personal';

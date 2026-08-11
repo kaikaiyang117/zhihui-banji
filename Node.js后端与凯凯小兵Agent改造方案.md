@@ -1,10 +1,12 @@
 # Node.js 后端与凯凯小兵 Agent 改造实施方案
 
 > 建立日期：2026-08-11
-> 文档状态：待执行
+> 文档状态：已执行并进入发布候选
 > 目标读者：负责实施迁移的编程 Agent、代码审查 Agent 和发布验收人员
 > 技术决策：FastAPI 全量迁移至 Node.js/TypeScript；凯凯小兵迁移至 LangGraph.js，复用 LangChain Core 的消息、工具和模型适配能力
-> 当前阶段：全部工作包（MIG-00 至 MIG-11、AGENT-00 至 AGENT-03）已完成。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
+> 当前阶段：全部工作包（MIG-00 至 MIG-11、AGENT-00 至 AGENT-03）已完成。Python/FastAPI 后端、一次性迁移基线和 PyInstaller 配置已退役；当前运行时仅保留 Node.js、TypeScript、Electron 和前端资源。
+
+> 历史说明：文档后半部分保留迁移过程中的 FastAPI 对照、MIG-00/MIG-01 基线记录，作为设计决策和审计资料；这些一次性工具已从仓库删除，不再作为开发或 CI 前置步骤。
 
 ## 1. 文档职责与执行优先级
 

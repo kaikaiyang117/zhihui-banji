@@ -29,7 +29,7 @@
 - [x] 微信和网页入口使用统一 Agent 工具层
 - [x] 工具调用失败处理、一次自动重试和重复失败熔断
 - [x] 建立 Agent 问题回归样例集
-  - 固定样例位于 `backend/tests/fixtures/agent_regression.json`，由 `test_agent_regression.py` 自动执行
+  - 固定回归由 `server/tests/integration/agent*.test.ts` 执行，夹具位于 `server/tests/fixtures/`
 
 ## 第二阶段：会话和体验增强
 

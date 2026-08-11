@@ -1,5 +1,5 @@
 /* MIG-05 通用工作表：元数据、行数据、派生列与考勤兼容视图。
- * 与 backend/app/db.py 工作表部分 + derived.py + sheets 路由语义一致。
+ * 提供元数据、行数据、派生列与考勤兼容视图。
  */
 import { getDb, scopeIds } from './context.js';
 import * as audit from './audit.js';
@@ -142,7 +142,7 @@ export function attendanceCompatibilityRows(): SheetRow[] {
   });
 }
 
-/* ---------------- 派生列（与 backend/app/derived.py 一致） ---------------- */
+/* ---------------- 派生列 ---------------- */
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined) return null;

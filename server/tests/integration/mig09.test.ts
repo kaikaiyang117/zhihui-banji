@@ -17,11 +17,59 @@ import * as migrationService from '../../src/services/migrationService.js';
 import * as updateService from '../../src/services/update.js';
 import { createBackup } from '../../src/db/connection.js';
 import { secretPath } from '../../src/services/secretStore.js';
+import ExcelJS from 'exceljs';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 let tempDir: string;
 let db: WorkbenchDb;
+
+function crc32(input: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of input) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function unsafeZip(): Buffer {
+  const name = Buffer.from('../../evil.txt');
+  const data = Buffer.from('x');
+  const checksum = crc32(data);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x800, 6);
+  local.writeUInt16LE(0, 8);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(name.length, 26);
+
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x800, 8);
+  central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  central.writeUInt32LE(0, 42);
+
+  const centralOffset = local.length + name.length + data.length;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12);
+  end.writeUInt32LE(centralOffset, 16);
+  return Buffer.concat([local, name, data, central, name, end]);
+}
 
 function testConfig(): ReturnType<typeof loadConfig> {
   const previous = { ...process.env };
@@ -113,16 +161,14 @@ describe('健康', () => {
 });
 
 describe('Excel 导出', () => {
-  it('通用表/成绩/考勤导出可被 openpyxl 解析', async () => {
+  it('通用表/成绩/考勤导出可被 ExcelJS 解析', async () => {
     const sheet = await exportService.exportSheet('班主任日志');
     expect(sheet.buffer.length).toBeGreaterThan(100);
     const attendance = await exportService.exportAttendanceReport('2026-04-01', '2026-04-30');
     expect(attendance.buffer.length).toBeGreaterThan(100);
-    const output = execPython(
-      `import io,json;from openpyxl import load_workbook;` +
-      `wb=load_workbook(io.BytesIO(${JSON.stringify(sheet.buffer.toString('base64'))} and __import__('base64').b64decode(${JSON.stringify(sheet.buffer.toString('base64'))})));` +
-      `print(json.dumps([ws.title for ws in wb.worksheets],ensure_ascii=False))`);
-    expect(JSON.parse(output)).toContain('班主任日志');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(sheet.buffer);
+    expect(workbook.worksheets.map((worksheet) => worksheet.name)).toContain('班主任日志');
   });
 });
 
@@ -169,18 +215,7 @@ describe('迁移包', () => {
   });
 
   it('拒绝不安全路径的迁移包', async () => {
-    const { execFileSync } = await import('node:child_process');
-    // 构造一个含 ../../ 路径的 zip（用 python 生成）
-    const evilZip = execFileSync(process.env.WORKBENCH_PYTHON || 'python3', ['-c', `
-import zipfile, io
-buf = io.BytesIO()
-with zipfile.ZipFile(buf, 'w') as z:
-    z.writestr('../../evil.txt', 'x')
-buf.seek(0)
-import sys
-sys.stdout.buffer.write(buf.read())
-`]);
-    await expect(migrationService.restorePackage(Buffer.from(evilZip)))
+    await expect(migrationService.restorePackage(unsafeZip()))
       .rejects.toThrow(/不安全|不合法|缺少/);
   });
 });
@@ -269,8 +304,3 @@ describe('HTTP 冒烟', () => {
     await app.close();
   });
 });
-
-function execPython(code: string): string {
-  const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
-  return execFileSync(process.env.WORKBENCH_PYTHON || 'python3', ['-c', code], { encoding: 'utf-8' }).trim();
-}

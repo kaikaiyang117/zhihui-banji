@@ -2,7 +2,7 @@
  *
  * 约定：
  * - 本模块 import 时不监听端口、不打开数据库、不启动微信循环。
- * - 错误响应统一为 { detail }，与 FastAPI 兼容。
+ * - 错误响应统一为 { detail }。
  * - /api/* 的 404 返回 JSON；非 API 路径回退 SPA 根入口。
  */
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -67,7 +67,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     }
     const record = error as Record<string, unknown>;
     if (record && typeof record === 'object' && 'validation' in record) {
-      // Fastify schema 校验错误对齐 FastAPI 422
+      // Fastify schema 校验统一返回 422
       return reply.status(422).send({ detail: '请求参数校验失败' });
     }
     if (record && typeof record === 'object' && typeof record.statusCode === 'number') {

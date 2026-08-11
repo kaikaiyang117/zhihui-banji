@@ -1,4 +1,4 @@
-/* MIG-02 统一错误类型：业务错误携带 HTTP 状态码与 detail 文案（对齐 FastAPI）。 */
+/* MIG-02 统一错误类型：业务错误携带 HTTP 状态码与 detail 文案。 */
 export class AppError extends Error {
   readonly statusCode: number;
   readonly detail: string;

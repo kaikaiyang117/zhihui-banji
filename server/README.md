@@ -1,7 +1,6 @@
-# MIG-02 Node 服务骨架
+# Node.js 服务
 
-FastAPI 迁移的第二阶段产物：可启动、可测试、无业务代码的 Node.js/TypeScript 服务骨架。
-对应方案文档 `Node.js后端与凯凯小兵Agent改造方案.md` 第 10.3 节。
+项目当前的 Node.js/TypeScript 主后端，负责 HTTP API、SQLite、业务服务和 Agent 渠道。
 
 ## 命令
 
@@ -30,7 +29,7 @@ server/
     └── fixtures/static/   # 最小静态夹具（index.html / favicon / app-version.json）
 ```
 
-## 行为契约（与 FastAPI 对齐）
+## HTTP 行为契约
 
 - `GET /api/system/health` → `{app, version, ready}`；ready 由启动任务回调控制。
 - `GET /api/system/runtime` → `{business_date, today}`（WORKBENCH_BUSINESS_DATE 或真实日期）。
@@ -48,27 +47,19 @@ server/
 - 业务日期用组件方式校验（`Date.UTC`），避免本地时区把日期偏移一天。
 - 测试完全独立于 5000 端口：macOS ControlCenter 会动态占用/释放 5000，任何
   依赖 5000 空闲的断言都是 flaky 的（实测踩坑）。
-- `server/static/` 尚未生成时回退 `backend/static`，测试使用 fixtures 静态目录，
-  不依赖 Python 构建产物。
+- `server/static/` 尚未生成时回退 `backend/static`，测试使用 fixtures 静态目录。
 
 ## 下一工作包
 
 （无）全部迁移工作包完成，进入发布候选。
 
-## MIG-11 总验收（已交付）
-
-- 契约重放 `npm run test:contract`：152 用例顺序重放，146 逐字匹配 + 6 个已批准差异
-  （422/400 校验语义、500 响应体、工具元数据扩展、审计级联），详见方案 20.16 节。
-- 重放补齐缺口：stats 与 recycle 路由、学生自动在班、agent 状态/工具/流式对齐、审计 api_request 语义。
-- 验证：186/186 后端测试、契约通过、typecheck、Electron 冒烟双路径。
-
-## MIG-10 Electron 切换（已交付）
+## Electron 桌面切换（已交付）
 
 - Electron 锁定 `43.3.0`；后端运行在 `utilityProcess`（打包）或系统 Node 子进程（开发），
   同一入口 `dist/entry.js --desktop-child --lan`，桌面默认开启局域网配对。
 - `scripts/build-node-bundle.sh`/`.ps1`：组装 `build/server-bundle/`（dist + static +
   app-version.json + 生产依赖）并把 better-sqlite3 重建为打包 Electron ABI；
-  `desktop/electron-builder.yml` extraResources 指向它，不再包含 Python sidecar。
+  `desktop/electron-builder.yml` extraResources 指向它。
 - 版本唯一来源 `APP_VERSION` → app-version.json + 桌面 package.json + 安装包。
 - 补缺统计路由：`/api/stats/dashboard|calendar|attendance|scores|points|fund`
   （`src/services/stats.ts` + `src/http/routes/stats.ts`，前端 Dashboard 依赖，原缺失）。
@@ -77,7 +68,7 @@ server/
 
 ## AGENT-03 网页与微信渠道（已交付）
 
-`src/wechat/`（子代理移植，与 Python 逐条对应）：
+`src/wechat/`（微信渠道实现）：
 - `config.ts`：微信配置（env > DB agent_settings、白名单策略、脱敏输出）。
 - `ilinkClient.ts`：iLink HTTP 客户端（fetch + AbortSignal 超时/取消、ret 错误映射、
   `-14` 会话过期、X-WECHAT-UIN、base_info 注入、可注入 httpClient 便于测试）。
@@ -119,7 +110,7 @@ server/
 - `graph.ts`：StateGraph——load_context → route（直接工具/计划/模型）→
   apply_direct / create_plan → execute_plan_steps → plan_final；model_loop；
   条件边 + 自定义流事件（config.writer）。
-- `runner.ts`：`AgentRunner.chat`/`chatStream`（与 Python runner 语义一致）：
+- `runner.ts`：`AgentRunner.chat`/`chatStream`：
   确定性直接工具路由（班级人数/考勤/成绩/待办/沟通/校历）、规则计划（全班问题强制
   批量、空批量恢复一次、失败重建一次、重试熔断 retry_exhausted）、计划条件/引用解析、
   计划最终回答流式；SQLite 检查点（`agent-checkpoints.db`，thread_id=session_id）；
@@ -174,7 +165,7 @@ server/
 
 验证（tests/integration/mig09.test.ts，12 项；总 140/140）：
 - 周报指标与来源追溯、档案创建/列表/读取/导出。
-- 健康目标唯一/提醒/复盘/汇总/多 sheet 导出（openpyxl 可解析）。
+- 健康目标唯一/提醒/复盘/汇总/多 sheet 导出（ExcelJS 可解析）。
 - 通用表/考勤导出；备份创建→修改→恢复；迁移包导出→破坏→恢复往返；
   路径穿越 zip 被拒；github-token 校验；installer-path 未就绪拒绝。
 - HTTP 全端点连通（开发模式 install 拒绝 400、AI 草稿 503）。
@@ -224,7 +215,7 @@ server/
 `src/http/routes/mig07.ts`：考勤规则/成绩配置/成绩导入/成绩规则/班级任务/值日/校历/搜索路由。
 
 联动接线：
-- `p0Service.saveDailyAttendance` 保存后自动触发考勤规则评估（与 Python save_daily 一致）。
+- `p0Service.saveDailyAttendance` 保存后自动触发考勤规则评估。
 - `entry.ts` 启动任务非阻塞执行考勤/成绩 `evaluateStartup`。
 
 验证（tests/integration/mig07.test.ts，15 项；总 114/114）：
@@ -280,7 +271,7 @@ server/
 验证（tests/integration/mig05.test.ts，20 项）：
 - 班级/学期/在班：创建自动建学期、结转复制+归档、转班状态机、归档写保护、班级学期匹配。
 - 学生：中文字段/空值、学号唯一（含回收站占用）、头像类型/大小/路径安全。
-- 导入：预览故障行报告、按学号合并、**注入失败整批回滚零残留**、模板可被 openpyxl 解析。
+- 导入：预览故障行报告、按学号合并、**注入失败整批回滚零残留**、模板可被 ExcelJS 解析。
 - 工作表：跨班级/学期隔离、个人表不隔离、派生列数值、软删除进回收站、考勤兼容九列视图。
 - HTTP：学生创建/列表/导出/模板、座位表读写、归档范围写入 409。
 
@@ -292,12 +283,12 @@ server/
 - `audit.ts`：渠道/操作者上下文、敏感参数脱敏（key/token/密码/电话/地址 → `***`）、
   缺省写审计、`listAudits`。
 - `devices.ts`：短时配对（5 分钟单次）、90 天设备凭证（SHA-256 哈希存储）、
-  认证/过期/撤权/全部撤权、last_seen 更新；行为与 Python 逐条一致。
+  认证/过期/撤权/全部撤权、last_seen 更新。
 - `recycle.ts`：13 类核心记录软删除（联动工作项）、回收站恢复、二次确认永久删除。
 - `files.ts`：`safeResolve`（拒绝绝对路径与穿越）、`atomicWrite`、`sha256`、`cleanTempFiles`。
 - `clock.ts`：业务日期（WORKBENCH_BUSINESS_DATE），审计仍用真实时钟。
 
-`src/http/plugins/request-context.ts`：中间件顺序与 Python local_access_guard 一致
+`src/http/plugins/request-context.ts`：中间件顺序与本机访问策略一致
 （请求 ID → 设备鉴权 → 范围绑定 → 渠道/操作者 → 审计上下文 → 路由 → 缺省写审计 → 释放）。
 关键实现：必须用**回调风格** onRequest 钩子并在 ALS 上下文中同步调用 `done()`，
 promise 风格钩子不会传播（已实验验证）。
@@ -313,27 +304,22 @@ promise 风格钩子不会传播（已实验验证）。
 - 业务日期、safeResolve 穿越拒绝、原子写入、临时文件清理。
 - 端到端：--lan 启动后 access-info/pairing/claim/devices/audit 全链路验证。
 
-## MIG-03 SQLite 与迁移引擎（已交付）
+## SQLite 与迁移引擎（已交付）
 
 `src/db/`：
-- `schema.ts`：基础 schema + 全部历史迁移 v2-v25 逐条移植（SQL 与 Python 一致，
-  仅翻译不增加版本号）；`initSchema` 复刻 Python 逻辑（迁移表、v1 标记、高版本拒绝、
+- `schema.ts`：基础 schema + 全部历史迁移 v2-v25；`initSchema` 负责迁移表、v1 标记、高版本拒绝、
   迁移前备份、版本标记成功后写入）。
 - `connection.ts`：`WorkbenchDb` 受控单连接（WAL、busy_timeout=5000、外键）、
-  `withTransaction`（失败回滚）、`createBackup`（SQLite backup API，文件名与 Python 一致）、
+  `withTransaction`（失败回滚）、`createBackup`（SQLite backup API）、
   迁移前同步备份（checkpoint + 复制）。
-- `snapshot.ts`：schema/行数快照，结构与 MIG-00 Python 基线完全一致，用于逐项比对。
+- `snapshot.ts`：schema/行数快照，用于迁移和完整性测试。
 - 启动接入：`entry.ts` 把数据库初始化作为启动任务，`/api/system/health` 的 ready
   仅在数据库打开成功后为 true；退出时受控关闭。
 
-验证（tests/integration/db-migrate.test.ts，14 项）：
-- 空库：Node 新库 schema 快照与 Python 基线逐字节一致；82 张表 CREATE SQL 逐条一致；
-  迁移自带数据（默认班级/学期/在班关系）行数一致。
-- 旧版升级：v4-sample 经 Node 引擎升级后与 Python `v4-upgraded` 基线完全一致；
-  v10/v15/v20 空库升级后与 `empty-v25` 一致。
-- 跨引擎：Node 升级后的库 Python 可读、integrity_check=ok、学号行数一致。
-- 幂等：重复 open 不重复迁移；高版本（26）拒绝启动。
+验证（tests/integration/db-migrate.test.ts）：
+- 新库 schema、默认班级/学期、完整性校验和迁移版本正确。
+- 重复 open 不重复迁移；高版本（26）拒绝启动。
 - 并发：100 次并发异步读取；同文件两连接写冲突 SQLITE_BUSY 且不静默覆盖。
-- 备份：createBackup 一致性备份、恢复后数据一致、迁移前自动生成 pre-migrate-v5 备份。
+- 备份：createBackup 一致性备份、恢复后数据一致、迁移前自动生成备份。
 - 中断恢复：注入失败迁移 → 版本停在 24，修复后重启到 25。
 - withTransaction 提交/回滚。

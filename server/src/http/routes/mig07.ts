@@ -1,5 +1,5 @@
 /* MIG-07 路由：考勤规则、成绩配置/导入、班级任务、值日、校历、搜索。
- * 与 backend/app/routers/p1.py + school_calendar.py 对应实现一致。
+ * 提供高频教师业务相关 HTTP 入口。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 

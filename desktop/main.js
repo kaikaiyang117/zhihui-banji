@@ -1,7 +1,7 @@
 'use strict';
 /* 美美大王工作台 Electron 桌面壳
  *
- * 职责：单实例、窗口、托盘、后端子进程（FastAPI sidecar）、导航限制、
+ * 职责：单实例、窗口、托盘、Node.js 后端子进程、导航限制、
  * 下载/外部协议、更新安装协调和退出生命周期。
  * 渲染进程保持 nodeIntegration:false + contextIsolation:true + sandbox:true，
  * 仅通过 preload 暴露白名单 IPC。

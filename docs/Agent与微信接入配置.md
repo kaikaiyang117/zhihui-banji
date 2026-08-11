@@ -7,7 +7,7 @@ Agent 的已完成能力和后续阶段任务见：[Agent 代理清单](Agent代
 ## 1. 安装依赖
 
 ```bash
-pip install -r backend/requirements.txt
+cd server && npm ci
 ```
 
 微信 Bot Token、模型 API Key、微信同步 Token 和更新 Token 会保存到数据目录下独立的权限受限 JSON 文件（文件权限为当前用户可读写），不会写入业务 SQLite 或迁移包。生产环境仍建议优先使用环境变量注入凭据。

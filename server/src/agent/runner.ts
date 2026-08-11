@@ -1,5 +1,5 @@
 /* AGENT-01 凯凯小兵 Runner：以 LangGraph 状态图表达模型+工具循环。
- * 公开 API（chat/chatStream）与 backend/app/agent/runner.py 语义一致，
+ * 公开 API（chat/chatStream）遵循统一 Agent 执行契约，
  * 内部节点复刻：确定性直接工具、计划（确定性/模型）、执行（条件/引用/一次重试）、
  * 空批量恢复一次、失败重建一次、重试熔断、最终回答流式。
  * 图内自定义事件（plan/plan_step/delta）通过 LangGraph config.writer 发射。

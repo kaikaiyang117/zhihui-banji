@@ -1,5 +1,5 @@
 /* AGENT-02 确认写入状态机：预览 → 明确确认（token/哈希复核）→ 备份 → 执行业务服务 → 验证 → 审计。
- * 与 backend/app/agent/actions.py 语义一致；agent_actions 表是写入授权、
+ * agent_actions 表是写入授权、
  * 参数哈希、TTL、状态与幂等的权威来源（LangGraph interrupt 只负责流程暂停）。
  */
 import { createHash } from 'node:crypto';
@@ -235,4 +235,3 @@ export function handleConfirmation(
   }
   return [true, `${String(pending.preview ?? '')} 请先回复“确认”或“取消”。`];
 }
-

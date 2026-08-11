@@ -251,16 +251,14 @@ describe('Excel 导入：预览、合并提交、故障报告与整批回滚', (
     expect(count.c).toBe(0);
   });
 
-  it('模板可生成且可被 openpyxl 解析', async () => {
+  it('模板可生成且可被 ExcelJS 解析', async () => {
     const buffer = await buildTemplate();
-    const output = execPython(`import sys,io,json;sys.path.insert(0,'${SERVER_ROOT}');` +
-      `from openpyxl import load_workbook;` +
-      `wb=load_workbook(io.BytesIO(${JSON.stringify(buffer.toString('base64'))} if False else __import__('base64').b64decode(${JSON.stringify(buffer.toString('base64'))})));` +
-      `ws=wb.active;print(json.dumps({'title':ws.title,'a1':ws.cell(1,1).value,'a2':ws.cell(2,1).value},ensure_ascii=False))`);
-    const parsed = JSON.parse(output);
-    expect(parsed.title).toBe('学生信息');
-    expect(parsed.a1).toBe('学号');
-    expect(parsed.a2).toBe('2201');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.worksheets[0];
+    expect(sheet.name).toBe('学生信息');
+    expect(sheet.getCell('A1').value).toBe('学号');
+    expect(sheet.getCell('A2').value).toBe('2201');
   });
 });
 
@@ -383,8 +381,3 @@ describe('座位表与 HTTP 冒烟', () => {
     await app.close();
   });
 });
-
-function execPython(code: string): string {
-  const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
-  return execFileSync(process.env.WORKBENCH_PYTHON || 'python3', ['-c', code], { encoding: 'utf-8' }).trim();
-}

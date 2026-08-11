@@ -1,5 +1,5 @@
 /* MIG-05 学生档案：列表/创建/更新/头像（魔术字节校验、原子写入）。
- * 与 backend/app/services/student_photos.py + routers/students.py 语义一致。
+ * 提供学生资料、照片和导入相关能力。
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,4 +1,4 @@
-/* 统计端点集成测试（与 backend/app/routers/stats.py 对应）。 */
+/* 统计端点集成测试。 */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
