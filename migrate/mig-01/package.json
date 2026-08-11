@@ -1,0 +1,28 @@
+{
+  "name": "mig-01-experiments",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MIG-01 技术试验：SQLite / Excel / LangGraph 依赖验证",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "exp:sqlite": "tsx src/exp-sqlite.ts",
+    "exp:excel": "tsx src/exp-excel.ts",
+    "exp:langgraph": "tsx src/exp-langgraph.ts",
+    "exp:electron": "bash scripts/run-electron-abi.sh",
+    "test": "npm run typecheck && npm run exp:sqlite && npm run exp:excel && npm run exp:langgraph"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.5",
+    "@langchain/langgraph": "1.4.9",
+    "@langchain/langgraph-checkpoint-sqlite": "1.0.3",
+    "better-sqlite3": "12.4.1",
+    "exceljs": "4.4.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "3.7.1",
+    "@types/better-sqlite3": "7.6.13",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3"
+  }
+}
