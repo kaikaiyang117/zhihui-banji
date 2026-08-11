@@ -47,11 +47,11 @@ export function modelTools(): Array<Record<string, unknown>> {
   return getRegistry().modelTools();
 }
 
-function isWriteTool(name: string): boolean {
+export function isWriteTool(name: string): boolean {
   return name in WRITE_TOOLS;
 }
 
-function actionsAllowed(channel: string, toolName: string): boolean {
+export function actionsAllowed(channel: string, toolName: string): boolean {
   return toolName in WRITE_TOOLS && ['web', 'wechat', 'local', 'lan'].includes(channel);
 }
 
@@ -84,7 +84,7 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));
 }
 
@@ -137,13 +137,13 @@ function summaryText(result: Record<string, unknown>): string {
   return '调用成功';
 }
 
-function expireActions(conn: Database): void {
+export function expireActions(conn: Database): void {
   conn.prepare(
     "UPDATE agent_actions SET status='expired' WHERE status='pending' AND expires_at<?",
   ).run(nowStamp());
 }
 
-function previewText(toolName: string, args: Record<string, unknown>): string {
+export function previewText(toolName: string, args: Record<string, unknown>): string {
   const label = WRITE_TOOLS[toolName];
   let detail: string;
   if (toolName === 'create_task') {
@@ -184,7 +184,7 @@ function actionFloat(value: unknown): number {
   throw new ActionError('积分分值必须是非零数字');
 }
 
-function validateArguments(toolName: string, args: Record<string, unknown>): void {
+export function validateArguments(toolName: string, args: Record<string, unknown>): void {
   const [required, allowed] = WRITE_FIELDS[toolName];
   const unknown = Object.keys(args).filter((key) => !allowed.has(key)).sort();
   if (unknown.length > 0) throw new ActionError(`工具参数不支持：${unknown.join(', ')}`);

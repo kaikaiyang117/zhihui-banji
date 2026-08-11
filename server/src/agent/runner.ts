@@ -20,6 +20,7 @@ import { systemPrompt } from './prompt.js';
 import { SessionStore } from './sessionStore.js';
 import { buildRegistry, ToolRegistry, ToolError } from './toolRegistry.js';
 import { invokeTool, recordModelUsage, recordToolFailure } from './agentService.js';
+import { handleConfirmation } from './actions.js';
 
 export interface RunnerOptions {
   modelClient?: OpenAICompatibleClient;
@@ -358,6 +359,8 @@ export class AgentRunner {
     const actorId = options.actorId ?? '';
     const input = String(text ?? '').trim();
     if (!input) return '请输入要查询的内容。';
+    const handled = handleConfirmation(input, { sessionId, actorId, channel });
+    if (handled[0]) return handled[1];
     const graph = await this.buildGraph();
     const result = await graph.invoke(this.initial(sessionId, channel, actorId, input), sessionId);
     return result.finalAnswer || '请输入要查询的内容。';
@@ -370,6 +373,11 @@ export class AgentRunner {
     const input = String(text ?? '').trim();
     if (!input) {
       yield { type: 'delta', content: '请输入要查询的内容。' };
+      return;
+    }
+    const handled = handleConfirmation(input, { sessionId, actorId, channel });
+    if (handled[0]) {
+      yield { type: 'delta', content: handled[1] };
       return;
     }
     const graph = await this.buildGraph();

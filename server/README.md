@@ -53,7 +53,25 @@ server/
 
 ## 下一工作包
 
-`AGENT-02` 确认写入与会话：写入预览/确认/取消状态机（actions）、会话压缩、审计补全。
+`AGENT-03` 网页与微信渠道：SSE 打磨、微信 iLink 适配器（登录/消息循环/去重/断线恢复）。
+
+## AGENT-02 确认写入与会话（已交付）
+
+`src/agent/actions.ts`：
+- 写工具确认状态机：预览（参数白名单/正整数/非零积分校验、TTL 10 分钟、
+  arguments_hash 幂等、confirmation_token 仅接口返回不落明文）→ 确认（token 哈希复核）
+  → **备份（createBackupSync）** → 事务执行业务服务（create_task/record_communication/
+  save_attendance/record_points 均写 `agent_action` 来源键）→ 状态/结果落库；
+  失败保留备份并标记 failed；重复确认幂等（duplicate）。
+- `pendingForSession`/`cancelAction`/`handleConfirmation`：聊天“确认/取消”拦截
+  （runner.chat/chatStream 首轮处理，不进入模型）。
+- 会话压缩（sessionStore.compactMessages 按用户回合保留 + 本地摘要标记，不落思维链）。
+- 路由：`/api/agent/actions/pending|confirm|cancel`；`/api/agent/tools/:name` 传递 session_id。
+
+验证（tests/integration/agent02.test.ts，11 项；总 173/173）：
+- 预览→确认→备份→执行→幂等；未确认拒绝；错误 token 拒；取消/过期失效；
+  参数校验（未知字段/缺参/非零积分）；聊天确认/取消/提示拦截（模型不被调用）；
+  会话压缩摘要；HTTP 全链路。
 
 ## AGENT-01 LangGraph Harness（已交付）
 

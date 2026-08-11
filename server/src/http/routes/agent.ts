@@ -4,6 +4,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import { AgentRunner } from '../../agent/runner.js';
+import { pendingForSession, confirmAction, cancelAction, ActionError } from '../../agent/actions.js';
 import { SessionStore } from '../../agent/sessionStore.js';
 import { listTools, invokeTool, listAudits, usageStats } from '../../agent/agentService.js';
 import { ToolError } from '../../agent/toolRegistry.js';
@@ -69,10 +70,11 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
   app.post('/api/agent/tools/:toolName', async (request, reply) => {
     const { toolName } = request.params as { toolName: string };
-    const body = request.body as { arguments?: Record<string, unknown>; channel?: string; actor_id?: string };
+    const body = request.body as { arguments?: Record<string, unknown>; channel?: string; actor_id?: string; session_id?: string };
     try {
       const result = invokeTool(toolName, body.arguments ?? {}, {
         channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
+        sessionId: body.session_id ?? '',
       });
       return result;
     } catch (error) {
@@ -147,6 +149,45 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     const { sessionId } = request.params as { sessionId: string };
     new SessionStore().clear(sessionId);
     return { ok: true };
+  });
+
+  app.get('/api/agent/actions/pending', async (request) => {
+    const { session_id, actor_id } = request.query as { session_id?: string; actor_id?: string };
+    const pending = pendingForSession(session_id ?? '', actor_id ?? '');
+    if (!pending) return { pending: null };
+    return { pending };
+  });
+
+  app.post('/api/agent/actions/:actionId/confirm', async (request, reply) => {
+    const { actionId } = request.params as { actionId: string };
+    const body = request.body as { session_id?: string; actor_id?: string; confirmation_token?: string };
+    try {
+      const result = confirmAction(Number(actionId), {
+        sessionId: body.session_id ?? '', actorId: body.actor_id ?? '',
+        token: body.confirmation_token ?? '',
+      });
+      return { ok: true, ...result };
+    } catch (error) {
+      if (error instanceof ActionError) {
+        return reply.status(400).send({ detail: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/agent/actions/:actionId/cancel', async (request, reply) => {
+    const { actionId } = request.params as { actionId: string };
+    const body = request.body as { session_id?: string; actor_id?: string };
+    try {
+      return cancelAction(Number(actionId), {
+        sessionId: body.session_id ?? '', actorId: body.actor_id ?? '',
+      });
+    } catch (error) {
+      if (error instanceof ActionError) {
+        return reply.status(400).send({ detail: error.message });
+      }
+      throw error;
+    }
   });
 
   app.get('/api/agent/audit', async (request) => {
