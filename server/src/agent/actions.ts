@@ -206,16 +206,17 @@ function successMessage(toolName: string, result: Record<string, unknown>): stri
   return `${labels[toolName] ?? '操作已完成'}。操作编号：${String(result.id ?? '')}`;
 }
 
-/** 处理聊天中的确认/取消；返回 (是否拦截, 用户可见回答)。 */
+/** 处理聊天中的确认/取消；返回 (是否拦截, 用户可见回答)。
+ * 确认/取消使用精确词匹配，避免“确认一下明天的安排”这类正常消息误触发写入。
+ */
 export function handleConfirmation(
   text: string, options: { sessionId: string; actorId: string; channel: string; conn?: Database },
 ): [boolean, string] {
   const conn = connOf(options.conn);
   const pending = pendingForSession(options.sessionId, options.actorId, conn);
   if (!pending) return [false, ''];
-  const normalized = String(text ?? '').replace(/\s+/g, '').trim().toLowerCase();
-  if (normalized === '确认' || normalized === '确认执行' || normalized === '执行'
-    || normalized === 'yes' || normalized === 'y' || normalized.startsWith('确认')) {
+  const normalized = stripTrailingPunctuation(String(text ?? '').replace(/\s+/g, '').trim().toLowerCase());
+  if (CONFIRM_WORDS.has(normalized)) {
     try {
       const result = confirmAction(Number(pending.id), {
         sessionId: options.sessionId, actorId: options.actorId, conn,
@@ -228,10 +229,16 @@ export function handleConfirmation(
       throw error;
     }
   }
-  if (normalized === '取消' || normalized === '取消执行' || normalized === '不要'
-    || normalized === 'no' || normalized === 'n' || normalized.startsWith('取消')) {
+  if (CANCEL_WORDS.has(normalized)) {
     cancelAction(Number(pending.id), { sessionId: options.sessionId, actorId: options.actorId, conn });
     return [true, '已取消这次待确认操作，没有修改业务数据。'];
   }
   return [true, `${String(pending.preview ?? '')} 请先回复“确认”或“取消”。`];
+}
+
+const CONFIRM_WORDS = new Set(['确认', '确认执行', '执行', 'yes', 'y']);
+const CANCEL_WORDS = new Set(['取消', '取消执行', '不要', 'no', 'n']);
+
+function stripTrailingPunctuation(text: string): string {
+  return text.replace(/[。！!？?，,、.]+$/g, '');
 }

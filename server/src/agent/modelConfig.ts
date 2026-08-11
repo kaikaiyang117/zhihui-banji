@@ -14,6 +14,7 @@ export interface ModelConfigOptions {
   model: string;
   timeout_seconds?: number;
   thinking?: string;
+  temperature?: number;
 }
 
 export class ModelConfig {
@@ -22,6 +23,7 @@ export class ModelConfig {
   readonly model: string;
   readonly timeout_seconds: number;
   readonly thinking: string;
+  readonly temperature: number;
 
   constructor(options: ModelConfigOptions) {
     this.api_key = options.api_key;
@@ -29,6 +31,7 @@ export class ModelConfig {
     this.model = options.model;
     this.timeout_seconds = options.timeout_seconds ?? 45;
     this.thinking = options.thinking ?? 'disabled';
+    this.temperature = options.temperature ?? 0.2;
   }
 
   static fromEnv(): ModelConfig {
@@ -94,7 +97,12 @@ export function loadConfig(conn?: Database): ModelConfigOptions {
   if (Number.isFinite(parsed)) {
     timeout = Math.max(5, Math.min(parsed, 180));
   }
-  return { api_key: apiKey, base_url: baseUrl, model, thinking, timeout_seconds: timeout };
+  let temperature = 0.2;
+  const parsedTemperature = Number(env('MEIMEI_MODEL_TEMPERATURE'));
+  if (Number.isFinite(parsedTemperature) && String(env('MEIMEI_MODEL_TEMPERATURE')).trim() !== '') {
+    temperature = Math.max(0, Math.min(parsedTemperature, 2));
+  }
+  return { api_key: apiKey, base_url: baseUrl, model, thinking, timeout_seconds: timeout, temperature };
 }
 
 export function saveConfig(

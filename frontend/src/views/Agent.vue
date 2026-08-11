@@ -168,7 +168,7 @@ async function testModel() {
   error.value = ''
   try {
     const result = await post('/api/agent/chat', {
-      session_id: 'agent-settings-test',
+      session_id: 'web:settings-test',
       message: '请只回复：模型连接成功。',
       channel: 'local',
       actor_id: 'settings'

@@ -11,6 +11,7 @@ import { ToolError } from '../../agent/toolRegistry.js';
 import { loadConfig, saveConfig, publicConfig, ModelConfigError } from '../../agent/modelConfig.js';
 import { ModelError, ModelNotConfigured } from '../../agent/modelClient.js';
 import { wechatService } from '../../wechat/service.js';
+import { currentActor } from '../../services/audit.js';
 
 function mapAgentError(reply: FastifyReply, error: unknown): FastifyReply | undefined {
   if (error instanceof ModelNotConfigured || error instanceof ModelError || error instanceof ModelConfigError) {
@@ -20,6 +21,26 @@ function mapAgentError(reply: FastifyReply, error: unknown): FastifyReply | unde
     return reply.status(400).send({ detail: error.message, code: error.code });
   }
   return undefined;
+}
+
+/* 身份一律来自请求上下文（request-context 插件绑定），不接受客户端在 body/query 中
+ * 自行声明的 channel/actor_id，防止渠道冒充与跨身份确认写入（权限在服务端）。 */
+function boundIdentity(): { channel: string; actorId: string } {
+  const { channel, actorId } = currentActor();
+  return { channel, actorId };
+}
+
+/** 会话命名空间校验：网页与局域网设备共用 web: 前缀，微信内部使用 wechat:。 */
+function sessionNamespaceError(sessionId: string, channel: string): string | null {
+  const id = String(sessionId ?? '');
+  if (!id) return '缺少会话 ID';
+  if (channel === 'wechat') {
+    return id.startsWith('wechat:') ? null : '微信会话 ID 必须使用 wechat: 前缀';
+  }
+  if (channel === 'web' || channel === 'lan') {
+    return id.startsWith('web:') ? null : '网页会话 ID 必须使用 web: 前缀';
+  }
+  return null;
 }
 
 export function registerAgentRoutes(app: FastifyInstance): void {
@@ -74,11 +95,16 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
   app.post('/api/agent/tools/:toolName', async (request, reply) => {
     const { toolName } = request.params as { toolName: string };
-    const body = request.body as { arguments?: Record<string, unknown>; channel?: string; actor_id?: string; session_id?: string };
+    const body = request.body as { arguments?: Record<string, unknown>; session_id?: string };
+    const { channel, actorId } = boundIdentity();
+    const namespaceError = sessionNamespaceError(String(body.session_id ?? ''), channel);
+    if (namespaceError) {
+      return reply.status(422).send({ detail: namespaceError });
+    }
     try {
       const result = invokeTool(toolName, body.arguments ?? {}, {
-        channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
-        sessionId: body.session_id ?? '',
+        channel, actorId,
+        sessionId: String(body.session_id ?? ''),
       });
       return { ok: true, tool: toolName, result };
     } catch (error) {
@@ -90,7 +116,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/agent/chat', async (request, reply) => {
-    const body = request.body as { session_id: string; message: string; channel?: string; actor_id?: string };
+    const body = request.body as { session_id: string; message: string };
     if (String(body.message ?? '').length < 1) {
       return reply.status(422).send({
         detail: [{
@@ -102,10 +128,15 @@ export function registerAgentRoutes(app: FastifyInstance): void {
         }],
       });
     }
+    const { channel, actorId } = boundIdentity();
+    const namespaceError = sessionNamespaceError(body.session_id, channel);
+    if (namespaceError) {
+      return reply.status(422).send({ detail: namespaceError });
+    }
     try {
       const runner = new AgentRunner({ sessionStore: new SessionStore() });
       const answer = await runner.chat(body.session_id, body.message, {
-        channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
+        channel, actorId,
       });
       return { answer, session_id: body.session_id, ok: true };
     } catch (error) {
@@ -116,7 +147,12 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/agent/chat/stream', async (request, reply) => {
-    const body = request.body as { session_id: string; message: string; channel?: string; actor_id?: string };
+    const body = request.body as { session_id: string; message: string };
+    const { channel, actorId } = boundIdentity();
+    const namespaceError = sessionNamespaceError(body.session_id, channel);
+    if (namespaceError) {
+      return reply.status(422).send({ detail: namespaceError });
+    }
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
@@ -126,7 +162,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     const runner = new AgentRunner({ sessionStore: new SessionStore() });
     try {
       for await (const event of runner.chatStream(body.session_id, body.message, {
-        channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
+        channel, actorId,
       })) {
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       }
@@ -141,11 +177,21 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
   app.get('/api/agent/sessions', async (request) => {
     const { prefix = '' } = request.query as { prefix?: string };
-    return { sessions: new SessionStore().list(prefix) };
+    const { channel } = boundIdentity();
+    const prefixValue = String(prefix ?? '');
+    if ((channel === 'web' || channel === 'lan') && prefixValue && !prefixValue.startsWith('web:')) {
+      return { sessions: [] };
+    }
+    return { sessions: new SessionStore().list(prefixValue) };
   });
 
   app.get('/api/agent/sessions/:sessionId', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    const { channel } = boundIdentity();
+    const namespaceError = sessionNamespaceError(sessionId, channel);
+    if (namespaceError) {
+      return reply.status(404).send({ detail: '会话不存在' });
+    }
     const messages = new SessionStore().load(sessionId);
     if (!messages.length) return reply.status(404).send({ detail: '会话不存在' });
     return { messages };
@@ -153,6 +199,11 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
   app.put('/api/agent/sessions/:sessionId', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    const { channel } = boundIdentity();
+    const namespaceError = sessionNamespaceError(sessionId, channel);
+    if (namespaceError) {
+      return reply.status(404).send({ detail: '会话不存在' });
+    }
     const body = request.body as { title?: string };
     try {
       const result = new SessionStore().rename(sessionId, String(body.title ?? ''));
@@ -162,25 +213,36 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.delete('/api/agent/sessions/:sessionId', async (request) => {
+  app.delete('/api/agent/sessions/:sessionId', async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    const { channel } = boundIdentity();
+    const namespaceError = sessionNamespaceError(sessionId, channel);
+    if (namespaceError) {
+      return reply.status(404).send({ detail: '会话不存在' });
+    }
     new SessionStore().clear(sessionId);
     return { ok: true };
   });
 
   app.get('/api/agent/actions/pending', async (request) => {
-    const { session_id, actor_id } = request.query as { session_id?: string; actor_id?: string };
-    const pending = pendingForSession(session_id ?? '', actor_id ?? '');
+    const { session_id } = request.query as { session_id?: string };
+    const { actorId } = boundIdentity();
+    const pending = pendingForSession(session_id ?? '', actorId);
     if (!pending) return { pending: null };
     return { pending };
   });
 
   app.post('/api/agent/actions/:actionId/confirm', async (request, reply) => {
     const { actionId } = request.params as { actionId: string };
-    const body = request.body as { session_id?: string; actor_id?: string; confirmation_token?: string };
+    const body = request.body as { session_id?: string; confirmation_token?: string };
+    const { channel, actorId } = boundIdentity();
+    const namespaceError = sessionNamespaceError(String(body.session_id ?? ''), channel);
+    if (namespaceError) {
+      return reply.status(422).send({ detail: namespaceError });
+    }
     try {
       const result = confirmAction(Number(actionId), {
-        sessionId: body.session_id ?? '', actorId: body.actor_id ?? '',
+        sessionId: body.session_id ?? '', actorId,
         token: body.confirmation_token ?? '',
       });
       return { ok: true, ...result };
@@ -194,10 +256,15 @@ export function registerAgentRoutes(app: FastifyInstance): void {
 
   app.post('/api/agent/actions/:actionId/cancel', async (request, reply) => {
     const { actionId } = request.params as { actionId: string };
-    const body = request.body as { session_id?: string; actor_id?: string };
+    const body = request.body as { session_id?: string };
+    const { channel, actorId } = boundIdentity();
+    const namespaceError = sessionNamespaceError(String(body.session_id ?? ''), channel);
+    if (namespaceError) {
+      return reply.status(422).send({ detail: namespaceError });
+    }
     try {
       return cancelAction(Number(actionId), {
-        sessionId: body.session_id ?? '', actorId: body.actor_id ?? '',
+        sessionId: body.session_id ?? '', actorId,
       });
     } catch (error) {
       if (error instanceof ActionError) {

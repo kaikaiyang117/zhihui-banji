@@ -210,6 +210,43 @@ describe('聊天确认拦截', () => {
     void preview2; void preview3;
   });
 
+  it('确认/取消使用精确词匹配，前缀相似语句不误触发写入', () => {
+    const preview = invokeTool('record_points', { student_id: 1, amount: 3, reason: '前缀测试' }, {
+      channel: 'web', actorId: 'teacher', sessionId: 'web:t:11',
+    });
+    // “确认一下明天的安排”不是确认词 → 不执行，仍提示确认
+    const [handled, answer] = handleConfirmation('确认一下明天的安排', {
+      sessionId: 'web:t:11', actorId: 'teacher', channel: 'web',
+    });
+    expect(handled).toBe(true);
+    expect(answer).toContain('确认');
+    expect(db.connInstance.prepare(
+      "SELECT COUNT(*) AS c FROM point_ledger WHERE reason='前缀测试'",
+    ).get().c).toBe(0);
+    expect(db.connInstance.prepare(
+      'SELECT status FROM agent_actions WHERE id=?',
+    ).get(preview.action_id).status).toBe('pending');
+    // 精确词（含标点）才执行
+    const [handled2] = handleConfirmation('确认。', {
+      sessionId: 'web:t:11', actorId: 'teacher', channel: 'web',
+    });
+    expect(handled2).toBe(true);
+    expect(db.connInstance.prepare(
+      "SELECT COUNT(*) AS c FROM point_ledger WHERE reason='前缀测试'",
+    ).get().c).toBe(1);
+    // “取消这个月的活动”不会取消待确认操作
+    const preview2 = invokeTool('record_points', { student_id: 2, amount: 1, reason: '取消前缀测试' }, {
+      channel: 'web', actorId: 'teacher', sessionId: 'web:t:12',
+    });
+    const [handled3] = handleConfirmation('取消这个月的活动', {
+      sessionId: 'web:t:12', actorId: 'teacher', channel: 'web',
+    });
+    expect(handled3).toBe(true);
+    expect(db.connInstance.prepare(
+      'SELECT status FROM agent_actions WHERE id=?',
+    ).get(preview2.action_id).status).toBe('pending');
+  });
+
   it('Agent chat 首轮拦截确认文本（不进入模型）', async () => {
     const preview = invokeTool('record_points', { student_id: 1, amount: 2, reason: '聊天确认' }, {
       channel: 'web', actorId: 'teacher', sessionId: 'web:t:10',

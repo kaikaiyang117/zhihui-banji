@@ -13,6 +13,7 @@ import { WorkbenchDb } from '../../src/db/connection.js';
 import { setDatabase } from '../../src/services/context.js';
 import { OpenAICompatibleClient, ModelResponse } from '../../src/agent/modelClient.js';
 import { saveConfig, loadConfig as loadModelConfig, publicConfig, ModelConfig } from '../../src/agent/modelConfig.js';
+import { AgentPlan } from '../../src/agent/planner.js';
 import { SessionStore } from '../../src/agent/sessionStore.js';
 import { systemPrompt } from '../../src/agent/prompt.js';
 import { getRegistry, listTools, invokeTool, ToolError } from '../../src/agent/agentService.js';
@@ -149,6 +150,32 @@ describe('模型客户端', () => {
     await expect(client.complete([], [])).rejects.toThrow(/模型尚未配置/);
     process.env = previous;
   });
+
+  it('thinking 仅在启用时发送；temperature 可配置', async () => {
+    const previous = { ...process.env };
+    const fake = await fakeModelServer();
+    try {
+      process.env.MEIMEI_MODEL_BASE_URL = fake.url;
+      process.env.MEIMEI_MODEL_API_KEY = 'k';
+      process.env.MEIMEI_MODEL_NAME = 'fake';
+      process.env.MEIMEI_MODEL_TEMPERATURE = '0.8';
+      delete process.env.MEIMEI_MODEL_THINKING;
+      const client = new OpenAICompatibleClient();
+      await client.complete([{ role: 'user', content: 'hi' }]);
+      const disabledPayload = fake.calls[fake.calls.length - 1].body as Record<string, unknown>;
+      expect(disabledPayload.thinking).toBeUndefined();
+      expect(disabledPayload.temperature).toBe(0.8);
+
+      process.env.MEIMEI_MODEL_THINKING = 'enabled';
+      const client2 = new OpenAICompatibleClient();
+      await client2.complete([{ role: 'user', content: 'hi' }]);
+      const enabledPayload = fake.calls[fake.calls.length - 1].body as Record<string, unknown>;
+      expect(enabledPayload.thinking).toEqual({ type: 'enabled' });
+    } finally {
+      process.env = previous;
+      fake.close();
+    }
+  });
 });
 
 describe('工具注册表与回归', () => {
@@ -203,6 +230,14 @@ describe('工具注册表与回归', () => {
     expect(() => invokeTool('nonexistent', {}, { channel: 'web', actorId: 't' }))
       .toThrow(/不存在|未知/);
   });
+
+  it('计划路径拒绝写入工具', () => {
+    const registry = getRegistry();
+    expect(() => AgentPlan.fromPayload({
+      goal: '创建一个待办',
+      steps: [{ id: 's1', tool: 'create_task', arguments: { title: '计划测试' } }],
+    }, registry)).toThrow(/写入工具/);
+  });
 });
 
 describe('会话存储', () => {
@@ -247,5 +282,68 @@ describe('系统提示与 HTTP 冒烟', () => {
     expect(report.statusCode).toBe(400);
     await app.close();
     process.env = previous;
+  });
+});
+
+describe('HTTP 身份绑定', () => {
+  it('body 中的 channel/actor 伪装无效，身份来自请求上下文', async () => {
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    // 直接服务层：微信渠道拒绝敏感档案工具
+    expect(() => invokeTool('student_get_profile', { student_id: 1 }, { channel: 'wechat', actorId: 'w' }))
+      .toThrow(/微信/);
+    // HTTP 层：即使 body 声称 channel=wechat，身份仍按本机 web 绑定，允许读取
+    const spoof = await app.inject({
+      method: 'POST', url: '/api/agent/tools/student_get_profile',
+      payload: { arguments: { student_id: 1 }, channel: 'wechat', actor_id: 'spoofer', session_id: 'web:spoof:1' },
+    });
+    expect(spoof.statusCode).toBe(200);
+    expect((spoof.json().result as Record<string, unknown>).student).toBeTruthy();
+    await app.close();
+  });
+
+  it('会话 ID 必须使用 web: 前缀', async () => {
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const tools = await app.inject({
+      method: 'POST', url: '/api/agent/tools/class_student_count',
+      payload: { arguments: {}, session_id: 'no-prefix' },
+    });
+    expect(tools.statusCode).toBe(422);
+    const chat = await app.inject({
+      method: 'POST', url: '/api/agent/chat',
+      payload: { session_id: 'no-prefix', message: '我们班多少人？' },
+    });
+    expect(chat.statusCode).toBe(422);
+    const sessions = await app.inject({ method: 'GET', url: '/api/agent/sessions/wechat:someone' });
+    expect(sessions.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('跨身份确认被拒绝', async () => {
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const created = await app.inject({
+      method: 'POST', url: '/api/agent/tools/create_task',
+      headers: { 'x-workbench-actor': 'alice' },
+      payload: { arguments: { title: '跨身份确认测试', student_id: 1 }, session_id: 'web:cross:1' },
+    });
+    expect(created.statusCode).toBe(200);
+    const actionId = created.json().result.action_id;
+    const wrongActor = await app.inject({
+      method: 'POST', url: `/api/agent/actions/${actionId}/confirm`,
+      headers: { 'x-workbench-actor': 'bob' },
+      payload: { session_id: 'web:cross:1', confirmation_token: 'XXXXXX' },
+    });
+    expect(wrongActor.statusCode).toBe(400);
+    expect(wrongActor.json().detail).toContain('不存在或不属于当前会话');
+    const correctActor = await app.inject({
+      method: 'POST', url: `/api/agent/actions/${actionId}/confirm`,
+      headers: { 'x-workbench-actor': 'alice' },
+      payload: { session_id: 'web:cross:1' },
+    });
+    expect(correctActor.statusCode).toBe(200);
+    expect(correctActor.json().status).toBe('executed');
+    await app.close();
   });
 });

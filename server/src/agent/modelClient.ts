@@ -49,9 +49,12 @@ export class OpenAICompatibleClient {
     const payload: Record<string, unknown> = {
       model: this.config.model,
       messages,
-      temperature: 0.2,
-      thinking: { type: this.config.thinking },
+      temperature: this.config.temperature,
     };
+    /* thinking 是非标准扩展字段，只有显式启用才发送，保证严格 OpenAI 兼容端点可接入。 */
+    if (this.config.thinking === 'enabled') {
+      payload['thinking'] = { type: 'enabled' };
+    }
     if (tools && tools.length > 0) {
       payload['tools'] = tools;
       payload['tool_choice'] = 'auto';
@@ -112,11 +115,13 @@ export class OpenAICompatibleClient {
     const payload: Record<string, unknown> = {
       model: this.config.model,
       messages,
-      temperature: 0.2,
-      thinking: { type: this.config.thinking },
+      temperature: this.config.temperature,
       stream: true,
       stream_options: { include_usage: true },
     };
+    if (this.config.thinking === 'enabled') {
+      payload['thinking'] = { type: 'enabled' };
+    }
     if (tools && tools.length > 0) {
       payload['tools'] = tools;
       payload['tool_choice'] = 'auto';

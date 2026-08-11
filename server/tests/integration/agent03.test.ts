@@ -14,6 +14,8 @@ import { setDatabase } from '../../src/services/context.js';
 import { loadConfig as loadWechatConfig, saveConfig as saveWechatConfig, publicConfig as wechatPublic } from '../../src/wechat/config.js';
 import { SessionStore } from '../../src/agent/sessionStore.js';
 import { parseTextMessages } from '../../src/wechat/messageParser.js';
+import { MessageLoop } from '../../src/wechat/messageLoop.js';
+import type { ILinkClient } from '../../src/wechat/ilinkClient.js';
 import { wechatService } from '../../src/wechat/service.js';
 import { secretPath } from '../../src/services/secretStore.js';
 
@@ -107,6 +109,36 @@ describe('消息去重与会话隔离', () => {
     const sessionsB = store.list('wechat:user-b');
     expect(sessionsA.length).toBe(1);
     expect(sessionsB.length).toBe(0);
+  });
+
+  it('毒消息连续失败 3 次标记 dead 并跳过，不再无限重试', async () => {
+    const client = {
+      getUpdates: async () => ({
+        get_updates_buf: 'cur-1',
+        msgs: [{
+          message_id: 'poison-1', message_type: 1,
+          item_list: [{ type: 1, text_item: { text: '毒消息' } }],
+        }],
+      }),
+    } as unknown as ILinkClient;
+    let attempts = 0;
+    const loop = new MessageLoop(client, async () => {
+      attempts += 1;
+      throw new Error('模拟持久错误');
+    });
+    await expect(loop.pollOnce()).rejects.toThrow(/模拟持久错误/);
+    expect(attempts).toBe(1);
+    await expect(loop.pollOnce()).rejects.toThrow(/模拟持久错误/);
+    expect(attempts).toBe(2);
+    await expect(loop.pollOnce()).resolves.toBeUndefined();
+    expect(attempts).toBe(3);
+    const row = db.connInstance.prepare(
+      "SELECT status FROM wechat_message_receipts WHERE message_id='poison-1'",
+    ).get() as { status: string };
+    expect(row.status).toBe('dead');
+    expect(loop.lastError).toContain('停止重试');
+    await loop.pollOnce();
+    expect(attempts).toBe(3); // dead 消息不再投递
   });
 });
 

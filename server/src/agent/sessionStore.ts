@@ -34,7 +34,7 @@ export class SessionStore {
       }
     }
     if (!title) title = '新会话';
-    saveAgentSession(sessionId, compactMessages(stripPrivateFields(messages), this.max_messages), title, options.conn);
+    saveAgentSession(sessionId, compactMessages(stripPrivateFields(capToolMessages(messages)), this.max_messages), title, options.conn);
   }
 
   clear(sessionId: string, conn?: Database): void {
@@ -203,5 +203,16 @@ function stripPrivateFields(messages: Array<Record<string, unknown>>): Array<Rec
     const clean = { ...message };
     delete clean.reasoning_content;
     return clean;
+  });
+}
+
+/** 单条工具结果上限：批量查询（如 500 名学生）结果可能很大，超长截断防止会话表膨胀。 */
+const TOOL_MESSAGE_CAP = 8000;
+
+function capToolMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    if (message.role !== 'tool' || typeof message.content !== 'string') return message;
+    if (message.content.length <= TOOL_MESSAGE_CAP) return message;
+    return { ...message, content: `${message.content.slice(0, TOOL_MESSAGE_CAP)}…（工具结果过长已截断）` };
   });
 }

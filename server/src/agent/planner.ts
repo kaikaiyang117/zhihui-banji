@@ -63,8 +63,13 @@ export class AgentPlan {
       if (!step_id || seen.has(step_id)) {
         throw new PlanningError('计划步骤 ID 必须唯一');
       }
-      if (!registry.get(tool_name)) {
+      const definition = registry.get(tool_name);
+      if (!definition) {
         throw new PlanningError(`计划使用了不存在的工具：${tool_name}`);
+      }
+      if (definition.writeAction) {
+        /* 计划路径不经确认直接执行，必须只读；写操作走模型预览-确认流程。 */
+        throw new PlanningError(`计划步骤不能包含写入工具：${tool_name}`);
       }
       if (typeof argumentsValue !== 'object' || argumentsValue === null || Array.isArray(argumentsValue)) {
         throw new PlanningError(`步骤 ${step_id} 的参数必须是对象`);
@@ -309,6 +314,10 @@ function _extract_student_keyword(text: string): string {
         || ['信息', '详细信息', '基本信息'].includes(keyword)) {
         continue;
       }
+      /* 年份（19xx/20xx）不是学号，避免“查一下2026年春季的成绩”被当作学生查询。 */
+      if (/^(19|20)\d{2}$/.test(keyword)) {
+        continue;
+      }
       return keyword;
     }
   }
@@ -318,6 +327,8 @@ function _extract_student_keyword(text: string): string {
 function _planner_prompt(registry: ToolRegistry): string {
   const tools: Array<Record<string, unknown>> = [];
   for (const tool of registry.list()) {
+    /* 计划路径只执行只读工具；写工具必须经预览-确认流程，不进入规划器。 */
+    if (Boolean(tool['write_action'])) continue;
     tools.push({
       name: tool['name'],
       description: tool['description'],

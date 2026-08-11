@@ -258,6 +258,15 @@ export class WeChatService {
 
   private clearLoopTask(task: Promise<void>): void {
     if (this.loopTask === task) this.loopTask = null;
+    /* 会话过期后消息循环已停止：继续发提醒只会重复失败，同步暂停提醒。 */
+    if (this.loop?.sessionExpired && !this.reminderStopped) {
+      this.reminderStopped = true;
+      if (this.reminderTimer) {
+        clearTimeout(this.reminderTimer);
+        this.reminderTimer = null;
+      }
+      this.lastError = '微信会话已过期，提醒已暂停，请重新扫码登录后恢复。';
+    }
   }
 }
 
