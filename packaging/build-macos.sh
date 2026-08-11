@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS Electron 构建：Vue build → PyInstaller sidecar → Electron Builder → 签名/公证 → DMG
+# macOS Electron 构建：前端 build → Node 后端编译 → server-bundle → Electron Builder → 签名/公证 → DMG
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +11,8 @@ if [ ! -f "backend/static/index.html" ]; then
   exit 1
 fi
 
-VERSION="${APP_VERSION:-0.0.0-dev}"
+VERSION="${APP_VERSION#v}"
+VERSION="${VERSION:-0.0.0-dev}"
 ARCH="${1:-$(uname -m)}"
 case "$ARCH" in
   arm64|x86_64) ;;
@@ -19,20 +20,22 @@ case "$ARCH" in
 esac
 
 echo "==> 清理旧产物"
-rm -rf dist/MeimeiWorkbench build/backend-sidecar desktop/dist desktop/release artifacts
+rm -rf dist/MeimeiWorkbench build/server-bundle desktop/dist desktop/release artifacts
 mkdir -p artifacts
 
-echo "==> 构建 Python sidecar（${ARCH}）"
-export MEIMEI_SIDECAR=1
-python -m PyInstaller packaging/meimei-workbench.spec --noconfirm --clean --distpath dist --workpath build/pyinstaller
-if [ ! -d "build/backend-sidecar/MeimeiWorkbench" ]; then
-  echo "未生成后端 sidecar 目录"
+echo "==> 构建 Node 后端资源包（${ARCH}，version=${VERSION}）"
+APP_VERSION="$VERSION" bash scripts/build-node-bundle.sh
+if [ ! -d "build/server-bundle/dist" ]; then
+  echo "未生成 server-bundle 目录"
   exit 1
 fi
 
 echo "==> 安装桌面依赖"
 cd desktop
 npm ci || npm install
+
+echo "==> 同步桌面应用版本（${VERSION}）"
+node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='${VERSION}';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
 
 echo "==> Electron Builder 打包（${ARCH}）"
 if [ -n "${APPLE_CERTIFICATE_P12_BASE64:-}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then

@@ -1,4 +1,4 @@
-# Windows Electron 构建：Vue build → PyInstaller sidecar → Electron Builder → NSIS 安装包
+# Windows Electron 构建：前端 build → Node 后端编译 → server-bundle → Electron Builder → NSIS 安装包
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -13,24 +13,30 @@ python packaging/create-logo-ico.py --out packaging/logo.ico
 if ($LASTEXITCODE -ne 0) { throw "Logo icon generation failed: $LASTEXITCODE" }
 
 if (Test-Path 'dist\MeimeiWorkbench') { Remove-Item -Recurse -Force 'dist\MeimeiWorkbench' }
-if (Test-Path 'build\backend-sidecar') { Remove-Item -Recurse -Force 'build\backend-sidecar' }
+if (Test-Path 'build\server-bundle') { Remove-Item -Recurse -Force 'build\server-bundle' }
 if (Test-Path 'desktop\dist') { Remove-Item -Recurse -Force 'desktop\dist' }
 if (Test-Path 'desktop\release') { Remove-Item -Recurse -Force 'desktop\release' }
 if (Test-Path 'artifacts') { Remove-Item -Recurse -Force 'artifacts' }
 New-Item -ItemType Directory -Force artifacts | Out-Null
 
-Write-Host '==> 构建 Python sidecar'
-$env:MEIMEI_SIDECAR = '1'
-python -m PyInstaller packaging/meimei-workbench.spec --noconfirm --clean --distpath dist --workpath build\pyinstaller
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败：$LASTEXITCODE" }
-if (-not (Test-Path 'build\backend-sidecar\MeimeiWorkbench')) {
-  throw '未生成后端 sidecar 目录'
+Write-Host "==> 构建 Node 后端资源包（Windows x64，version=$Version）"
+$env:APP_VERSION = $Version
+& "$ProjectRoot\scripts\build-node-bundle.ps1"
+if ($LASTEXITCODE -ne 0) { throw "server-bundle 构建失败：$LASTEXITCODE" }
+if (-not (Test-Path 'build\server-bundle\dist')) {
+  throw '未生成 server-bundle 目录'
 }
 
 Write-Host '==> 安装桌面依赖'
 Set-Location desktop
 if (-not (Test-Path 'node_modules')) { npm ci }
 if ($LASTEXITCODE -ne 0) { throw "桌面依赖安装失败：$LASTEXITCODE" }
+
+Write-Host "==> 同步桌面应用版本（$Version）"
+$DesktopPkgPath = 'package.json'
+$DesktopPkg = Get-Content $DesktopPkgPath -Raw | ConvertFrom-Json
+$DesktopPkg.version = $Version
+Set-Content -Path $DesktopPkgPath -Value ($DesktopPkg | ConvertTo-Json -Depth 8) -Encoding UTF8
 
 Write-Host '==> Electron Builder 打包（Windows x64）'
 if ($env:WINDOWS_CERTIFICATE_BASE64 -and $env:WINDOWS_CERTIFICATE_PASSWORD) {

@@ -6,7 +6,7 @@
  * 渲染进程保持 nodeIntegration:false + contextIsolation:true + sandbox:true，
  * 仅通过 preload 暴露白名单 IPC。
  */
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, session, utilityProcess } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -64,60 +64,85 @@ function flushBackendLog() {
   }
 }
 
-/* ---------------------------------------------------------------- 后端进程 */
-function resolveBackendCommand() {
-  if (process.env.WORKBENCH_BACKEND_CMD) {
-    return {
-      cmd: process.env.WORKBENCH_BACKEND_CMD,
-      args: (process.env.WORKBENCH_BACKEND_ARGS || '').split(' ').filter(Boolean),
-      cwd: process.env.WORKBENCH_BACKEND_CWD || path.join(__dirname, '..'),
-    };
+/* ---------------------------------------------------------------- 后端进程
+ * Node.js 后端运行在 Electron utilityProcess 中（MIG-10）：
+ * 开发与打包共用同一入口 server/dist/entry.js，差异只来自路径和环境变量。
+ * 开发模式（未打包）使用系统 Node 子进程：server/node_modules 为系统 Node ABI，
+ * 无法在 utilityProcess（Electron ABI）中加载；打包模式依赖 build/server-bundle
+ * 里为 Electron ABI 重建过的原生模块。
+ */
+const MAX_BACKEND_RESTARTS = 2;
+
+function usingServerBundle() {
+  return app.isPackaged || process.env.WORKBENCH_USE_BUNDLE === '1';
+}
+
+function bundleRoot() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'server')
+    : path.join(__dirname, '..', 'build', 'server-bundle');
+}
+
+function resolveBackendEntry() {
+  return usingServerBundle()
+    ? path.join(bundleRoot(), 'dist', 'entry.js')
+    : path.join(__dirname, '..', 'server', 'dist', 'entry.js');
+}
+
+function backendProcessEnv() {
+  const env = { ...process.env };
+  if (usingServerBundle()) {
+    env.MEIMEI_PACKAGED = '1';
+    env.WORKBENCH_STATIC_DIR = path.join(bundleRoot(), 'static');
   }
-  if (app.isPackaged) {
-    const root = path.join(process.resourcesPath, 'backend', 'MeimeiWorkbench');
-    return {
-      cmd: path.join(root, process.platform === 'win32' ? 'MeimeiWorkbench.exe' : 'MeimeiWorkbench'),
-      args: ['--desktop-child'],
-      cwd: root,
-    };
+  return env;
+}
+
+function resolveNodeCommand() {
+  if (process.env.WORKBENCH_NODE) {
+    return process.env.WORKBENCH_NODE;
   }
-  const backendDir = path.join(__dirname, '..', 'backend');
   const candidates = [
-    process.env.WORKBENCH_PYTHON,
-    path.join(__dirname, '..', '.venv', 'bin', 'python'),
-    path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe'),
-    process.platform === 'win32' ? 'python' : 'python3',
+    path.join(__dirname, '..', '.nvm', 'current', 'bin', 'node'),
   ].filter(Boolean);
-  const python = candidates.find(candidate => !candidate.includes(path.sep) || fs.existsSync(candidate));
-  return {
-    cmd: python,
-    args: ['-u', path.join(backendDir, 'run.py'), '--desktop-child'],
-    cwd: backendDir,
-  };
+  const found = candidates.find(candidate => !candidate.includes(path.sep) || fs.existsSync(candidate));
+  return found || 'node';
 }
 
 function startBackend() {
-  let { cmd, args, cwd } = resolveBackendCommand();
-  if (!cmd) {
-    failBackend('找不到可用的 Python 解释器，请在环境变量 WORKBENCH_PYTHON 中指定。');
+  const entry = resolveBackendEntry();
+  if (!fs.existsSync(entry)) {
+    failBackend(`找不到 Node 后端入口 ${entry}，请先构建：cd server && npm run build:server`);
     return;
   }
-  logLine(`启动后端：${cmd} ${args.join(' ')}`);
+  const backendDir = path.dirname(path.dirname(entry));
+  /* 桌面壳默认开启局域网配对（手机访问），与 Electron 冒烟测试和产品定位一致。 */
+  const backendArgs = ['--desktop-child', '--lan'];
+  logLine(`启动 Node 后端：${entry} ${backendArgs.join(' ')}`);
+  const useUtility = usingServerBundle();
   try {
-    backendProcess = spawn(cmd, args, {
-      cwd,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    if (useUtility) {
+      backendProcess = utilityProcess.fork(entry, backendArgs, {
+        cwd: backendDir,
+        env: backendProcessEnv(),
+        stdio: 'pipe',
+      });
+    } else {
+      backendProcess = spawn(resolveNodeCommand(), [entry, ...backendArgs], {
+        cwd: backendDir,
+        env: backendProcessEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    }
   } catch (err) {
     failBackend(`无法启动后端进程：${err.message}`);
     return;
   }
   let stdoutBuffer = '';
   let stderrBuffer = '';
-  backendProcess.stdout.on('data', chunk => { stdoutBuffer = consumeOutput(stdoutBuffer, chunk); });
-  backendProcess.stderr.on('data', chunk => { stderrBuffer = consumeOutput(stderrBuffer, chunk); });
+  if (backendProcess.stdout) backendProcess.stdout.on('data', chunk => { stdoutBuffer = consumeOutput(stdoutBuffer, chunk); });
+  if (backendProcess.stderr) backendProcess.stderr.on('data', chunk => { stderrBuffer = consumeOutput(stderrBuffer, chunk); });
   backendProcess.on('error', err => {
     failBackend(`后端进程启动失败：${err.message}`);
   });
@@ -125,7 +150,40 @@ function startBackend() {
     backendProcess = null;
     logLine(`后端进程已退出（code=${code} signal=${signal || 'none'}）`);
     if (!quitting && code !== 0) {
-      failBackend(`后端服务意外退出（退出码 ${code}），请查看日志。`);
+      handleBackendCrash(`后端服务意外退出（退出码 ${code}），请查看日志。`);
+    }
+  });
+}
+
+let backendRestartCount = 0;
+function handleBackendCrash(message) {
+  flushBackendLog();
+  if (isSmoke) {
+    failBackend(message);
+    return;
+  }
+  if (backendRestartCount >= MAX_BACKEND_RESTARTS) {
+    failBackend(message);
+    return;
+  }
+  backendRestartCount += 1;
+  logLine(`后端异常退出，尝试重启（第 ${backendRestartCount}/${MAX_BACKEND_RESTARTS} 次）……`);
+  dialog.showMessageBox({
+    type: 'warning',
+    title: '工作台服务异常',
+    message,
+    detail: `完整日志：${backendLogPath()}\n\n${backendLog.slice(-30).join('\n')}`,
+    buttons: ['重启服务', '退出工作台'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    if (response === 0) {
+      healthStartedAt = 0;
+      backendBaseUrl = null;
+      startBackend();
+    } else {
+      quitting = true;
+      app.exit(1);
     }
   });
 }

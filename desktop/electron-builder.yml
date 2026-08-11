@@ -1,5 +1,5 @@
 # Electron 桌面壳打包配置
-# 构建顺序（由发布脚本执行）：Vue build → PyInstaller sidecar → electron-builder → 签名/公证
+# 构建顺序（由发布脚本执行）：前端 build → Node 后端编译 → server-bundle → electron-builder → 签名/公证
 appId: com.meimei.workbench
 productName: MeimeiWorkbench
 directories:
@@ -9,10 +9,11 @@ files:
   - main.js
   - preload.js
   - package.json
-# Python sidecar 必须放在 extraResources，不能打进 app.asar
+# Node 后端资源包放在 extraResources，不能打进 app.asar；
+# 运行在 Electron utilityProcess 中（MIG-10），不再包含 Python sidecar。
 extraResources:
-  - from: ../build/backend-sidecar
-    to: backend
+  - from: ../build/server-bundle
+    to: server
     filter:
       - '**/*'
 win:

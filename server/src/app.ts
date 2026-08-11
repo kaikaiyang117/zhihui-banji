@@ -23,6 +23,7 @@ import { registerMig06Routes } from './http/routes/mig06.js';
 import { registerMig07Routes } from './http/routes/mig07.js';
 import { registerMig08Routes } from './http/routes/mig08.js';
 import { registerMig09Routes } from './http/routes/mig09.js';
+import { registerStatsRoutes } from './http/routes/stats.js';
 import { registerAgentRoutes } from './http/routes/agent.js';
 import { registerWechatRoutes } from './http/routes/wechat.js';
 
@@ -119,6 +120,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   // ---------- 输出、个人与系统运维（MIG-09） ----------
   registerMig09Routes(app);
+
+  // ---------- 统计（MIG-05 补齐） ----------
+  registerStatsRoutes(app);
 
   // ---------- Agent 基础路由（AGENT-01+） ----------
   registerAgentRoutes(app);

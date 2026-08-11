@@ -6,7 +6,7 @@
  * 退出后确认后端进程与端口释放。
  */
 import { spawn } from 'child_process';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,7 +14,6 @@ import net from 'net';
 import http from 'http';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const projectRoot = path.resolve(desktopRoot, '..');
 const electronBin = path.join(
   desktopRoot, 'node_modules', '.bin',
   process.platform === 'win32' ? 'electron.cmd' : 'electron',
@@ -73,21 +72,17 @@ const env = {
   WORKBENCH_SMOKE: '1',
   WORKBENCH_VERSION: '9.8.7',
   WORKBENCH_NO_TRAY: '1',
-  PYTHONUNBUFFERED: '1',
 };
-for (const candidate of [
-  path.join(projectRoot, '.venv', 'bin', 'python'),
-  path.join(projectRoot, '.venv', 'Scripts', 'python.exe'),
-]) {
-  if (existsSync(candidate)) {
-    env.WORKBENCH_PYTHON = candidate;
-    break;
-  }
-}
 
 const args = ['.'];
 if (process.platform === 'linux') args.push('--no-sandbox');
-const child = spawn(electronBin, args, { cwd: desktopRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+/* detached 进程组：超时清理时整组 kill，避免 Electron 主进程（.bin/electron 的
+ * shim 子进程）孤儿化后持有单实例锁，阻塞后续测试。 */
+const child = spawn(electronBin, args, { cwd: desktopRoot, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+function killTree() {
+  try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  try { child.kill('SIGKILL'); } catch {}
+}
 
 let output = '';
 let gotOk = false;
@@ -141,11 +136,11 @@ let exitCode = null;
 try {
   await waiter;
   const codePromise = new Promise(resolve => child.once('exit', code => resolve(code)));
-  const killTimer = setTimeout(() => { child.kill('SIGKILL'); }, 30000);
+  const killTimer = setTimeout(killTree, 30000);
   exitCode = await codePromise;
   clearTimeout(killTimer);
 } catch (err) {
-  child.kill('SIGKILL');
+  killTree();
   fail(err.message, output);
 }
 

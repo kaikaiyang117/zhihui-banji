@@ -53,7 +53,20 @@ server/
 
 ## 下一工作包
 
-`MIG-10` Electron 切换：utilityProcess 运行 Node 后端（替代 Python sidecar）、打包/签名/更新验证。
+`MIG-11` 总验收与发布候选：Python/Node 全量契约对比、升级回滚演练、发布检查。
+
+## MIG-10 Electron 切换（已交付）
+
+- Electron 锁定 `43.3.0`；后端运行在 `utilityProcess`（打包）或系统 Node 子进程（开发），
+  同一入口 `dist/entry.js --desktop-child --lan`，桌面默认开启局域网配对。
+- `scripts/build-node-bundle.sh`/`.ps1`：组装 `build/server-bundle/`（dist + static +
+  app-version.json + 生产依赖）并把 better-sqlite3 重建为打包 Electron ABI；
+  `desktop/electron-builder.yml` extraResources 指向它，不再包含 Python sidecar。
+- 版本唯一来源 `APP_VERSION` → app-version.json + 桌面 package.json + 安装包。
+- 补缺统计路由：`/api/stats/dashboard|calendar|attendance|scores|points|fund`
+  （`src/services/stats.ts` + `src/http/routes/stats.ts`，前端 Dashboard 依赖，原缺失）。
+- 验证：`npm run test:server` 184/184、`tsc --noEmit`、Electron 冒烟两条路径均通过
+  （`node tests/smoke.mjs` 与 `WORKBENCH_USE_BUNDLE=1 node tests/smoke.mjs`）。
 
 ## AGENT-03 网页与微信渠道（已交付）
 
