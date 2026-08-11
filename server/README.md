@@ -53,8 +53,30 @@ server/
 
 ## 下一工作包
 
-`AGENT-00` Agent 基线与模型层：固定回归轨迹、OpenAI-compatible 模型客户端、
-工具契约登记，并启用报告/评语 AI 草稿端点。
+`AGENT-01` LangGraph Harness：状态图、检查点、计划/执行/验证/纠错（凯凯小兵）。
+
+## AGENT-00 Agent 基线与模型层（已交付）
+
+`src/agent/`：
+- `modelConfig.ts`：OpenAI-compatible 配置（env 优先 + DB 回退、必填校验、脱敏）。
+- `modelClient.ts`：`complete`/`iter_complete`（fetch + SSE 流式、reasoning/DSML、
+  tool_calls、usage、超时与 401/429/5xx 单次重试退避）。
+- `sessionStore.ts`：会话 CRUD/重命名/消息压缩。
+- `prompt.ts`：凯凯小兵系统提示（业务日期注入）。
+- `toolRegistry.ts`：16 个工具（12 只读 + 4 写入确认），渠道过滤（wechat 排除敏感）、
+  参数校验（invalid_arguments）、错误码体系；与 TS 业务服务逐项映射。
+- `agentService.ts`：invokeTool（渠道→确认→校验→执行→脱敏审计）、listTools/listAudits/
+  usageStats、写入预览（createPendingAction：参数白名单、10 分钟过期、hash 幂等、确认码）。
+- `commentDrafter.ts`/`reportDrafter.ts`：评语/报告 AI 草稿（上下文构造 + 模型调用 +
+  JSON 解析回填），已接入 `/api/comments/ai/preview` 与 `/api/reports/ai/preview`
+  （未配置模型返回明确 400）。
+
+验证（tests/integration/agent00.test.ts，13 项；总 153/153）：
+- 假模型 HTTP 服务下 complete/流式/DSML 解析；未配置抛 ModelNotConfigured。
+- 配置保存/加载/脱敏（api_key_set/masked）。
+- 工具回归：班级人数、搜索、批量查询、聚合、微信敏感拒绝、写工具 confirmation_required、
+  参数错误 invalid_arguments、未知工具。
+- 会话 CRUD 与重命名；systemPrompt 含业务日期；AI 端点未配置模型返回 400。
 
 ## MIG-09 输出、个人与系统运维（已交付）
 

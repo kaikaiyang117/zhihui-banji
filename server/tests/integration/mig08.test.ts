@@ -273,7 +273,8 @@ describe('HTTP 冒烟', () => {
       method: 'POST', url: '/api/comments/ai/preview',
       payload: { student_ids: [1] },
     });
-    expect(aiStub.statusCode).toBe(503);
+    expect(aiStub.statusCode).toBe(400); // 未配置模型 → 明确错误提示
+    expect(aiStub.json().detail).toContain('模型');
 
     const pointsList = await app.inject({ method: 'GET', url: '/api/points' });
     expect(pointsList.statusCode).toBe(200);

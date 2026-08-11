@@ -67,9 +67,19 @@ export function registerMig09Routes(app: FastifyInstance): void {
     }));
   });
 
-  app.post('/api/reports/ai/preview', async (_request, reply) => {
-    // AI 报告草稿在 AGENT-00 接入
-    return reply.status(503).send({ detail: 'AI 报告草稿服务将在 AGENT-00 接入' });
+  app.post('/api/reports/ai/preview', async (request, reply) => {
+    const body = request.body as { instruction?: string };
+    try {
+      const reportDrafter = await import('../../agent/reportDrafter.js');
+      const report = reports.buildReport('term', {}) as Record<string, unknown>;
+      return await reportDrafter.generateDraft({ report, instruction: String(body.instruction ?? '') });
+    } catch (error) {
+      if (error instanceof Error && (error.constructor.name === 'ReportAIDraftError'
+        || error.constructor.name === 'ModelError' || error.constructor.name === 'ModelNotConfigured')) {
+        return reply.status(400).send({ detail: error.message });
+      }
+      throw error;
+    }
   });
 
   app.get('/api/reports/archives/:archiveId', async (request, reply) => {

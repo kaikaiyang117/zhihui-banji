@@ -339,9 +339,26 @@ export function registerMig08Routes(app: FastifyInstance): void {
     }));
   });
 
-  app.post('/api/comments/ai/preview', async (_request, reply) => {
-    // AI 草稿生成在 AGENT-00（模型客户端）接入后提供
-    return reply.status(503).send({ detail: 'AI 评语草稿服务将在 AGENT-00 接入' });
+  app.post('/api/comments/ai/preview', async (request, reply) => {
+    const body = request.body as {
+      student_ids?: number[]; comment_type?: string; tone?: string; length?: string; instruction?: string;
+    };
+    try {
+      const commentDrafter = await import('../../agent/commentDrafter.js');
+      return await commentDrafter.previewGeneration({
+        studentIds: body.student_ids ?? [],
+        commentType: String(body.comment_type ?? '学期评语'),
+        tone: String(body.tone ?? '温和、客观、鼓励'),
+        length: String(body.length ?? '120-160字'),
+        instruction: String(body.instruction ?? ''),
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.constructor.name === 'CommentAIDraftError'
+        || error.constructor.name === 'ModelError' || error.constructor.name === 'ModelNotConfigured')) {
+        return reply.status(400).send({ detail: error.message });
+      }
+      throw error;
+    }
   });
 
   app.post('/api/comments/ai/generate', async (request, reply) => {
