@@ -178,6 +178,7 @@ Agent 核心层：planner / runner / tools / session / audit
 - 后端以 Node.js 方式启动（`--desktop-child --lan`）：开发模式用系统 Node 运行 `server/dist/entry.js`（`server/node_modules` 为系统 Node ABI）；打包模式用 Electron `utilityProcess` 运行 `resources/server/dist/entry.js`（`build/server-bundle/` 内 better-sqlite3 已重建为打包 Electron ABI）。启动契约不变：打印单行 `WORKBENCH_URL=http://127.0.0.1:<port>` 后由 Electron 轮询 `/api/system/health` 判断就绪；异常退出最多自动重启 2 次，之后给出重启/退出选择。
 - Electron 是唯一桌面宿主：托盘、退出权和更新安装权都在 Electron。退出时必须由 Electron 终止 Node 后端，等待端口释放；`--desktop-child` 模式正常退出会清理 `.workbench-ready` 标记。
 - 更新所有权边界：后端只负责检查、升级前备份、下载和 SHA-256 校验，校验通过后进入 `ready_to_install` 状态；Electron 通过受限 IPC 调用 `/api/system/update/installer-path`（仅本机）取得安装包后关闭应用并启动安装器。后端不得再自行启动安装器或 `os._exit`。
+- 更新多源：更新源按 Gitee → GitHub 顺序尝试，采用第一个返回完整结果的源；下载失败时自动切换到备用源 URL。Gitee 镜像由发布流水线同步到 `packaging/publish-gitee.mjs`，客户端通过 Gitee Releases 的 `update-manifest.json` 取得下载地址与 SHA-256，任何来源的安装包都必须通过校验。新增更新源或修改源顺序时，同步更新 `server/tests/integration/mig09.test.ts` 的多源用例和 `docs/发布检查清单.md`。
 - Electron 安全基线：`nodeIntegration: false`、`contextIsolation: true`、`sandbox: true`、不关闭 `webSecurity`；主窗口只加载后端回环地址，非白名单导航一律拦截，外部链接仅放行 http(s) 与 `obsidian://`；同源 `window.open` 视为下载交给下载策略，不打开外部浏览器。
 - Electron 的 `userData` 使用独立的 `MeimeiWorkbench-Electron` 目录，不能与后端数据目录（`MeimeiWorkbench`）混用；打包时 Node 后端资源（`build/server-bundle`）放在 `extraResources`，不能打进 `app.asar`。应用版本唯一来源为构建时的 `APP_VERSION`，写入 `server-bundle/static/app-version.json` 并同步 Electron 版本与安装包名称。
 

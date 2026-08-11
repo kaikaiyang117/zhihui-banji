@@ -292,16 +292,19 @@ export function registerMig09Routes(app: FastifyInstance): void {
     try {
       return await updateService.checkForUpdate();
     } catch (error) {
-      const record = error as { message?: string };
-      let hint = '暂时无法检查更新';
-      if (String(record.message).includes('HTTP 404')) hint = '尚未找到任何发布版本。如果仓库为私有，请在下方配置 GitHub Token。';
-      else if (String(record.message).includes('HTTP 403')) hint = 'GitHub API 访问受限或触发限流，请稍后重试。';
-      else if (String(record.message).includes('HTTP 401')) hint = 'GitHub Token 无效或已过期，请重新配置。';
-      return {
-        current_version: loadAppVersion(), latest_version: '',
-        update_available: false, downloadable: false,
-        error: `暂时无法检查更新：${hint}（${record.message}）`,
-      };
+    const record = error as { message?: string };
+    let hint = '暂时无法检查更新';
+    if (String(record.message).includes('gitee: HTTP 401')
+      || String(record.message).includes('gitee: HTTP 403')) {
+      hint = 'Gitee 仓库需要公开，或在下方配置 Gitee 访问令牌。';
+    } else if (String(record.message).includes('HTTP 404')) hint = '尚未找到任何发布版本。如果仓库为私有，请配置对应的更新源 Token。';
+    else if (String(record.message).includes('HTTP 403')) hint = 'GitHub API 访问受限或触发限流，请稍后重试。';
+    else if (String(record.message).includes('HTTP 401')) hint = 'GitHub Token 无效或已过期，请重新配置。';
+    return {
+      current_version: loadAppVersion(), latest_version: '',
+      update_available: false, downloadable: false,
+      error: `暂时无法检查更新：${hint}（${record.message}）`,
+    };
     }
   });
 

@@ -178,10 +178,10 @@ onUnmounted(clearPoll)
         </div>
       </div>
       <div v-if="showTokenInput" class="update-token-section">
-        <div class="update-token-title">配置 GitHub Token（私有仓库必需）</div>
-        <div class="update-token-desc">前往 GitHub Settings → Developer settings → Personal access tokens 生成，需勾选 repo 权限。</div>
+        <div class="update-token-title">配置更新源 Token（私有仓库必需）</div>
+        <div class="update-token-desc">GitHub 私有仓库使用 ghp_ 或 github_pat_ 开头令牌；Gitee 私有仓库使用 Gitee 个人访问令牌（十六进制）。</div>
         <div class="update-token-row">
-          <input v-model="tokenValue" type="password" class="update-token-input" placeholder="ghp_ 或 github_pat_" @keydown.enter="saveToken" />
+          <input v-model="tokenValue" type="password" class="update-token-input" placeholder="ghp_ / github_pat_ / Gitee 令牌" @keydown.enter="saveToken" />
           <button class="btn btn-primary btn-sm" type="button" :disabled="!tokenValue.trim() || tokenSaving" @click="saveToken">
             <LoaderCircle v-if="tokenSaving" class="spin" :size="13" />
             <span v-else>保存</span>
@@ -194,6 +194,7 @@ onUnmounted(clearPoll)
           <span>当前版本 {{ result.current_version }}</span>
           <span>最新版本 {{ result.latest_version || '暂不可用' }}</span>
         </div>
+        <div v-if="result.source" class="update-source-row">更新源：{{ result.source === 'gitee' ? 'Gitee 镜像（国内直连）' : 'GitHub' }}</div>
         <div v-if="updateStatus" class="update-progress">
           <LoaderCircle v-if="['starting', 'checking', 'backing_up', 'downloading', 'verifying'].includes(updateStatus.status)" class="spin" :size="18" />
           <CheckCircle v-else-if="['ready_to_install', 'up_to_date'].includes(updateStatus.status)" :size="18" />
@@ -228,7 +229,7 @@ onUnmounted(clearPoll)
           <button v-else class="btn btn-outline" type="button" @click="checkUpdate">
             <RefreshCw :size="15" /> 重新检查
           </button>
-          <button v-if="tokenConfigured" class="btn btn-outline" type="button" @click="showTokenInput = !showTokenInput" title="GitHub Token 已配置">
+          <button v-if="tokenConfigured" class="btn btn-outline" type="button" @click="showTokenInput = !showTokenInput" title="更新源 Token 已配置">
             <Key :size="14" /> 已配置
           </button>
         </div>
@@ -249,6 +250,7 @@ onUnmounted(clearPoll)
 .update-state-error { flex-direction: column; color: var(--danger); }
 .update-state-error .btn { color: var(--text); }
 .update-version-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; color: var(--text-secondary); font-size: 12px; }
+.update-source-row { margin-top: 6px; color: var(--text-secondary); font-size: 11px; }
 .update-available { margin-top: 18px; padding: 14px; border-radius: 14px; background: var(--primary-bg); }
 .update-available-title { color: var(--primary); font-weight: 650; }
 .update-available-copy { margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }

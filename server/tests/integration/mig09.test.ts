@@ -1,8 +1,11 @@
 /* MIG-09 输出、个人与系统运维测试：报告、健康、导出、备份恢复、迁移包、更新状态。 */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import { buildApp } from '../../src/app.js';
@@ -235,6 +238,194 @@ describe('更新状态机', () => {
 
   it('installer-path 未就绪时拒绝', () => {
     expect(() => updateService.installerPath(db)).toThrow(/没有待安装/);
+  });
+});
+
+describe('更新源（Gitee 优先 / GitHub 回退）', () => {
+  const INSTALLER_NAMES = [
+    'MeimeiWorkbench-Setup-Windows-x64.exe',
+    'MeimeiWorkbench-macOS-arm64.dmg',
+    'MeimeiWorkbench-macOS-x64.dmg',
+  ];
+  const installerBytes = Buffer.from('fake-installer-bytes-v9.9.9');
+  const installerSha = createHash('sha256').update(installerBytes).digest('hex');
+  const previousEnv = { ...process.env };
+  let server: http.Server;
+  let base = '';
+  let failGiteeDownloads = false;
+
+  function expectedMarker(): string {
+    if (process.platform === 'win32') return 'MeimeiWorkbench-Setup-Windows-x64.exe';
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    return `MeimeiWorkbench-macOS-${arch}.dmg`;
+  }
+
+  function withEnv(patch: Record<string, string | undefined>): void {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  async function waitFinished(timeoutMs = 8000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const status = updateService.updateStatus().status;
+      if (['ready_to_install', 'up_to_date', 'error'].includes(status)) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const state = updateService.updateStatus();
+    throw new Error(`更新状态未结束：${state.status} / ${state.error}`);
+  }
+
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      const url = req.url ?? '';
+      const send = (body: string): void => {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(body);
+      };
+      if (url.startsWith('/api/v5/repos/test/workbench/releases/latest')) {
+        send(JSON.stringify({
+          id: 1, tag_name: 'v9.9.9', prerelease: false,
+          assets: [
+            { name: 'update-manifest.json', browser_download_url: `${base}/gitee/manifest.json` },
+            { name: 'v9.9.9.zip' },
+          ],
+        }));
+        return;
+      }
+      if (url === '/gitee/manifest.json') {
+        send(JSON.stringify({
+          tag_name: 'v9.9.9',
+          html_url: 'https://gitee.com/test/workbench/releases/tag/v9.9.9',
+          release_notes: 'Gitee 测试发布',
+          assets: INSTALLER_NAMES.map((name) => ({
+            name,
+            browser_download_url: `${base}/gitee/file/${name}`,
+            size: installerBytes.length,
+            sha256: installerSha,
+          })),
+        }));
+        return;
+      }
+      if (url.startsWith('/gitee/file/')) {
+        if (failGiteeDownloads) {
+          res.statusCode = 404;
+          send(JSON.stringify({ message: 'Not Found' }));
+        } else {
+          res.setHeader('Content-Type', 'application/octet-stream');
+          res.end(installerBytes);
+        }
+        return;
+      }
+      if (url === '/api/github/latest') {
+        send(JSON.stringify({
+          tag_name: 'v9.9.9',
+          html_url: 'https://github.com/test/workbench/releases/tag/v9.9.9',
+          body: 'GitHub 测试发布',
+          assets: [
+            ...INSTALLER_NAMES.map((name, index) => ({
+              id: index + 1, name, url: `${base}/github/file/${name}`, size: installerBytes.length,
+            })),
+            { id: 99, name: 'SHA256SUMS.txt', url: `${base}/github/file/SHA256SUMS.txt` },
+          ],
+        }));
+        return;
+      }
+      if (url === '/github/file/SHA256SUMS.txt') {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(INSTALLER_NAMES.map((name) => `${installerSha}  ${name}`).join('\n'));
+        return;
+      }
+      if (url.startsWith('/github/file/')) {
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.end(installerBytes);
+        return;
+      }
+      res.statusCode = 404;
+      send(JSON.stringify({ message: 'Not Found' }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as AddressInfo;
+    base = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  afterEach(() => {
+    process.env = { ...previousEnv };
+    failGiteeDownloads = false;
+  });
+
+  it('Gitee 源优先：GitHub 不可达时采用 Gitee 清单与校验和', async () => {
+    withEnv({
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
+      WORKBENCH_UPDATE_GITEE_API: `${base}/api/v5`,
+      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
+      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
+    });
+    const result = await updateService.checkForUpdate();
+    expect(result.source).toBe('gitee');
+    expect(result.latest_version).toBe('9.9.9');
+    expect(result.update_available).toBe(true);
+    expect(result.downloadable).toBe(true);
+    expect(result.release_url).toBe('https://gitee.com/test/workbench/releases/tag/v9.9.9');
+    expect(result.asset.name).toBe(expectedMarker());
+    expect(result.asset.sha256).toBe(installerSha);
+  });
+
+  it('Gitee 不可达时回退 GitHub 源', async () => {
+    withEnv({
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
+      WORKBENCH_UPDATE_GITEE_API: 'http://127.0.0.1:1/api/v5',
+      WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
+      WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
+    });
+    const result = await updateService.checkForUpdate();
+    expect(result.source).toBe('github');
+    expect(result.update_available).toBe(true);
+    expect(result.asset.sha256).toBe(installerSha);
+    expect(result.release_url).toBe('https://github.com/test/workbench/releases/tag/v9.9.9');
+  });
+
+  it('全部源失败时抛出聚合错误', async () => {
+    withEnv({
+      WORKBENCH_UPDATE_GITEE_API: 'http://127.0.0.1:1/api/v5',
+      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
+      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
+    });
+    await expect(updateService.checkForUpdate()).rejects.toThrow(/所有更新源均不可用/);
+  });
+
+  it('下载失败时自动切换备用源并完成校验', async () => {
+    withEnv({
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
+      WORKBENCH_UPDATE_GITEE_API: `${base}/api/v5`,
+      WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
+      WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
+    });
+    failGiteeDownloads = true;
+    updateService.startUpdateWorker(db);
+    await waitFinished();
+    expect(updateService.updateStatus().status).toBe('ready_to_install');
+    const info = updateService.installerPath(db);
+    expect(path.basename(info.path)).toBe(expectedMarker());
+    expect(fs.readFileSync(info.path)).toEqual(installerBytes);
+  });
+
+  it('Token 校验同时接受 GitHub 与 Gitee 格式', () => {
+    updateService.saveGithubToken('ghp_testtoken1234567890');
+    updateService.saveGithubToken('a'.repeat(40));
+    expect(updateService.githubTokenConfigured()).toBe(true);
+    expect(() => updateService.saveGithubToken('bad')).toThrow(/Token 格式/);
   });
 });
 
