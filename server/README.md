@@ -53,7 +53,27 @@ server/
 
 ## 下一工作包
 
-`AGENT-01` LangGraph Harness：状态图、检查点、计划/执行/验证/纠错（凯凯小兵）。
+`AGENT-02` 确认写入与会话：写入预览/确认/取消状态机（actions）、会话压缩、审计补全。
+
+## AGENT-01 LangGraph Harness（已交付）
+
+`src/agent/graph/` + `src/agent/runner.ts`：
+- `state.ts`：可序列化 KaikaiState（graphVersion 版本化，不存密钥/思维链）。
+- `graph.ts`：StateGraph——load_context → route（直接工具/计划/模型）→
+  apply_direct / create_plan → execute_plan_steps → plan_final；model_loop；
+  条件边 + 自定义流事件（config.writer）。
+- `runner.ts`：`AgentRunner.chat`/`chatStream`（与 Python runner 语义一致）：
+  确定性直接工具路由（班级人数/考勤/成绩/待办/沟通/校历）、规则计划（全班问题强制
+  批量、空批量恢复一次、失败重建一次、重试熔断 retry_exhausted）、计划条件/引用解析、
+  计划最终回答流式；SQLite 检查点（`agent-checkpoints.db`，thread_id=session_id）；
+  SSE 事件 plan/plan_step/delta。
+- `src/agent/planner.ts`：确定性规则计划 + 模型计划（JSON/DSML 解析、验证）。
+- 路由 `agent.ts`：状态/配置（本机 403）/工具/chat/chat-stream（SSE）/会话 CRUD/审计/用量。
+
+验证（tests/integration/agent01.test.ts，9 项；总 162/162）：
+- 直接工具路由命中、模型计划执行、全班问题不退化单学生、重复失败熔断（retry_exhausted）、
+  流式事件序列（plan/plan_step/delta）、检查点与会话落库（无思维链）、
+  模型未配置时 Agent 明确报错而业务正常、HTTP 冒烟。
 
 ## AGENT-00 Agent 基线与模型层（已交付）
 

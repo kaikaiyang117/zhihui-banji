@@ -4,7 +4,7 @@
 > 文档状态：待执行
 > 目标读者：负责实施迁移的编程 Agent、代码审查 Agent 和发布验收人员
 > 技术决策：FastAPI 全量迁移至 Node.js/TypeScript；凯凯小兵迁移至 LangGraph.js，复用 LangChain Core 的消息、工具和模型适配能力
-> 当前阶段：MIG-00 至 MIG-09、AGENT-00 已完成；下一步 AGENT-01 LangGraph Harness。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
+> 当前阶段：MIG-00 至 MIG-09、AGENT-00/01 已完成；下一步 AGENT-02 确认写入与会话。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
 
 ## 1. 文档职责与执行优先级
 
@@ -252,7 +252,7 @@ server/
 | 8 | `MIG-08` 账目与教育沉淀 | 积分、班费、评语、教育记录、知识库 | ✅ 已完成（2026-08-11，`server/src/services/` + mig08 路由，详见 20.9 节） |
 | 9 | `MIG-09` 输出、个人与系统运维 | 报告、健康、Excel、附件、备份恢复、迁移包、更新 | ✅ 已完成（2026-08-11，`server/src/services/` + mig09 路由，详见 20.10 节） |
 | 10 | `AGENT-00` Agent 基线与模型层 | 固定轨迹并移植模型/工具契约 | ✅ 已完成（2026-08-11，`server/src/agent/`，详见 20.11 节） |
-| 11 | `AGENT-01` LangGraph Harness | 状态图、检查点、计划、执行、验证和纠错 | ⬜ 待开始 |
+| 11 | `AGENT-01` LangGraph Harness | 状态图、检查点、计划、执行、验证和纠错 | ✅ 已完成（2026-08-11，`server/src/agent/`，详见 20.12 节） |
 | 12 | `AGENT-02` 确认写入与会话 | 暂停恢复、确认状态机、会话压缩和审计 | ⬜ 待开始 |
 | 13 | `AGENT-03` 网页与微信渠道 | SSE、网页会话、iLink、去重、断线恢复 | ⬜ 待开始 |
 | 14 | `MIG-10` Electron 切换 | utilityProcess、打包、签名、公证和更新 | ⬜ 待开始 |
@@ -906,7 +906,15 @@ CI 分层：
 - 验证（13 项新增，总 153/153）：假模型服务完整/流式、工具回归样例（与 MIG-00 基线一致）、微信敏感拒绝、写确认、参数错误、会话 CRUD、AI 端点。
 - 关键实现：Node fetch 替代 httpx；agent_settings 表替代 agent-model.json；写入工具走 createPendingAction（arguments_hash 幂等、TTL 10 分钟、确认码）。
 
-下一项任务：`AGENT-01` LangGraph Harness。
+## 20.12 AGENT-01 交付记录（2026-08-11）
+
+- `src/agent/graph/`（state/graph）+ `runner.ts`：LangGraph StateGraph 复刻 Python runner 语义（直接工具路由、规则/模型计划、条件与引用、空批量恢复一次、失败重建一次、重试熔断、计划最终流式回答）；SqliteSaver 检查点（`agent-checkpoints.db`，thread_id=session_id）；自定义流事件 plan/plan_step/delta。
+- `src/agent/planner.ts`（子代理）：规则计划 + 模型计划（JSON/DSML 解析、验证）。
+- 路由 `agent.ts`：状态/配置/工具/chat/chat-stream/会话/审计/用量（配置仅本机）。
+- 验证（9 项新增，总 162/162）：直接路由、计划执行、全班不退化、熔断、流式事件、检查点落库无思维链、模型未配置 Agent 报错业务正常、HTTP。
+- 关键实现：节点名不能与状态属性同名（`plan` 冲突 → create_plan/execute_plan_steps）；LangGraph 自定义事件经 `config.writer`；`ToolCall` 为扁平结构。
+
+下一项任务：`AGENT-02` 确认写入与会话。
 
 ## 21. 设计依据
 
