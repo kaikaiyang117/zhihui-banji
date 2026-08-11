@@ -76,6 +76,18 @@ export function createCommunication(options: {
   return { communication_id: communicationId, task_id: taskId };
 }
 
+export function getCommunication(
+  communicationId: number, options: { conn?: Database } = {},
+): Record<string, unknown> {
+  const conn = options.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const row = conn.prepare(
+    "SELECT * FROM communications WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
+  ).get(Number(communicationId), classId, termId) as Record<string, unknown> | undefined;
+  if (!row) throw new CommunicationError('家校沟通记录不存在');
+  return row;
+}
+
 export const EVENT_STATUSES = new Set(['待处理', '处理中', '待复查', '已完成', '无需处理']);
 
 export function createEvent(options: {
@@ -120,6 +132,16 @@ export function createEvent(options: {
   return { event_id: eventId, task_id: taskId };
 }
 
+export function getEvent(eventId: number, options: { conn?: Database } = {}): Record<string, unknown> {
+  const conn = options.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const row = conn.prepare(
+    "SELECT * FROM student_events WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
+  ).get(Number(eventId), classId, termId) as Record<string, unknown> | undefined;
+  if (!row) throw new CommunicationError('学生事件不存在');
+  return row;
+}
+
 export const FOCUS_STATUSES = new Set(['待确认', '跟进中', '情况改善', '已结束']);
 
 export function createFocus(options: {
@@ -157,14 +179,25 @@ export function createFocus(options: {
   return { focus_id: focusId, task_id: taskId };
 }
 
+export function getFocus(focusId: number, options: { conn?: Database } = {}): Record<string, unknown> {
+  const conn = options.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const row = conn.prepare(
+    "SELECT * FROM focus_items WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
+  ).get(Number(focusId), classId, termId) as Record<string, unknown> | undefined;
+  if (!row) throw new CommunicationError('关注事项不存在');
+  return row;
+}
+
 export class AttendanceError extends Error {}
 
 const ATTENDANCE_STATUSES = new Set(['出勤', '迟到', '早退', '请假', '缺勤']);
 
 export function saveDailyAttendance(
   attendanceDate: string, scene: string, records: Array<Record<string, unknown>>,
+  options: { conn?: Database } = {},
 ): Record<string, unknown> {
-  const conn = getDb().connInstance;
+  const conn = options.conn ?? getDb().connInstance;
   if (!records || records.length === 0) throw new AttendanceError('至少提交一名学生的考勤');
   const [classId, termId] = scopeIds({ write: true, conn });
   const students = new Map<number, unknown>();
@@ -213,7 +246,7 @@ export function saveDailyAttendance(
   let evaluationError = '';
   try {
     const { evaluateRules } = requireAttendance();
-    evaluation = evaluateRules({ referenceDate: attendanceDate, trigger: 'save' });
+    evaluation = evaluateRules({ referenceDate: attendanceDate, trigger: 'save', conn });
   } catch (error) {
     evaluationError = String((error as Error).message);
   }
@@ -221,9 +254,9 @@ export function saveDailyAttendance(
 }
 
 export function listAttendanceRecords(options: {
-  attendanceDate?: string; scene?: string; studentId?: number | null; limit?: number;
+  attendanceDate?: string; scene?: string; studentId?: number | null; limit?: number; conn?: Database;
 } = {}): Array<Record<string, unknown>> {
-  const conn = getDb().connInstance;
+  const conn = options.conn ?? getDb().connInstance;
   const [classId, termId] = scopeIds({ conn });
   const where = ["a.class_id=?", "a.term_id=?", "a.deleted_at=''", "s.deleted_at=''"];
   const params: unknown[] = [classId, termId];
@@ -245,6 +278,22 @@ export function listAttendanceRecords(options: {
      JOIN students s ON s.id=a.student_id WHERE ${where.join(' AND ')}
      ORDER BY a.attendance_date DESC, a.id DESC LIMIT ?`,
   ).all(...params, limit) as Array<Record<string, unknown>>;
+}
+
+export function getAttendanceRecord(options: {
+  studentId: number; attendanceDate: string; scene: string; conn?: Database;
+}): Record<string, unknown> {
+  const conn = options.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const row = conn.prepare(
+    `SELECT * FROM attendance_records
+     WHERE student_id=? AND class_id=? AND term_id=? AND attendance_date=? AND scene=? AND deleted_at=''`,
+  ).get(
+    Number(options.studentId), classId, termId,
+    String(options.attendanceDate), String(options.scene),
+  ) as Record<string, unknown> | undefined;
+  if (!row) throw new AttendanceError('考勤记录不存在');
+  return row;
 }
 
 export function studentDetail(studentId: number): Record<string, unknown> {
@@ -511,7 +560,7 @@ function buildCommentsSummary(
 export { WorkflowError, type WorkItemError };
 
 function requireAttendance(): { evaluateRules: (options: {
-  referenceDate?: string; trigger?: string;
+  referenceDate?: string; trigger?: string; conn?: Database;
 }) => Record<string, unknown> } {
   // 延迟导入避免循环依赖（attendance → workItems，workItems 不依赖 p0Service）
   return { evaluateRules: attendanceModule.evaluateRules };

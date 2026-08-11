@@ -12,7 +12,18 @@ import { loadConfig } from '../../src/config/index.js';
 import { WorkbenchDb } from '../../src/db/connection.js';
 import { setDatabase } from '../../src/services/context.js';
 import { OpenAICompatibleClient, ModelResponse } from '../../src/agent/modelClient.js';
-import { saveConfig, loadConfig as loadModelConfig, publicConfig, ModelConfig } from '../../src/agent/modelConfig.js';
+import {
+  createProfile,
+  deleteProfile,
+  duplicateProfile,
+  listProfiles,
+  saveConfig,
+  loadConfig as loadModelConfig,
+  publicConfig,
+  revealProfileKey,
+  selectProfile,
+  ModelConfig,
+} from '../../src/agent/modelConfig.js';
 import { AgentPlan } from '../../src/agent/planner.js';
 import { SessionStore } from '../../src/agent/sessionStore.js';
 import { systemPrompt } from '../../src/agent/prompt.js';
@@ -114,10 +125,105 @@ describe('模型配置', () => {
     const pub = publicConfig({ api_key: 'sk-secret', model: 'gpt-test', base_url: 'http://x' });
     expect(pub.api_key_set).toBe(true);
     expect(pub.api_key_masked).toContain('…');
+    expect(revealProfileKey('default').api_key).toBe('sk-secret');
   });
 
   it('校验必填字段', () => {
     expect(() => saveConfig({ base_url: '', model: '' })).toThrow();
+  });
+
+  it('留空或 null 字符串不会覆盖已有 API Key', () => {
+    saveConfig({ base_url: 'http://localhost:9999/v1', model: 'gpt-test', api_key: 'sk-secret' });
+    saveConfig({ base_url: 'http://localhost:9999/v1', model: 'gpt-test', api_key: null });
+    expect(loadModelConfig().api_key).toBe('sk-secret');
+    saveConfig({ base_url: 'http://localhost:9999/v1', model: 'gpt-test', api_key: 'null' });
+    expect(loadModelConfig().api_key).toBe('sk-secret');
+  });
+
+  it('历史配置中的 null API Key 被视为未配置', () => {
+    fs.writeFileSync(path.join(tempDir, 'agent-model.json'), JSON.stringify({
+      model_api_key: 'null',
+      model_base_url: 'https://api.deepseek.com',
+      model_name: 'deepseek-chat',
+      model_thinking: 'disabled',
+    }), { mode: 0o600 });
+    const loaded = loadModelConfig();
+    expect(loaded.api_key).toBe('');
+    expect(new ModelConfig(loaded).configured).toBe(false);
+  });
+
+  it('配置接口收到 JSON null 时保留已有 API Key', async () => {
+    saveConfig({ base_url: 'http://localhost:9999/v1', model: 'gpt-test', api_key: 'sk-secret' });
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const saved = await app.inject({
+      method: 'PUT', url: '/api/agent/config',
+      payload: {
+        api_key: null,
+        base_url: 'http://localhost:9999/v1',
+        model: 'gpt-test',
+        thinking: 'disabled',
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().api_key_set).toBe(true);
+    expect(loadModelConfig().api_key).toBe('sk-secret');
+    await app.close();
+  });
+
+  it('仅本机配置页可显式读取当前档案 API Key', async () => {
+    saveConfig({ base_url: 'http://localhost:9999/v1', model: 'gpt-test', api_key: 'sk-secret' });
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const revealed = await app.inject({
+      method: 'GET', url: '/api/agent/config/profiles/default/key',
+    });
+    expect(revealed.statusCode).toBe(200);
+    expect(revealed.json()).toEqual({ api_key: 'sk-secret' });
+
+    const denied = await app.inject({
+      method: 'GET', url: '/api/agent/config/profiles/default/key', remoteAddress: '192.168.31.99',
+    });
+    expect(denied.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('配置档案可创建、切换、保存与删除', () => {
+    saveConfig({ base_url: 'https://api.deepseek.com', model: 'deepseek-chat', api_key: 'sk-default' });
+    const created = createProfile({
+      name: 'OpenAI 备用',
+      base_url: 'https://api.openai.com/v1',
+      model: 'gpt-test',
+      thinking: 'disabled',
+      api_key: 'sk-backup',
+    });
+    const createdId = String(created.profile_id);
+    expect(listProfiles().active_profile_id).toBe(createdId);
+    expect(listProfiles().profiles).toHaveLength(2);
+    expect(loadModelConfig().model).toBe('gpt-test');
+
+    selectProfile('default');
+    expect(loadModelConfig().api_key).toBe('sk-default');
+    saveConfig({
+      profile_id: 'default',
+      profile_name: 'DeepSeek 主配置',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-reasoner',
+      thinking: 'enabled',
+      api_key: null,
+    });
+    expect(loadModelConfig().model).toBe('deepseek-reasoner');
+    expect(loadModelConfig().api_key).toBe('sk-default');
+    expect(loadModelConfig().profile_name).toBe('DeepSeek 主配置');
+
+    const duplicated = duplicateProfile('default');
+    expect(duplicated.api_key_set).toBe(true);
+    expect(duplicated.profile_name).toBe('DeepSeek 主配置 副本');
+    expect(loadModelConfig().api_key).toBe('sk-default');
+    deleteProfile(String(duplicated.profile_id));
+    deleteProfile(createdId);
+    expect(listProfiles().profiles).toHaveLength(1);
+    expect(listProfiles().active_profile_id).toBe('default');
   });
 });
 
@@ -179,21 +285,25 @@ describe('模型客户端', () => {
 });
 
 describe('工具注册表与回归', () => {
-  it('16 个工具，微信渠道过滤敏感工具', () => {
+  it('24 个工具，微信渠道过滤敏感工具', () => {
     const registry = getRegistry();
-    expect(registry.list().length).toBe(16);
+    expect(registry.list().length).toBe(24);
     const web = listTools('web');
-    expect(web.length).toBe(16);
+    expect(web.length).toBe(24);
     const wechat = listTools('wechat');
-    expect(wechat.length).toBe(15);
+    expect(wechat.length).toBe(22);
     expect(wechat.some((tool) => tool.name === 'student_get_profile')).toBe(false);
+    expect(registry.modelTools('wechat').some((tool) =>
+      (tool.function as Record<string, unknown>).name === 'student_get_profile')).toBe(false);
   });
 
   it('班级人数与搜索（回归样例）', () => {
     const count = invokeTool('class_student_count', {}, { channel: 'web', actorId: 't' });
     expect(count.student_count).toBe(3);
     const search = invokeTool('students_search', { keyword: '工具学生1' }, { channel: 'web', actorId: 't' });
-    expect((search.students as Array<Record<string, unknown>>)[0].姓名).toBe('工具学生1');
+    const student = (search.students as Array<Record<string, unknown>>)[0];
+    expect(student.姓名).toBe('工具学生1');
+    expect(student.student_id).toBe(student.id);
   });
 
   it('批量查询与聚合', () => {
@@ -344,6 +454,35 @@ describe('HTTP 身份绑定', () => {
     });
     expect(correctActor.statusCode).toBe(200);
     expect(correctActor.json().status).toBe('executed');
+    await app.close();
+  });
+
+  it('网页会话由服务端创建并按操作者隔离', async () => {
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const created = await app.inject({
+      method: 'POST', url: '/api/agent/sessions',
+      headers: { 'x-workbench-actor': 'alice' }, payload: {},
+    });
+    expect(created.statusCode).toBe(200);
+    const sessionId = String(created.json().session_id);
+    expect(sessionId).toMatch(/^web:[0-9a-f]{12}:[0-9a-f-]+$/);
+    const own = await app.inject({
+      method: 'GET', url: `/api/agent/sessions/${encodeURIComponent(sessionId)}`,
+      headers: { 'x-workbench-actor': 'alice' },
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json().messages).toEqual([]);
+    const other = await app.inject({
+      method: 'GET', url: `/api/agent/sessions/${encodeURIComponent(sessionId)}`,
+      headers: { 'x-workbench-actor': 'bob' },
+    });
+    expect(other.statusCode).toBe(404);
+    const otherList = await app.inject({
+      method: 'GET', url: '/api/agent/sessions',
+      headers: { 'x-workbench-actor': 'bob' },
+    });
+    expect(otherList.json().sessions).toEqual([]);
     await app.close();
   });
 });

@@ -241,7 +241,7 @@ describe('更新状态机', () => {
   });
 });
 
-describe('更新源（Gitee 优先 / GitHub 回退）', () => {
+describe('GitHub 更新源', () => {
   const INSTALLER_NAMES = [
     'MeimeiWorkbench-Setup-Windows-x64.exe',
     'MeimeiWorkbench-macOS-arm64.dmg',
@@ -252,7 +252,6 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
   const previousEnv = { ...process.env };
   let server: http.Server;
   let base = '';
-  let failGiteeDownloads = false;
   let processPlatformDescriptor: PropertyDescriptor | undefined;
 
   function expectedMarker(): string {
@@ -290,40 +289,6 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(body);
       };
-      if (url.startsWith('/api/v5/repos/test/workbench/releases/latest')) {
-        send(JSON.stringify({
-          id: 1, tag_name: 'v9.9.9', prerelease: false,
-          assets: [
-            { name: 'update-manifest.json', browser_download_url: `${base}/gitee/manifest.json` },
-            { name: 'v9.9.9.zip' },
-          ],
-        }));
-        return;
-      }
-      if (url === '/gitee/manifest.json') {
-        send(JSON.stringify({
-          tag_name: 'v9.9.9',
-          html_url: 'https://gitee.com/test/workbench/releases/tag/v9.9.9',
-          release_notes: 'Gitee 测试发布',
-          assets: INSTALLER_NAMES.map((name) => ({
-            name,
-            browser_download_url: `${base}/gitee/file/${name}`,
-            size: installerBytes.length,
-            sha256: installerSha,
-          })),
-        }));
-        return;
-      }
-      if (url.startsWith('/gitee/file/')) {
-        if (failGiteeDownloads) {
-          res.statusCode = 404;
-          send(JSON.stringify({ message: 'Not Found' }));
-        } else {
-          res.setHeader('Content-Type', 'application/octet-stream');
-          res.end(installerBytes);
-        }
-        return;
-      }
       if (url === '/api/github/latest') {
         send(JSON.stringify({
           tag_name: 'v9.9.9',
@@ -335,6 +300,19 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
             })),
             { id: 99, name: 'SHA256SUMS.txt', url: `${base}/github/file/SHA256SUMS.txt` },
           ],
+        }));
+        return;
+      }
+      if (url === '/api/github/manifest') {
+        send(JSON.stringify({
+          tag_name: 'v9.9.9',
+          html_url: 'https://github.com/test/workbench/releases/tag/v9.9.9',
+          assets: INSTALLER_NAMES.map((name) => ({
+            name,
+            browser_download_url: `${base}/github/file/${name}`,
+            size: installerBytes.length,
+            sha256: installerSha,
+          })),
         }));
         return;
       }
@@ -367,32 +345,11 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
 
   afterEach(() => {
     process.env = { ...previousEnv };
-    failGiteeDownloads = false;
   });
 
-  it('Gitee 源优先：GitHub 不可达时采用 Gitee 清单与校验和', async () => {
+  it('GitHub Release 可用时作为唯一更新源', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
-      WORKBENCH_UPDATE_GITEE_API: `${base}/api/v5`,
-      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
-      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
-    });
-    const result = await updateService.checkForUpdate();
-    expect(result.source).toBe('gitee');
-    expect(result.latest_version).toBe('9.9.9');
-    expect(result.update_available).toBe(true);
-    expect(result.downloadable).toBe(true);
-    expect(result.release_url).toBe('https://gitee.com/test/workbench/releases/tag/v9.9.9');
-    expect(result.asset.name).toBe(expectedMarker());
-    expect(result.asset.sha256).toBe(installerSha);
-  });
-
-  it('Gitee 不可达时回退 GitHub 源', async () => {
-    withEnv({
-      WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
-      WORKBENCH_UPDATE_GITEE_API: 'http://127.0.0.1:1/api/v5',
       WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
@@ -403,24 +360,32 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
     expect(result.release_url).toBe('https://github.com/test/workbench/releases/tag/v9.9.9');
   });
 
-  it('全部源失败时抛出聚合错误', async () => {
+  it('GitHub API 失败时使用清单中的 browser_download_url', async () => {
     withEnv({
-      WORKBENCH_UPDATE_GITEE_API: 'http://127.0.0.1:1/api/v5',
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
+      WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
+    });
+    const result = await updateService.checkForUpdate();
+    expect(result.source).toBe('github');
+    expect(result.downloadable).toBe(true);
+    expect(result.asset.url).toBe(`${base}/github/file/${expectedMarker()}`);
+  });
+
+  it('GitHub Release 不可达时报告错误', async () => {
+    withEnv({
       WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
       WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
     });
-    await expect(updateService.checkForUpdate()).rejects.toThrow(/所有更新源均不可用/);
+    await expect(updateService.checkForUpdate()).rejects.toThrow(/fetch failed|ECONNREFUSED/);
   });
 
-  it('下载失败时自动切换备用源并完成校验', async () => {
+  it('从 GitHub 下载并完成 SHA-256 校验', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_GITEE_REPO: 'test/workbench',
-      WORKBENCH_UPDATE_GITEE_API: `${base}/api/v5`,
       WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
-    failGiteeDownloads = true;
     updateService.startUpdateWorker(db);
     await waitFinished();
     expect(updateService.updateStatus().status).toBe('ready_to_install');
@@ -429,11 +394,11 @@ describe('更新源（Gitee 优先 / GitHub 回退）', () => {
     expect(fs.readFileSync(info.path)).toEqual(installerBytes);
   });
 
-  it('Token 校验同时接受 GitHub 与 Gitee 格式', () => {
+  it('Token 校验只接受 GitHub 格式', () => {
     updateService.saveGithubToken('ghp_testtoken1234567890');
-    updateService.saveGithubToken('a'.repeat(40));
     expect(updateService.githubTokenConfigured()).toBe(true);
-    expect(() => updateService.saveGithubToken('bad')).toThrow(/Token 格式/);
+    updateService.saveGithubToken('github_pat_testtoken1234567890');
+    expect(() => updateService.saveGithubToken('a'.repeat(40))).toThrow(/Token 格式/);
   });
 });
 

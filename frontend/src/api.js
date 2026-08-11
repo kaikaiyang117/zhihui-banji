@@ -41,6 +41,14 @@ function accessHeaders() {
   return headers
 }
 
+export async function fetchWithAccess(input, init = {}) {
+  await ensureDevicePairing()
+  return fetch(input, {
+    ...init,
+    headers: { ...accessHeaders(), ...(init.headers || {}) },
+  })
+}
+
 async function ensureDevicePairing() {
   const code = new URLSearchParams(window.location.search).get('pair')
   if (!code) return
@@ -91,40 +99,6 @@ export const post = async (url, body) => {
   }).then(parse)
 }
 
-export async function streamPost(url, body, onEvent) {
-  await ensureDevicePairing()
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...accessHeaders() },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) await parse(res)
-  if (!res.body) throw new Error('浏览器不支持流式响应')
-
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  async function consumeLine(line) {
-    if (!line.startsWith('data:')) return
-    const raw = line.slice(5).trim()
-    if (!raw) return
-    await onEvent(JSON.parse(raw))
-  }
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() || ''
-      for (const line of lines) await consumeLine(line)
-      if (done) break
-    }
-    if (buffer) await consumeLine(buffer)
-  } finally {
-    reader.releaseLock()
-  }
-}
 export const put = async (url, body) => {
   await ensureDevicePairing()
   return fetch(url, {

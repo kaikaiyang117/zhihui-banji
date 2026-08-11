@@ -183,6 +183,18 @@ export function ensureSourceWorkItem(options: EnsureSourceWorkItemOptions): { id
   return createWorkItem(options);
 }
 
+export function getWorkItem(
+  itemId: number, options: { conn?: Database } = {},
+): Record<string, unknown> {
+  const conn = options.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const row = conn.prepare(
+    "SELECT * FROM student_tasks WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
+  ).get(Number(itemId), classId, termId) as Record<string, unknown> | undefined;
+  if (!row) throw new WorkItemError('工作项不存在');
+  return row;
+}
+
 export function listWorkItems(options: {
   status?: string | null;
   bucket?: string;

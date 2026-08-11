@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 25;
+export const CURRENT_SCHEMA_VERSION = 26;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -1590,6 +1590,21 @@ function migration25(conn: Database): void {
   addColumn(conn, 'students', 'photo_path', "TEXT NOT NULL DEFAULT ''");
 }
 
+function migration26(conn: Database): void {
+  addColumn(conn, 'agent_sessions', 'channel', "TEXT NOT NULL DEFAULT 'web'");
+  addColumn(conn, 'agent_sessions', 'actor_id', "TEXT NOT NULL DEFAULT ''");
+  conn.exec(`
+    UPDATE agent_sessions
+       SET channel='wechat', actor_id=substr(session_id, 8)
+     WHERE session_id LIKE 'wechat:%' AND actor_id='';
+    UPDATE agent_sessions
+       SET channel='web', actor_id='local-user'
+     WHERE session_id LIKE 'web:%' AND actor_id='';
+    CREATE INDEX IF NOT EXISTS idx_agent_sessions_owner
+        ON agent_sessions(channel, actor_id, updated_at);
+  `);
+}
+
 export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   2: migration2,
   3: migration3,
@@ -1615,6 +1630,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   23: migration23,
   24: migration24,
   25: migration25,
+  26: migration26,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */

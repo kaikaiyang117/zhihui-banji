@@ -104,8 +104,17 @@ export class ToolRegistry {
     return [...this.tools.keys()].sort().map((name) => this.tools.get(name)!.publicSchema());
   }
 
-  modelTools(): Array<Record<string, unknown>> {
-    return [...this.tools.keys()].sort().map((name) => this.tools.get(name)!.modelSchema());
+  modelTools(channel?: string): Array<Record<string, unknown>> {
+    return [...this.tools.keys()].sort()
+      .map((name) => this.tools.get(name)!)
+      .filter((tool) => !channel || tool.allowChannels.includes(channel))
+      .map((tool) => tool.modelSchema());
+  }
+
+  forChannel(channel: string): ToolRegistry {
+    return new ToolRegistry(
+      [...this.tools.values()].filter((tool) => tool.allowChannels.includes(channel)),
+    );
   }
 
   get(name: string): ToolDefinition | undefined {
@@ -216,7 +225,8 @@ function searchStudents(args: Record<string, unknown>): Record<string, unknown> 
     params.push(`%${keyword}%`, `%${keyword}%`);
   }
   sql += ' ORDER BY s.学号 LIMIT ?';
-  const students = conn.prepare(sql).all(...params, limit) as Array<Record<string, unknown>>;
+  const students = (conn.prepare(sql).all(...params, limit) as Array<Record<string, unknown>>)
+    .map((student) => ({ ...student, student_id: Number(student['id']) }));
   return { students, count: students.length };
 }
 
@@ -446,10 +456,13 @@ function queryStudents(args: Record<string, unknown>): Record<string, unknown> {
   ).get(...params) as { count: number } | undefined;
   const total = Number(row?.count ?? 0);
   const columns = selected.map(([, expression, label]) => `${expression} AS "${label}"`).join(', ');
-  const students = conn.prepare(
+  const students = (conn.prepare(
     `SELECT ${columns} FROM students s JOIN student_enrollments e ON e.student_id=s.id `
     + `WHERE ${where} ORDER BY s.学号, s.id LIMIT ?`,
-  ).all(...params, limit) as Array<Record<string, unknown>>;
+  ).all(...params, limit) as Array<Record<string, unknown>>).map((student) => {
+    if (!('id' in student)) return student;
+    return { ...student, student_id: Number(student['id']) };
+  });
   return {
     fields: selected.map(([name]) => name),
     students,
@@ -947,7 +960,7 @@ export function buildRegistry(): ToolRegistry {
       parameters: {
         type: 'object', properties: {
           title: { type: 'string', minLength: 1 },
-          student_id: { type: 'integer', minimum: 1 },
+          student_id: { type: 'integer', minimum: 1, description: '学生数据库 ID 或学号' },
           owner: { type: 'string' }, scheduled_at: { type: 'string' },
           due_at: { type: 'string' }, priority: { type: 'string', enum: ['普通', '重要', '紧急'] },
           notes: { type: 'string' },
@@ -990,6 +1003,121 @@ export function buildRegistry(): ToolRegistry {
         }, required: ['student_id', 'amount', 'reason'], additionalProperties: false,
       },
       handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'update_task',
+      description: '提出修改一条待办的操作预览，可修改内容、时间、优先级或状态；完成/取消时必须填写结果。用户确认后才会执行。',
+      parameters: {
+        type: 'object', properties: {
+          task_id: { type: 'integer', minimum: 1, description: '待办数据库 ID' },
+          title: { type: 'string' }, owner: { type: 'string' }, priority: { type: 'string', enum: ['普通', '重要', '紧急'] },
+          scheduled_at: { type: 'string' }, due_at: { type: 'string' },
+          status: { type: 'string', enum: ['待处理', '处理中', '待复查', '已完成', '已取消'] },
+          notes: { type: 'string' }, result: { type: 'string' },
+        }, required: ['task_id'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_event',
+      description: '提出记录单个学生事件的操作预览，例如异常情况、家长反馈或成长记录；用户确认后才会写入。',
+      parameters: {
+        type: 'object', properties: {
+          student_id: { type: 'integer', minimum: 1, description: '学生数据库 ID 或学号' },
+          occurred_at: { type: 'string', minLength: 1, description: '发生时间' },
+          event_type: { type: 'string', minLength: 1, description: '事件类型' },
+          description: { type: 'string', minLength: 1, description: '事件描述' },
+          handling: { type: 'string' }, parent_contacted: { type: 'boolean' },
+          needs_followup: { type: 'boolean' }, followup_due: { type: 'string' },
+          status: { type: 'string', enum: ['待处理', '处理中', '待复查', '已完成', '无需处理'] },
+        }, required: ['student_id', 'occurred_at', 'event_type', 'description'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_focus',
+      description: '提出为单个学生创建重点关注事项的操作预览，包含原因和跟进计划；用户确认后才会写入。',
+      parameters: {
+        type: 'object', properties: {
+          student_id: { type: 'integer', minimum: 1, description: '学生数据库 ID 或学号' },
+          topic: { type: 'string', minLength: 1, description: '关注主题' },
+          reason: { type: 'string', minLength: 1, description: '关注原因' },
+          evidence: { type: 'string' }, action_plan: { type: 'string' },
+          status: { type: 'string', enum: ['待确认', '跟进中', '情况改善', '已结束'] },
+          next_review_at: { type: 'string' },
+        }, required: ['student_id', 'topic', 'reason'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_meeting',
+      description: '提出记录一次班会的操作预览，可包含主题、内容、结论和行动项；用户确认后才会写入。',
+      parameters: {
+        type: 'object', properties: {
+          held_on: { type: 'string', description: '班会日期 YYYY-MM-DD' },
+          topic: { type: 'string', minLength: 1 },
+          format: { type: 'string', enum: ['主题班会', '事务通知', '团队活动', '安全教育', '心理健康'] },
+          content: { type: 'string' }, participation: { type: 'string' }, conclusion: { type: 'string' },
+          status: { type: 'string', enum: ['已记录', '待复盘'] },
+          student_ids: { type: 'array', items: { type: 'integer', minimum: 1 }, description: '参与学生 ID 或学号，可为空' },
+          action_items: { type: 'array', items: { type: 'object' }, description: '行动项数组，可包含 title、owner、due_at、priority' },
+          followup_title: { type: 'string' }, followup_due: { type: 'string' },
+        }, required: ['held_on', 'topic'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_activity',
+      description: '提出记录一次班级活动的操作预览，可包含参与学生、预算、结果和复盘；用户确认后才会写入。',
+      parameters: {
+        type: 'object', properties: {
+          occurred_on: { type: 'string', description: '活动日期 YYYY-MM-DD' },
+          name: { type: 'string', minLength: 1 },
+          activity_type: { type: 'string', enum: ['文体活动', '社会实践', '志愿服务', '学科竞赛', '节日庆祝', '其他'] },
+          budget: { type: 'number', minimum: 0 }, participant_count: { type: 'integer', minimum: 0 },
+          summary: { type: 'string' }, result: { type: 'string' }, retrospective: { type: 'string' },
+          status: { type: 'string', enum: ['计划中', '进行中', '已完成', '已复盘'] },
+          student_ids: { type: 'array', items: { type: 'integer', minimum: 1 }, description: '参与学生 ID 或学号，可为空' },
+          followup_title: { type: 'string' }, followup_due: { type: 'string' },
+        }, required: ['occurred_on', 'name'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_diary',
+      description: '提出记录一条班主任日志的操作预览；用户确认后才会写入本地工作台。',
+      parameters: {
+        type: 'object', properties: {
+          diary_date: { type: 'string', description: '日志日期 YYYY-MM-DD' }, weather: { type: 'string' },
+          work: { type: 'string' }, event: { type: 'string' }, reflection: { type: 'string' }, todo: { type: 'string' },
+        }, required: ['diary_date'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_knowledge_note',
+      description: '提出在本地知识库创建 Markdown 笔记的操作预览；用户确认后才会创建文件。',
+      parameters: {
+        type: 'object', properties: {
+          title: { type: 'string', minLength: 1 }, category: { type: 'string' },
+          template: { type: 'string', enum: ['备课笔记', '考研知识点', '读书笔记', '学生档案', '班会记录', '班主任日志'] },
+          content: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } },
+        }, required: ['title'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'create_class_task',
+      description: '提出为明确学生范围创建班级材料收集任务的操作预览。此操作会为每名学生生成收集项，用户确认后才会写入；微信端不可用。',
+      parameters: {
+        type: 'object', properties: {
+          title: { type: 'string', minLength: 1 },
+          student_ids: { type: 'array', items: { type: 'integer', minimum: 1 }, minItems: 1, description: '学生 ID 或学号' },
+          task_type: { type: 'string' }, start_at: { type: 'string' }, due_at: { type: 'string' },
+          material_name: { type: 'string' }, description: { type: 'string' }, template_id: { type: 'integer', minimum: 1 },
+        }, required: ['title', 'student_ids'], additionalProperties: false,
+      },
+      handler: () => ({}), readOnly: false, writeAction: true, allowChannels: NON_WECHAT_CHANNELS,
     }),
   );
   return new ToolRegistry(tools);

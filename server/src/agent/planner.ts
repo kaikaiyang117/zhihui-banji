@@ -106,6 +106,7 @@ export type UsageRecorder = (
 export class AgentPlanner {
   readonly model_client: OpenAICompatibleClient;
   readonly usage_recorder: UsageRecorder | null;
+  lastReasoningContent = '';
 
   constructor(model_client: OpenAICompatibleClient, usage_recorder: UsageRecorder | null = null) {
     this.model_client = model_client;
@@ -129,6 +130,7 @@ export class AgentPlanner {
     if (this.usage_recorder) {
       this.usage_recorder(response, started, 'success', '');
     }
+    this.lastReasoningContent = response.reasoning_content ?? '';
     return AgentPlanner._from_response(response, registry);
   }
 
@@ -159,6 +161,7 @@ export class AgentPlanner {
     if (this.usage_recorder) {
       this.usage_recorder(response, started, 'success', '');
     }
+    this.lastReasoningContent = response.reasoning_content ?? '';
     return AgentPlanner._from_response(response, registry);
   }
 
@@ -238,7 +241,15 @@ export function build_rule_plan(text: string, registry: ToolRegistry): AgentPlan
   if (['沟通', '家长联系', '家校'].some((term) => text.includes(term))) {
     target_tools.push('communications_list');
   }
-  if (target_tools.length === 0) {
+  if (target_tools.length === 0 && ['最近', '近期', '情况'].some((term) => text.includes(term))) {
+    for (const tool of [
+      'student_get_profile', 'student_get_timeline', 'attendance_summary',
+      'tasks_list', 'communications_list',
+    ]) {
+      if (registry.get(tool)) target_tools.push(tool);
+    }
+  }
+  if (target_tools.length === 0 && registry.get('student_get_profile')) {
     target_tools.push('student_get_profile');
   }
   const steps: Array<Record<string, unknown>> = [{
@@ -246,11 +257,11 @@ export function build_rule_plan(text: string, registry: ToolRegistry): AgentPlan
     tool: 'students_search',
     arguments: { keyword, limit: 20 },
   }];
-  for (const [index, target_tool] of target_tools.entries()) {
+  for (const [index, target_tool] of target_tools.slice(0, MAX_PLAN_STEPS - 1).entries()) {
     steps.push({
       id: `query_student_data_${index + 1}`,
       tool: target_tool,
-      arguments: { student_id: '$search_student.students[0].id' },
+      arguments: { student_id: '$search_student.students[0].student_id' },
       depends_on: ['search_student'],
       condition: 'exactly_one_student',
     });
@@ -262,10 +273,10 @@ export function build_rule_plan(text: string, registry: ToolRegistry): AgentPlan
 }
 
 function _is_student_lookup(text: string): boolean {
+  const keyword = _extract_student_keyword(text);
   return (
-    (['学生', '同学', '学号'].some((term) => text.includes(term))
-      || /(?<!\d)\d{2,}(?!\d)/.test(text))
-    && ['查看', '查询', '了解', '详细', '档案', '信息', '成绩', '考勤', '待办', '沟通']
+    Boolean(keyword)
+    && ['查看', '查询', '了解', '详细', '档案', '信息', '成绩', '考勤', '待办', '沟通', '最近', '近期', '情况']
       .some((term) => text.includes(term))
   );
 }
@@ -301,6 +312,21 @@ export function normalize_query_text(text: string): string {
 }
 
 function _extract_student_keyword(text: string): string {
+  const direct = /(?:查看|查询|了解)(?:一下)?(.+)$/.exec(text)?.[1] ?? '';
+  const suffixes = [
+    '最近的情况', '近期的情况', '的最近情况', '的近期情况', '最近情况', '近期情况',
+    '的基本信息', '基本信息', '的详细信息', '详细信息',
+    '的档案', '档案', '的成绩', '成绩', '的考勤', '考勤',
+    '的待办', '待办', '的任务', '任务', '的沟通记录', '沟通记录', '的情况', '情况',
+  ];
+  for (const suffix of suffixes) {
+    if (!direct.endsWith(suffix)) continue;
+    const candidate = direct.slice(0, -suffix.length).replace(/(?:学生|同学)$/, '');
+    if (_looks_like_student_name(candidate)) return candidate;
+  }
+  const bareCandidate = direct.replace(/(?:学生|同学)$/, '');
+  if (_looks_like_student_name(bareCandidate)) return bareCandidate;
+
   const token = /([0-9A-Za-z_-]+|[\u4e00-\u9fff]{2,8})/;
   const patterns = [
     new RegExp(`(?:学生|同学|学号)\\s*${token.source}`),
@@ -322,6 +348,11 @@ function _extract_student_keyword(text: string): string {
     }
   }
   return '';
+}
+
+function _looks_like_student_name(value: string): boolean {
+  if (!/^[\u4e00-\u9fff]{2,4}$/.test(value)) return false;
+  return !new Set(['班级', '本班', '全班', '学生', '同学', '所有学生', '每个学生']).has(value);
 }
 
 function _planner_prompt(registry: ToolRegistry): string {
@@ -349,7 +380,8 @@ function _planner_prompt(registry: ToolRegistry): string {
   };
   return '你是“凯凯小兵”的任务规划器，不直接回答用户。\n'
     + '请把用户请求拆成最多 6 个只读工具步骤，并且只输出 JSON，不要 Markdown、解释或思维过程。\n'
-    + '步骤必须按依赖顺序排列；涉及具体学生时先 students_search，再使用搜索结果中的 id。\n'
+    + '步骤必须按依赖顺序排列；涉及具体学生时先 students_search，再使用搜索结果中的 student_id。\n'
+    + 'students_search 的学生标识字段是 students[].student_id（同时兼容 id）；后续步骤优先引用 $搜索步骤.students[0].student_id。\n'
     + '涉及“所有学生”“每个学生”“学生家长”“全班分布”或需要比较多名学生时，优先使用 students_query 或 students_aggregate，不要逐个调用 student_get_profile。\n'
     + '如果搜索结果不唯一，依赖学生 id 的步骤使用 condition="exactly_one_student"。\n'
     + '工具结果引用格式为 $步骤id.结果字段[0].字段名。\n'

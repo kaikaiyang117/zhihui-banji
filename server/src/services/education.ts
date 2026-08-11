@@ -181,6 +181,10 @@ export function listMeetings(options: {
   return rows.map((row) => decorateMeeting(row, { conn }));
 }
 
+export function getMeeting(meetingId: number, options: { conn?: Database } = {}): Record<string, unknown> {
+  return decorateMeeting(meetingRow(meetingId, options), options);
+}
+
 export function listActivities(options: {
   query?: string; dateFrom?: string; dateTo?: string; conn?: Database;
 } = {}): Array<Record<string, unknown>> {
@@ -207,6 +211,10 @@ export function listActivities(options: {
     + ' ORDER BY a.occurred_on DESC, a.id DESC',
   ).all(...params) as Array<Record<string, unknown>>;
   return rows.map((row) => decorateActivity(row, { conn }));
+}
+
+export function getActivity(activityId: number, options: { conn?: Database } = {}): Record<string, unknown> {
+  return decorateActivity(activityRow(activityId, options), options);
 }
 
 export function listDiary(options: {
@@ -246,6 +254,12 @@ export function listDiary(options: {
     result.push(item);
   }
   return result;
+}
+
+export function getDiary(diaryId: number, options: { conn?: Database } = {}): Record<string, unknown> {
+  const item = listDiary({ conn: options.conn }).find((entry) => Number(entry.id) === Number(diaryId));
+  if (!item) throw new EducationError('日志记录不存在');
+  return item;
 }
 
 export function listTemplates(options: { conn?: Database } = {}): Record<string, unknown> {

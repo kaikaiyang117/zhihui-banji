@@ -81,7 +81,7 @@ export class AgentRunner {
     const error = result.error as Record<string, unknown> | undefined;
     if (!error) return result;
     failureCounts[key] = 1;
-    if (!error.autoRetry) return result;
+    if (!Boolean(error.autoRetry ?? error.auto_retry)) return result;
     const retryResult = AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
     if (!retryResult.error) return retryResult;
     (retryResult.error as Record<string, unknown>).retry_attempts = 1;
@@ -106,8 +106,9 @@ export class AgentRunner {
   }
 
   /** 组装 graph runtime 节点。 */
-  private runtime(registry: ToolRegistry, tools: Array<Record<string, unknown>>): GraphRuntime {
+  private runtime(registry: ToolRegistry): GraphRuntime {
     const self = this;
+    const planReasoningBySession = new Map<string, string>();
     const emitFor = (config: GraphNodeConfig): EmitFn =>
       (payload) => config.writer?.(payload);
 
@@ -128,6 +129,17 @@ export class AgentRunner {
       emit(payload);
     };
 
+    const emitToolEvent = (
+      emit: EmitFn, id: string, name: string, status: string,
+      input: Record<string, unknown>, output?: Record<string, unknown>,
+    ): void => {
+      const payload: Record<string, unknown> = {
+        type: 'tool', id, name, status, input,
+      };
+      if (output !== undefined) payload.output = output;
+      emit(payload);
+    };
+
     const runSteps = (
       emit: EmitFn, state: GraphState, plan: AgentPlan,
       failureCounts: Record<string, number>,
@@ -136,7 +148,7 @@ export class AgentRunner {
       const steps: GraphState['executed'] = [];
       for (const step of plan.steps) {
         if (!conditionMatches(step, results)) {
-          emitPlanStep(emit, step, 'skipped', '条件未满足');
+          emitPlanStep(emit, step, 'skipped', conditionFailureMessage(step, results));
           continue;
         }
         emitPlanStep(emit, step, 'running');
@@ -144,6 +156,7 @@ export class AgentRunner {
         let result: Record<string, unknown>;
         try {
           argumentsValue = resolveReferences(step.arguments, results) as Record<string, unknown>;
+          emitToolEvent(emit, step.id, step.tool, 'running', argumentsValue);
           result = self.executeToolWithRetry(
             step.tool, JSON.stringify(argumentsValue), state.channel, state.actorId,
             failureCounts, state.sessionId);
@@ -155,6 +168,7 @@ export class AgentRunner {
         results[step.id] = result;
         steps.push({ step, arguments: argumentsValue, result });
         const error = result.error as Record<string, unknown> | undefined;
+        emitToolEvent(emit, step.id, step.tool, error ? 'error' : 'completed', argumentsValue, result);
         emitPlanStep(emit, step, error ? 'error' : 'completed', String(error?.message ?? ''));
       }
       return steps;
@@ -162,7 +176,9 @@ export class AgentRunner {
 
     return {
       loadContext: (state) => {
-        const sessionMessages = self.sessionStore.load(state.sessionId);
+        const sessionMessages = self.sessionStore.loadOwned(
+          state.sessionId, state.actorId, state.channel);
+        const resolvedReference = resolveFollowupStudentReference(state.text, sessionMessages);
         const systemMessage = { role: 'system', content: systemPrompt() };
         let messages: Array<Record<string, unknown>>;
         if (!sessionMessages.length || String(sessionMessages[0]?.role) !== 'system') {
@@ -170,32 +186,53 @@ export class AgentRunner {
         } else {
           messages = [systemMessage, ...sessionMessages.slice(1)];
         }
+        if (resolvedReference.reference) {
+          messages.push({
+            role: 'system',
+            content: `本轮请求中的“这个学生”已解析为上一轮提到的学生：${resolvedReference.reference}。请沿用这个学生，不要重新猜测其他学生。`,
+            context_summary: true,
+            student_context_reference: true,
+          });
+        }
         messages.push({ role: 'user', content: state.text });
-        return { messages, directTool: inferDirectTool(state.text) };
+        return {
+          messages,
+          text: resolvedReference.text,
+          directTool: inferDirectTool(resolvedReference.text),
+        };
       },
       route: (state) => (state.directTool ? 'direct' : (shouldAttemptModelPlan(state.text) ? 'plan' : 'model')),
-      applyDirect: (state) => {
+      applyDirect: (state, config) => {
         const [toolName, toolArguments, toolCallId] = state.directTool!;
+        const emit = emitFor(config);
+        const input = parseToolInput(toolArguments);
+        emitToolEvent(emit, toolCallId, toolName, 'running', input);
         const messages = [...state.messages];
         messages.push({
-          role: 'assistant', content: null,
+          role: 'assistant', content: null, reasoning_content: '',
           tool_calls: [{ id: toolCallId, type: 'function', function: { name: toolName, arguments: toolArguments } }],
         });
         const result = AgentRunner._callTool(toolName, toolArguments, state.channel, state.actorId, state.sessionId);
+        emitToolEvent(emit, toolCallId, toolName, result.error ? 'error' : 'completed', input, result);
         messages.push({ role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(result) });
         return { messages };
       },
       createPlan: async (state) => {
-        let plan = build_rule_plan(state.text, registry);
+        const availableRegistry = registry.forChannel(state.channel);
+        let plan = build_rule_plan(state.text, availableRegistry);
+        planReasoningBySession.set(state.sessionId, '');
         if (!plan && shouldAttemptModelPlan(state.text)) {
           try {
-            plan = await self.planner(state).create(state.text, registry, recentContext(state.messages));
+            const planner = self.planner(state);
+            plan = await planner.create(
+              state.text, availableRegistry, recentContext(state.messages));
+            planReasoningBySession.set(state.sessionId, planner.lastReasoningContent);
           } catch {
             plan = null;
           }
         }
         if (!plan) return { plan: null };
-        return { plan: validatePlanForRequest(plan, state.text, registry) };
+        return { plan: validatePlanForRequest(plan, state.text, availableRegistry) };
       },
       executePlan: async (state, config) => {
         const emit = emitFor(config);
@@ -208,16 +245,19 @@ export class AgentRunner {
         if (hasRetryExhausted(executed)) {
           return { executed, finalAnswer: toolFailureMessage(), halted: true };
         }
-        const recovery = recoveryPlanForEmptyBatch(state.text, state.plan, executed, registry);
+        const availableRegistry = registry.forChannel(state.channel);
+        const recovery = recoveryPlanForEmptyBatch(state.text, state.plan, executed, availableRegistry);
         if (recovery) {
           emitPlanEvent(emit, recovery, 'replanned');
           executed = runSteps(emit, state, recovery, failureCounts);
         }
         if (shouldReplan(executed) && replanCount < 1) {
           try {
-            const replanned = await self.planner(state).create(
-              state.text, registry,
+            const planner = self.planner(state);
+            const replanned = await planner.create(
+              state.text, availableRegistry,
               recentContext(state.messages) + '\n' + planFailureContext(executed));
+            planReasoningBySession.set(state.sessionId, planner.lastReasoningContent);
             replanCount += 1;
             emitPlanEvent(emit, replanned, 'replanned');
             executed = runSteps(emit, state, replanned, failureCounts);
@@ -233,12 +273,18 @@ export class AgentRunner {
       planFinal: async (state, config) => {
         const emit = emitFor(config);
         if (state.halted) return {};
+        const failureAnswer = planFailureAnswer(state.plan, state.executed);
+        if (failureAnswer) {
+          emitDelta(emit, failureAnswer);
+          return { finalAnswer: failureAnswer };
+        }
         const started = Date.now();
         let response: ModelResponse | null = null;
         let contentParts: string[] = [];
         try {
           for await (const event of self.modelClient.iter_complete(
-            planFinalMessages(state.messages, state.executed))) {
+            planFinalMessages(
+              state.messages, state.executed, planReasoningBySession.get(state.sessionId) ?? ''))) {
             if (event.content) {
               contentParts.push(event.content);
               emitDelta(emit, event.content);
@@ -253,7 +299,9 @@ export class AgentRunner {
         self.recordUsage(state.sessionId, state.channel, state.actorId, 'success', started, response);
         if (!response) throw new Error('模型流式响应缺少最终结果');
         if (response.tool_calls && response.tool_calls.length > 0) {
-          return { finalAnswer: fallbackPlanAnswer(state.executed) };
+          return {
+            finalAnswer: contentParts.join('').trim() || fallbackPlanAnswer(state.executed),
+          };
         }
         const answer = (response.content ?? '').trim()
           || contentParts.join('').trim() || fallbackPlanAnswer(state.executed);
@@ -269,7 +317,8 @@ export class AgentRunner {
           const started = Date.now();
           let response: ModelResponse | null = null;
           try {
-            for await (const event of self.modelClient.iter_complete(messages, tools)) {
+            for await (const event of self.modelClient.iter_complete(
+              messages, registry.modelTools(state.channel))) {
               if (event.content) emitDelta(emit, event.content);
               if (event.response) response = event.response;
             }
@@ -292,9 +341,14 @@ export class AgentRunner {
           messages.push(assistantToolMessage(response));
           let haltMessage = '';
           for (const call of response.tool_calls) {
+            emitToolEvent(emit, call.id || `tool-${turn}`, call.name, 'running', parseToolInput(call.arguments));
             const result = self.executeToolWithRetry(
               call.name, call.arguments, state.channel, state.actorId, failureCounts, state.sessionId);
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+            emitToolEvent(
+              emit, call.id || `tool-${turn}`, call.name,
+              result.error ? 'error' : 'completed', parseToolInput(call.arguments), result,
+            );
             if ((result.error as Record<string, unknown> | undefined)?.code === 'retry_exhausted') {
               haltMessage = toolFailureMessage();
               break;
@@ -318,7 +372,9 @@ export class AgentRunner {
         if (state.directTool || state.plan) {
           messages.push({ role: 'assistant', content: state.finalAnswer });
         }
-        self.sessionStore.save(state.sessionId, messages);
+        self.sessionStore.save(state.sessionId, messages, {
+          actorId: state.actorId, channel: state.channel,
+        });
         return { messages };
       },
     };
@@ -330,7 +386,7 @@ export class AgentRunner {
     close: () => void;
   }> {
     const registry = buildRegistry();
-    const runtime = this.runtime(registry, registry.modelTools());
+    const runtime = this.runtime(registry);
     return (async () => {
       const dataDir = getDb().paths.dataDir;
       const checkpointsPath = path.join(dataDir, 'agent-checkpoints.db');
@@ -378,7 +434,7 @@ export class AgentRunner {
   }
 
   async *chatStream(sessionId: string, text: string, options: { channel?: string; actorId?: string } = {}):
-    AsyncGenerator<Record<string, string>> {
+    AsyncGenerator<Record<string, unknown>> {
     const channel = options.channel ?? 'local';
     const actorId = options.actorId ?? '';
     const input = String(text ?? '').trim();
@@ -400,8 +456,8 @@ export class AgentRunner {
         if (payload.type === 'delta') {
           finalAnswer += String(payload.content ?? '');
           yield { type: 'delta', content: String(payload.content ?? '') };
-        } else if (payload.type === 'plan' || payload.type === 'plan_step') {
-          yield payload as unknown as Record<string, string>;
+        } else if (payload.type === 'plan' || payload.type === 'plan_step' || payload.type === 'tool') {
+          yield payload as Record<string, unknown>;
         }
       }
       if (!finalAnswer) {
@@ -434,6 +490,17 @@ function parseToolArguments(rawArguments: string): unknown {
     } catch {
       throw new Error('工具参数不是有效 JSON');
     }
+  }
+}
+
+function parseToolInput(rawArguments: string): Record<string, unknown> {
+  try {
+    const value = parseToolArguments(rawArguments);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
   }
 }
 
@@ -484,6 +551,55 @@ function recentContext(messages: Array<Record<string, unknown>>): string {
   return context.join('\n');
 }
 
+function resolveFollowupStudentReference(
+  text: string, messages: Array<Record<string, unknown>>,
+): { text: string; reference: string } {
+  const markerPattern = /(?:这个学生|该学生|此学生|这名学生|这个同学|该同学)/;
+  if (!markerPattern.test(text)) return { text, reference: '' };
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'user'
+      && !(message.role === 'system' && message.context_summary && !message.student_context_reference)) {
+      continue;
+    }
+    const reference = extractStudentReference(String(message.content ?? ''));
+    if (!reference) continue;
+    return {
+      text: text.replace(/(?:这个学生|该学生|此学生|这名学生|这个同学|该同学)/g, reference),
+      reference,
+    };
+  }
+  return { text, reference: '' };
+}
+
+function extractStudentReference(text: string): string {
+  const explicitId = /(?:学号|学生编号|学生学号|编号)\s*[:：]?\s*([0-9A-Za-z_-]+)/i.exec(text)?.[1] ?? '';
+  if (isStudentReference(explicitId)) return explicitId;
+
+  const candidates = [
+    /(?:查看|查询|了解)(?:一下|下)?\s*(?:学生|同学)?\s*([0-9A-Za-z_-]+|[\u4e00-\u9fff]{2,4})/i,
+    /(?:学生|同学)\s*([0-9A-Za-z_-]+|[\u4e00-\u9fff]{2,4})/i,
+  ];
+  for (const pattern of candidates) {
+    const candidate = pattern.exec(text)?.[1] ?? '';
+    if (isStudentReference(candidate)) return candidate;
+  }
+  return '';
+}
+
+function isStudentReference(value: string): boolean {
+  const candidate = value.trim();
+  if (!candidate || [
+    '这个', '那个', '该', '学生', '同学', '信息', '情况', '最近', '近期', '考勤', '出勤',
+    '迟到', '请假', '缺勤', '成绩', '考试', '待办', '任务', '沟通', '档案', '表现',
+  ].includes(candidate)) {
+    return false;
+  }
+  if (/^(19|20)\d{2}$/.test(candidate)) return false;
+  return /^[0-9A-Za-z_-]+$/.test(candidate) || /^[\u4e00-\u9fff]{2,4}$/.test(candidate);
+}
+
 function conditionMatches(step: PlanStep, results: Record<string, Record<string, unknown>>): boolean {
   if (!step.condition) return true;
   if (!step.depends_on || step.depends_on.length === 0) return false;
@@ -493,6 +609,16 @@ function conditionMatches(step: PlanStep, results: Record<string, Record<string,
   if (step.condition === 'exactly_one_student') return students.length === 1;
   if (step.condition === 'student_found') return students.length > 0;
   return false;
+}
+
+function conditionFailureMessage(step: PlanStep, results: Record<string, Record<string, unknown>>): string {
+  const source = step.depends_on?.[0] ? results[step.depends_on[0]] : undefined;
+  const students = source?.students;
+  if (!Array.isArray(students) || students.length === 0) return '未找到匹配的学生';
+  if (step.condition === 'exactly_one_student' && students.length > 1) {
+    return '匹配到多名学生，无法确定具体对象';
+  }
+  return '前置条件未满足';
 }
 
 function resolveReferences(value: unknown, results: Record<string, Record<string, unknown>>): unknown {
@@ -514,8 +640,16 @@ function resolveReferences(value: unknown, results: Record<string, Record<string
       const index = Number(part);
       if (index >= current.length) throw new Error(`计划引用超出范围：${value}`);
       current = current[index];
-    } else if (typeof current === 'object' && current !== null && part in (current as Record<string, unknown>)) {
-      current = (current as Record<string, unknown>)[part];
+    } else if (typeof current === 'object' && current !== null) {
+      const record = current as Record<string, unknown>;
+      const alias = part === 'student_id' ? 'id' : (part === 'id' ? 'student_id' : '');
+      if (part in record) {
+        current = record[part];
+      } else if (alias && alias in record) {
+        current = record[alias];
+      } else {
+        throw new Error(`计划引用路径不存在：${value}`);
+      }
     } else {
       throw new Error(`计划引用路径不存在：${value}`);
     }
@@ -531,7 +665,7 @@ function planToolMessages(executed: GraphState['executed']): Array<Record<string
     function: { name: item.step.tool, arguments: JSON.stringify(item.arguments) },
   }));
   const messages: Array<Record<string, unknown>> = [{
-    role: 'assistant', content: '已按计划执行查询步骤。', tool_calls: calls,
+    role: 'assistant', content: '已按计划执行查询步骤。', reasoning_content: '', tool_calls: calls,
   }];
   for (const item of executed) {
     messages.push({
@@ -542,8 +676,14 @@ function planToolMessages(executed: GraphState['executed']): Array<Record<string
   return messages;
 }
 
-function planFinalMessages(messages: Array<Record<string, unknown>>, executed: GraphState['executed']): Array<Record<string, unknown>> {
-  if (!messages.length) return planToolMessages(executed);
+function planFinalMessages(
+  messages: Array<Record<string, unknown>>,
+  executed: GraphState['executed'],
+  reasoningContent: string,
+): Array<Record<string, unknown>> {
+  const toolMessages = planToolMessages(executed);
+  if (toolMessages.length > 0) toolMessages[0].reasoning_content = reasoningContent;
+  if (!messages.length) return toolMessages;
   return [
     messages[0],
     {
@@ -551,7 +691,7 @@ function planFinalMessages(messages: Array<Record<string, unknown>>, executed: G
       content: '本轮查询计划已经执行完成。请只根据工具结果生成最终中文回答，不要再次调用工具，不要输出 DSML、XML 或工具协议标记。',
     },
     ...messages.slice(1),
-    ...planToolMessages(executed),
+    ...toolMessages,
   ];
 }
 
@@ -591,7 +731,10 @@ function hasRetryExhausted(executed: GraphState['executed']): boolean {
 }
 
 function shouldReplan(executed: GraphState['executed']): boolean {
-  const codes = new Set(['plan_error', 'invalid_arguments', 'execution_error']);
+  const codes = new Set([
+    'plan_error', 'invalid_arguments', 'execution_error', 'execution_failed',
+    'tool_error', 'unknown_tool',
+  ]);
   return executed.some((item) => {
     const error = item.result.error as Record<string, unknown> | undefined;
     return error && codes.has(String(error.code));
@@ -613,7 +756,7 @@ function fallbackPlanAnswer(executed: GraphState['executed']): string {
   if (!executed.length) return '没有找到可执行的查询步骤。';
   for (const item of executed) {
     const result = item.result;
-    if ('students' in result) {
+    if (item.step.tool === 'students_search' && 'students' in result) {
       const students = (result as { students?: Array<Record<string, unknown>> }).students;
       if (!students || !students.length) return '没有找到匹配的学生。';
       if (students.length > 1) {
@@ -626,6 +769,43 @@ function fallbackPlanAnswer(executed: GraphState['executed']): string {
   return '查询已完成，但模型没有返回可显示的回答。';
 }
 
+function planFailureAnswer(
+  plan: AgentPlan | null, executed: GraphState['executed'],
+): string {
+  for (const item of executed) {
+    const error = item.result.error as Record<string, unknown> | undefined;
+    if (error) {
+      const message = String(error.message ?? '').trim();
+      if (item.step.tool === 'students_search') {
+        return message
+          ? `搜索学生时遇到问题：${message}。请补充准确的学号或姓名。`
+          : '搜索学生时遇到问题，请补充准确的学号或姓名。';
+      }
+      return message
+        ? `${stepLabel(item.step.tool)}时遇到问题：${message}。请检查查询条件后重试。`
+        : `${stepLabel(item.step.tool)}时遇到问题，请检查查询条件后重试。`;
+    }
+    if (item.step.tool !== 'students_search') continue;
+    const students = item.result.students;
+    if (!Array.isArray(students) || students.length === 0) {
+      return '没有找到匹配的学生。请提供准确的学号或姓名，我再继续查询。';
+    }
+    if (students.length > 1) {
+      const names = students.slice(0, 5)
+        .map((row) => String(row.姓名 ?? row.学号 ?? '')).filter(Boolean).join('、');
+      return names
+        ? `找到多名匹配学生：${names}。请提供准确的学号或姓名。`
+        : '找到多名匹配学生，请提供准确的学号或姓名。';
+    }
+  }
+
+  if (plan && executed.length < plan.steps.length
+    && plan.steps.some((step) => step.condition && !executed.some((item) => item.step.id === step.id))) {
+    return '没有找到唯一匹配的学生，因此未继续查询。请提供准确的学号或姓名。';
+  }
+  return '';
+}
+
 function toolFailureMessage(): string {
   return '凯凯小兵尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。';
 }
@@ -634,6 +814,7 @@ function assistantToolMessage(response: ModelResponse): Record<string, unknown> 
   const message: Record<string, unknown> = {
     role: 'assistant',
     content: response.content ?? null,
+    reasoning_content: response.reasoning_content ?? '',
     tool_calls: (response.tool_calls ?? []).map((call) => ({
       id: call.id, type: 'function',
       function: { name: call.name, arguments: call.arguments },

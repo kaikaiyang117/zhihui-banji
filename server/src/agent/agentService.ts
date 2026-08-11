@@ -11,6 +11,14 @@ const WRITE_TOOLS: Record<string, string> = {
   record_communication: '记录家校沟通',
   save_attendance: '保存考勤',
   record_points: '记录行为积分',
+  update_task: '修改待办',
+  create_event: '记录学生事件',
+  create_focus: '创建重点关注',
+  create_meeting: '记录班会',
+  create_activity: '记录班级活动',
+  create_diary: '记录班主任日志',
+  create_knowledge_note: '创建知识库笔记',
+  create_class_task: '创建班级任务',
 };
 const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> = {
   create_task: [
@@ -29,6 +37,41 @@ const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> =
   record_points: [
     new Set(['student_id', 'amount', 'reason']),
     new Set(['student_id', 'amount', 'occurred_at', 'category', 'reason']),
+  ],
+  update_task: [
+    new Set(['task_id']),
+    new Set(['task_id', 'title', 'owner', 'priority', 'scheduled_at', 'due_at', 'status', 'notes', 'result']),
+  ],
+  create_event: [
+    new Set(['student_id', 'occurred_at', 'event_type', 'description']),
+    new Set(['student_id', 'occurred_at', 'event_type', 'description', 'handling', 'parent_contacted',
+      'needs_followup', 'followup_due', 'status']),
+  ],
+  create_focus: [
+    new Set(['student_id', 'topic', 'reason']),
+    new Set(['student_id', 'topic', 'reason', 'evidence', 'action_plan', 'status', 'next_review_at']),
+  ],
+  create_meeting: [
+    new Set(['held_on', 'topic']),
+    new Set(['held_on', 'topic', 'format', 'content', 'participation', 'conclusion', 'status', 'student_ids',
+      'action_items', 'followup_title', 'followup_due']),
+  ],
+  create_activity: [
+    new Set(['occurred_on', 'name']),
+    new Set(['occurred_on', 'name', 'activity_type', 'budget', 'participant_count', 'summary', 'result',
+      'retrospective', 'status', 'student_ids', 'followup_title', 'followup_due']),
+  ],
+  create_diary: [
+    new Set(['diary_date']),
+    new Set(['diary_date', 'weather', 'work', 'event', 'reflection', 'todo']),
+  ],
+  create_knowledge_note: [
+    new Set(['title']),
+    new Set(['title', 'category', 'template', 'content', 'tags']),
+  ],
+  create_class_task: [
+    new Set(['title', 'student_ids']),
+    new Set(['title', 'student_ids', 'task_type', 'start_at', 'due_at', 'material_name', 'description', 'template_id']),
   ],
 };
 
@@ -52,7 +95,9 @@ export function isWriteTool(name: string): boolean {
 }
 
 export function actionsAllowed(channel: string, toolName: string): boolean {
-  return toolName in WRITE_TOOLS && ['web', 'wechat', 'local', 'lan'].includes(channel);
+  const definition = getRegistry().list().find((tool) => tool['name'] === toolName);
+  const channels = definition?.['allow_channels'];
+  return toolName in WRITE_TOOLS && Array.isArray(channels) && channels.includes(channel);
 }
 
 function nowStamp(): string {
@@ -154,8 +199,25 @@ export function previewText(toolName: string, args: Record<string, unknown>): st
   } else if (toolName === 'save_attendance') {
     detail = `记录 ${String(args['date'] ?? '')} ${String(args['scene'] ?? '常规到校')} 的学生 `
       + `${args['student_id']} 为“${String(args['status'] ?? '')}”`;
-  } else {
+  } else if (toolName === 'record_points') {
     detail = `为学生 ${args['student_id']} 记录 ${args['amount']} 分行为积分`;
+  } else if (toolName === 'update_task') {
+    const status = args['status'] ? `，状态改为“${args['status']}”` : '';
+    detail = `修改待办 ${args['task_id']}${status}`;
+  } else if (toolName === 'create_event') {
+    detail = `为学生 ${args['student_id']} 记录“${String(args['event_type'] ?? '')}”事件`;
+  } else if (toolName === 'create_focus') {
+    detail = `为学生 ${args['student_id']} 创建重点关注“${String(args['topic'] ?? '')}”`;
+  } else if (toolName === 'create_meeting') {
+    detail = `记录 ${String(args['held_on'] ?? '')} 的班会“${String(args['topic'] ?? '')}”`;
+  } else if (toolName === 'create_activity') {
+    detail = `记录 ${String(args['occurred_on'] ?? '')} 的班级活动“${String(args['name'] ?? '')}”`;
+  } else if (toolName === 'create_diary') {
+    detail = `记录 ${String(args['diary_date'] ?? '')} 的班主任日志`;
+  } else if (toolName === 'create_knowledge_note') {
+    detail = `在知识库创建笔记“${String(args['title'] ?? '')}”`;
+  } else {
+    detail = `为 ${Array.isArray(args['student_ids']) ? args['student_ids'].length : 0} 名学生创建班级任务“${String(args['title'] ?? '')}”`;
   }
   return `将要${detail}。这是一次${label}，回复“确认”执行，回复“取消”放弃。确认有效期 ${ACTION_TTL_MINUTES} 分钟。`;
 }
@@ -196,6 +258,17 @@ export function validateArguments(toolName: string, args: Record<string, unknown
   if (toolName === 'record_points') {
     const amount = actionFloat(args['amount']);
     if (amount === 0) throw new ActionError('积分分值必须是非零数字');
+  }
+  if (toolName === 'update_task' && Object.keys(args).length <= 1) {
+    throw new ActionError('修改待办至少需要提供一个修改字段');
+  }
+  if (['create_meeting', 'create_activity'].includes(toolName)
+    && 'student_ids' in args && !Array.isArray(args.student_ids)) {
+    throw new ActionError('student_ids必须是学生 ID 或学号数组');
+  }
+  if (toolName === 'create_class_task'
+    && (!Array.isArray(args.student_ids) || args.student_ids.length === 0)) {
+    throw new ActionError('班级任务至少需要选择一名学生');
   }
 }
 
@@ -337,19 +410,23 @@ export function recordModelUsage(options: {
     Number(options.durationMs ?? 0),
     Number(usage['prompt_tokens'] ?? 0),
     Number(usage['completion_tokens'] ?? 0),
-    options.errorMessage ?? '',
+    sanitizeErrorMessage(options.errorMessage ?? ''),
   );
 }
 
-export function listAudits(limit = 50): Array<Record<string, unknown>> {
+export function listAudits(
+  limit = 50, scope?: { channel: string; actorId: string },
+): Array<Record<string, unknown>> {
   const conn = getDb().connInstance;
   const rawLimit = Number(limit);
   const capped = Number.isFinite(rawLimit)
     ? Math.max(1, Math.min(Math.trunc(rawLimit), 200)) : 50;
+  const where = scope ? 'WHERE channel=? AND actor_id=? ' : '';
+  const params: unknown[] = scope ? [scope.channel, scope.actorId, capped] : [capped];
   const rows = conn.prepare(
     'SELECT id, channel, actor_id, tool_name, arguments, status, result_summary, created_at '
-    + 'FROM agent_audit ORDER BY id DESC LIMIT ?',
-  ).all(capped) as Array<Record<string, unknown>>;
+    + `FROM agent_audit ${where}ORDER BY id DESC LIMIT ?`,
+  ).all(...params) as Array<Record<string, unknown>>;
   return rows.map((row) => {
     const item = { ...row };
     try {
@@ -361,34 +438,37 @@ export function listAudits(limit = 50): Array<Record<string, unknown>> {
   });
 }
 
-export function usageStats(): Record<string, unknown> {
+export function usageStats(scope?: { channel: string; actorId: string }): Record<string, unknown> {
   const conn = getDb().connInstance;
+  const where = scope ? ' WHERE channel=? AND actor_id=?' : '';
+  const scopeParams: unknown[] = scope ? [scope.channel, scope.actorId] : [];
   const totals = conn.prepare(
     'SELECT COUNT(*) AS total, '
     + "SUM(CASE WHEN status IN ('success','pending','executed') THEN 1 ELSE 0 END) AS successful, "
     + "SUM(CASE WHEN status IN ('error','denied','retry_exhausted') THEN 1 ELSE 0 END) AS failed "
-    + 'FROM agent_audit',
-  ).get() as { total: number | null; successful: number | null; failed: number | null };
+    + `FROM agent_audit${where}`,
+  ).get(...scopeParams) as { total: number | null; successful: number | null; failed: number | null };
   const byTool = conn.prepare(
     'SELECT tool_name, COUNT(*) AS calls, '
     + "SUM(CASE WHEN status IN ('success','pending','executed') THEN 1 ELSE 0 END) AS successful, "
     + "SUM(CASE WHEN status IN ('error','denied','retry_exhausted') THEN 1 ELSE 0 END) AS failed "
-    + 'FROM agent_audit GROUP BY tool_name ORDER BY calls DESC, tool_name',
-  ).all() as Array<Record<string, unknown>>;
+    + `FROM agent_audit${where} GROUP BY tool_name ORDER BY calls DESC, tool_name`,
+  ).all(...scopeParams) as Array<Record<string, unknown>>;
   const byChannel = conn.prepare(
     'SELECT channel, COUNT(*) AS calls, '
     + "SUM(CASE WHEN status IN ('success','pending','executed') THEN 1 ELSE 0 END) AS successful, "
     + "SUM(CASE WHEN status IN ('error','denied','retry_exhausted') THEN 1 ELSE 0 END) AS failed "
-    + 'FROM agent_audit GROUP BY channel ORDER BY calls DESC, channel',
-  ).all() as Array<Record<string, unknown>>;
+    + `FROM agent_audit${where} GROUP BY channel ORDER BY calls DESC, channel`,
+  ).all(...scopeParams) as Array<Record<string, unknown>>;
+  const modelWhere = scope ? ' WHERE channel=? AND actor_id=?' : '';
   const modelUsage = conn.prepare(
     'SELECT model, COUNT(*) AS calls, '
     + "SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS successful, "
     + "SUM(CASE WHEN status<>'success' THEN 1 ELSE 0 END) AS failed, "
     + 'SUM(prompt_tokens) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens, '
     + 'AVG(duration_ms) AS average_duration_ms '
-    + 'FROM agent_model_usage GROUP BY model ORDER BY calls DESC, model',
-  ).all() as Array<Record<string, unknown>>;
+    + `FROM agent_model_usage${modelWhere} GROUP BY model ORDER BY calls DESC, model`,
+  ).all(...scopeParams) as Array<Record<string, unknown>>;
   const total = Number(totals.total ?? 0);
   const successful = Number(totals.successful ?? 0);
   const failed = Number(totals.failed ?? 0);
@@ -404,4 +484,10 @@ export function usageStats(): Record<string, unknown> {
     model_usage: modelUsage,
     note: '模型 Token 与耗时仅在模型响应提供 usage 且客户端记录时统计。',
   };
+}
+
+function sanitizeErrorMessage(message: string): string {
+  return String(message ?? '')
+    .replace(/(api[_ -]?key|authorization|bearer|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=***')
+    .slice(0, 300);
 }

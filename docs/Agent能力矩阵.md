@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-10）：12 个只读工具 + 4 个单条低风险确认写入工具；数据库 schema v24；成绩查询已按四川`3+1+2`合法组合确定适用科目，非法组合不生成完整总分或排名；校历查询已接入网页和微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-12）：12 个只读工具 + 12 个确认写入工具；数据库 schema v26；模型可见工具按服务端渠道权限过滤，网页会话按操作者隔离，写入工具执行后自动读取业务状态验证；成绩查询已按四川`3+1+2`合法组合确定适用科目，校历查询已接入网页和微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -19,6 +19,18 @@
 - 查询结果必须保留结构化计数和截断信息；批量查询因错误关键词返回空结果时，只允许自动纠正并重试一次。
 - Agent 的展示计划、工具结果和最终回答属于同一条执行轨迹；修复问题时优先定位轨迹中的第一个错误，并将该 bad case 加入回归样例集。
 - 只读工具优先使用批量查询、结构化返回和可验证结果；不得为了让模型“自己推理”而绕过服务端字段白名单和班级/学期范围。
+- 注册表可以登记全部工具，但每次模型调用和模型规划只接收当前渠道允许的工具；微信不接收 `student_get_profile` 的工具定义。
+- 网页会话由服务端创建为 `web:{用户摘要}:{会话}`，会话列表、读取、重命名和删除均按服务端操作者与渠道过滤；旧 `web:` 会话迁移后归属本机用户。
+- 上下文压缩以用户回合为边界，保留工具调用与工具结果的对应摘要，不持久化模型隐式思维链。
+- 后续问题中的“这个学生”等指代，优先解析为会话中最近明确提到的学号或姓名；学生搜索无结果、结果不唯一或工具失败时，计划步骤必须给出明确恢复提示，不把内部协议残片交给用户。
+- 确认写入工具在同一事务内执行并重新读取业务状态；验证失败则回滚并标记操作失败，不向用户声称已经完成。
+- 网页 Agent 的待确认写入在工具卡片中显示“确认写入 / 取消”按钮；按钮调用服务端确认接口，手动回复“确认 / 取消”作为不支持按钮渠道的兼容方式。
+
+## 模型接入配置
+
+- 模型连接配置使用本地 `agent-model.json` 的版本化配置档案存储，支持多个档案、当前档案切换、重命名和删除；旧版单配置会自动迁移为“默认配置”。
+- 配置档案中的 API Key 只在本机保存，普通配置读取接口只返回是否已配置及掩码；用户在本机配置页显式点击小眼睛后，才通过本机专用接口临时读取当前档案 Key。保存时 API Key 留空表示保留当前值，不会把空值覆盖到本地凭据。
+- 配置档案管理仅允许本机工作台页面访问，不作为网页 Agent 或微信 Agent 工具开放；当前 active 档案供共享 Agent 核心使用。
 
 ## 当前能力
 
@@ -42,6 +54,14 @@
 | 记录家校沟通 | `communications.create_record` | `record_communication` | 是 | 是 | 是 | 写入；预览后必须确认；隐藏敏感联系人字段 | 已接入 |
 | 保存单条考勤 | `attendance.save_daily` | `save_attendance` | 是 | 是 | 是 | 低风险写入；预览后必须确认；禁止批量 | 已接入 |
 | 记录行为积分 | `points.create_entry` | `record_points` | 是 | 是 | 是 | 低风险写入；预览后必须确认；单条流水可撤销 | 已接入 |
+| 修改/完成/取消待办 | `work_items.update_work_item` | `update_task` | 是 | 是 | 是 | 低风险写入；预览后必须确认；完成/取消必须填写结果 | 已接入 |
+| 记录学生事件 | `p0.create_event` | `create_event` | 是 | 是 | 是 | 单条写入；预览后必须确认；可联动生成跟进待办 | 已接入 |
+| 创建重点关注 | `p0.create_focus` | `create_focus` | 是 | 是 | 是 | 学生跟进写入；预览后必须确认；可联动生成复查待办 | 已接入 |
+| 记录班会 | `education.create_meeting` | `create_meeting` | 是 | 是 | 是 | 结构化记录；预览后必须确认；可生成行动项 | 已接入 |
+| 记录班级活动 | `education.create_activity` | `create_activity` | 是 | 是 | 是 | 结构化记录；预览后必须确认；可生成跟进待办 | 已接入 |
+| 记录班主任日志 | `education.create_diary` | `create_diary` | 是 | 是 | 是 | 本地日志写入；预览后必须确认 | 已接入 |
+| 创建知识库笔记 | `knowledge.create_note` | `create_knowledge_note` | 是 | 是 | 是 | 本地 Markdown 文件写入；预览后必须确认 | 已接入 |
+| 创建班级任务 | `class_tasks.create_task` | `create_class_task` | 是 | 是 | 否 | 为明确学生范围批量生成收集项；网页/本地预览后必须确认 | 已接入 |
 
 ## 工具参数摘要
 
@@ -50,7 +70,7 @@
 | 工具 | 必填参数 | 可选参数/筛选 | 备注 |
 |---|---|---|---|
 | `class_student_count` | 无 | 无 | 使用当前班级/学期上下文 |
-| `students_search` | 无 | `keyword`, `limit` | 只返回基础学生信息 |
+| `students_search` | 无 | `keyword`, `limit` | 只返回基础学生信息；学生标识统一返回 `student_id`，兼容旧字段 `id` |
 | `students_query` | 无 | `fields`, `keyword`, `gender`, `boarding_status`, `class_role`, `limit` | `fields` 最多 10 个；只返回字段白名单 |
 | `students_aggregate` | `group_by` | `keyword`, `gender`, `boarding_status`, `class_role`, `include_empty`, `include_students`, `limit` | 支持 `guardian_occupation` 等分组；服务端完成统计 |
 | `student_get_profile` | `student_id` | 无 | 网页可用；微信默认拒绝敏感档案 |
@@ -61,10 +81,18 @@
 | `tasks_list` | 无 | `status`, `student_id`, `limit` | 默认查询未关闭事项 |
 | `communications_list` | 无 | `status`, `student_id`, `limit` | 隐藏家长电话 |
 | `school_calendar_query` | 无 | `date_from`, `date_to`, `day_type`, `limit` | 使用当前班级/学期校历，不返回学生隐私 |
-| `create_task` | `title` | `student_id`, `owner`, `scheduled_at`, `due_at`, `priority`, `notes` | 单条，先预览再确认 |
+| `create_task` | `title` | `student_id`, `owner`, `scheduled_at`, `due_at`, `priority`, `notes` | `student_id` 兼容数据库 ID 或学生学号；单条，先预览再确认，执行后验证落库 |
 | `record_communication` | `student_id`, `communicated_at`, `method`, `reason`, `summary` | `feedback`, `agreement`, `followup_at`, `status`, `event_id` | 单条，先预览再确认 |
 | `save_attendance` | `student_id`, `date`, `status` | `scene`, `reason`, `arrive`, `leave`, `note` | 单条，先预览再确认 |
 | `record_points` | `student_id`, `amount`, `reason` | `occurred_at`, `category` | 单条，先预览再确认 |
+| `update_task` | `task_id` | `title`, `owner`, `priority`, `scheduled_at`, `due_at`, `status`, `notes`, `result` | 完成/取消状态必须提供 `result`；先预览再确认 |
+| `create_event` | `student_id`, `occurred_at`, `event_type`, `description` | `handling`, `parent_contacted`, `needs_followup`, `followup_due`, `status` | `student_id` 兼容数据库 ID 或学生学号；先预览再确认 |
+| `create_focus` | `student_id`, `topic`, `reason` | `evidence`, `action_plan`, `status`, `next_review_at` | `student_id` 兼容数据库 ID 或学生学号；先预览再确认 |
+| `create_meeting` | `held_on`, `topic` | `format`, `content`, `participation`, `conclusion`, `status`, `student_ids`, `action_items`, `followup_title`, `followup_due` | 学生 ID 或学号；先预览再确认 |
+| `create_activity` | `occurred_on`, `name` | `activity_type`, `budget`, `participant_count`, `summary`, `result`, `retrospective`, `status`, `student_ids`, `followup_title`, `followup_due` | 学生 ID 或学号；先预览再确认 |
+| `create_diary` | `diary_date` | `weather`, `work`, `event`, `reflection`, `todo` | 先预览再确认 |
+| `create_knowledge_note` | `title` | `category`, `template`, `content`, `tags` | 创建本地 Markdown 笔记；先预览再确认 |
+| `create_class_task` | `title`, `student_ids` | `task_type`, `start_at`, `due_at`, `material_name`, `description`, `template_id` | 至少一名学生；微信端不可用；先预览再确认 |
 
 ## 仍未开放的高风险能力
 

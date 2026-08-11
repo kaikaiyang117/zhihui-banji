@@ -117,6 +117,7 @@ describe('确定性直接工具路由', () => {
     const toolCall = lastMessages.find((m) => m.tool_calls);
     expect((toolCall!.tool_calls as Array<{ function: { name: string } }>)[0].function.name)
       .toBe('class_student_count');
+    expect(toolCall!.reasoning_content).toBe('');
   });
 
   it('待办/校历直接路由', async () => {
@@ -145,6 +146,67 @@ describe('计划执行与纠错', () => {
     expect(finalMessages.some((m) => m.role === 'tool')).toBe(true);
   });
 
+  it('规划后的工具消息回传 reasoning_content', async () => {
+    const rounds: Array<Array<Record<string, unknown>>> = [];
+    const model = {
+      async complete(messages: Array<Record<string, unknown>>): Promise<ModelResponse> {
+        rounds.push(messages);
+        return {
+          content: JSON.stringify({
+            goal: '查询学生人数',
+            steps: [{ id: 'count', tool: 'class_student_count', arguments: {} }],
+          }),
+          tool_calls: [],
+          reasoning_content: '规划阶段思考内容',
+          usage: null,
+        };
+      },
+      async *iter_complete(messages: Array<Record<string, unknown>>): AsyncGenerator<ModelStreamEvent> {
+        rounds.push(messages);
+        yield {
+          content: '',
+          response: { content: '共有 3 名学生。', tool_calls: [], reasoning_content: '', usage: null },
+        };
+      },
+    };
+    await new AgentRunner({ modelClient: model as never }).chat(
+      's-plan-reasoning', '有多少学生', { channel: 'web', actorId: 'u' });
+    const finalMessages = rounds[1];
+    const toolCallMessage = finalMessages.find((message) => Array.isArray(message.tool_calls));
+    expect(toolCallMessage?.reasoning_content).toBe('规划阶段思考内容');
+  });
+
+  it('模型工具循环回传 reasoning_content', async () => {
+    const rounds: Array<Array<Record<string, unknown>>> = [];
+    let turn = 0;
+    const model = {
+      async *iter_complete(messages: Array<Record<string, unknown>>): AsyncGenerator<ModelStreamEvent> {
+        rounds.push(messages);
+        if (turn === 0) {
+          turn += 1;
+          yield {
+            content: '',
+            response: {
+              content: '',
+              tool_calls: [{ id: 'call-reasoning', name: 'class_student_count', arguments: '{}' }],
+              reasoning_content: '工具调用前思考内容',
+              usage: null,
+            },
+          };
+          return;
+        }
+        yield {
+          content: '',
+          response: { content: '查询完成。', tool_calls: [], reasoning_content: '', usage: null },
+        };
+      },
+    };
+    await new AgentRunner({ modelClient: model as never }).chat(
+      's-loop-reasoning', '你好', { channel: 'web', actorId: 'u' });
+    const assistantToolMessage = rounds[1].find((message) => Array.isArray(message.tool_calls));
+    expect(assistantToolMessage?.reasoning_content).toBe('工具调用前思考内容');
+  });
+
   it('全班问题被强制转为批量计划（不退化单学生搜索）', async () => {
     const model = new FakeModel({ plan: [] });
     const runner = new AgentRunner({ modelClient: model as never });
@@ -158,6 +220,122 @@ describe('计划执行与纠错', () => {
     expect(audits.some((item) => item.tool_name === 'students_aggregate'
       || item.tool_name === 'students_query')).toBe(true);
     expect(audits.every((item) => item.tool_name !== 'students_search')).toBe(true);
+  });
+
+  it('模型计划按姓名查询时，搜索结果 student_id 能传给后续工具', async () => {
+    db.connInstance.prepare("UPDATE students SET 姓名='李子涵' WHERE 学号='S001'").run();
+    const model = new FakeModel({ answer: '已整理李子涵最近的情况。' });
+    model.complete = async (messages): Promise<ModelResponse> => {
+      model.rounds.push(messages);
+      return {
+        content: JSON.stringify({
+          goal: '查看李子涵最近的情况',
+          steps: [
+            { id: 'search', tool: 'students_search', arguments: { keyword: '李子涵', limit: 20 } },
+            {
+              id: 'profile', tool: 'student_get_profile',
+              arguments: { student_id: '$search.students[0].student_id' },
+              depends_on: ['search'], condition: 'exactly_one_student',
+            },
+            {
+              id: 'timeline', tool: 'student_get_timeline',
+              arguments: { student_id: '$search.students[0].student_id' },
+              depends_on: ['search'], condition: 'exactly_one_student',
+            },
+            {
+              id: 'attendance', tool: 'attendance_summary',
+              arguments: { student_id: '$search.students[0].student_id' },
+              depends_on: ['search'], condition: 'exactly_one_student',
+            },
+            {
+              id: 'tasks', tool: 'tasks_list',
+              arguments: { student_id: '$search.students[0].student_id' },
+              depends_on: ['search'], condition: 'exactly_one_student',
+            },
+            {
+              id: 'communications', tool: 'communications_list',
+              arguments: { student_id: '$search.students[0].student_id' },
+              depends_on: ['search'], condition: 'exactly_one_student',
+            },
+          ],
+        }),
+        tool_calls: [],
+      } as ModelResponse;
+    };
+
+    const answer = await new AgentRunner({ modelClient: model as never }).chat(
+      's-student-overview', '分析李子涵近期表现', { channel: 'web', actorId: 'u' });
+
+    expect(answer).toContain('李子涵');
+    const audits = db.connInstance.prepare(
+      "SELECT tool_name, status FROM agent_audit WHERE actor_id='u' ORDER BY id",
+    ).all() as Array<{ tool_name: string; status: string }>;
+    expect(audits.filter((item) => item.status === 'error')).toEqual([]);
+    expect(audits.filter((item) => item.status === 'success').map((item) => item.tool_name)).toEqual([
+      'students_search', 'student_get_profile', 'student_get_timeline',
+      'attendance_summary', 'tasks_list', 'communications_list',
+    ]);
+  });
+
+  it('“查看姓名最近情况”使用确定性计划，不依赖模型猜测工具契约', async () => {
+    db.connInstance.prepare("UPDATE students SET 姓名='李子涵' WHERE 学号='S001'").run();
+    const model = new FakeModel({ answer: '已整理李子涵最近的情况。' });
+    model.complete = async (): Promise<ModelResponse> => {
+      throw new Error('该请求应由确定性计划处理');
+    };
+
+    const answer = await new AgentRunner({ modelClient: model as never }).chat(
+      's-student-overview-rule', '查看 李子涵 最近的情况', { channel: 'web', actorId: 'rule-user' });
+
+    expect(answer).toContain('李子涵');
+    const audits = db.connInstance.prepare(
+      "SELECT tool_name, status FROM agent_audit WHERE actor_id='rule-user' ORDER BY id",
+    ).all() as Array<{ tool_name: string; status: string }>;
+    expect(audits.every((item) => item.status === 'success')).toBe(true);
+    expect(audits.map((item) => item.tool_name)).toEqual([
+      'students_search', 'student_get_profile', 'student_get_timeline',
+      'attendance_summary', 'tasks_list', 'communications_list',
+    ]);
+  });
+
+  it('后续问题中的“这个学生”沿用上一轮明确提到的学生', async () => {
+    const model = new FakeModel({ answer: '已查询完成。' });
+    const runner = new AgentRunner({ modelClient: model as never });
+    const options = { channel: 'web', actorId: 'followup-user' };
+
+    await runner.chat('s-followup-student', '查询学号S001的学生最近的考试情况', options);
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of runner.chatStream(
+      's-followup-student', '查看这个学生最近的考勤情况', options,
+    )) {
+      events.push(event);
+    }
+
+    const attendance = events.find((event) =>
+      event.type === 'tool' && event.name === 'attendance_summary' && event.status === 'completed');
+    expect(attendance).toBeDefined();
+    expect((attendance?.input as Record<string, unknown>).student_id).toBe(1);
+    expect(events.some((event) =>
+      event.type === 'plan_step' && event.status === 'skipped')).toBe(false);
+  });
+
+  it('学生搜索无结果时直接说明原因，不输出协议残片', async () => {
+    const model = new FakeModel({ answer: '<不应调用模型生成失败回答>' });
+    const runner = new AgentRunner({ modelClient: model as never });
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of runner.chatStream(
+      's-missing-student', '查看不存在的学生最近的考勤情况',
+      { channel: 'web', actorId: 'missing-user' },
+    )) {
+      events.push(event);
+    }
+
+    const answer = events.filter((event) => event.type === 'delta')
+      .map((event) => String(event.content ?? '')).join('');
+    expect(answer).toContain('没有找到匹配的学生');
+    expect(answer).not.toContain('<');
+    const skipped = events.find((event) => event.type === 'plan_step' && event.status === 'skipped');
+    expect(skipped?.message).toContain('未找到匹配的学生');
   });
 
   it('重复失败熔断（retry_exhausted 停止）', async () => {
@@ -202,9 +380,12 @@ describe('流式事件序列', () => {
     const types = events.map((event) => event.type);
     expect(types).toContain('plan');
     expect(types).toContain('plan_step');
+    expect(types).toContain('tool');
     expect(types).toContain('delta');
     const planEvent = events.find((event) => event.type === 'plan') as Record<string, unknown>;
     expect((planEvent.steps as Array<Record<string, unknown>>).length).toBeGreaterThan(0);
+    const toolEvent = events.find((event) => event.type === 'tool' && event.status === 'completed');
+    expect(toolEvent?.name).toBe('students_query');
   });
 });
 

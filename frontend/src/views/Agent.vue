@@ -1,31 +1,18 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { BarChart3, Brain, CheckCircle, CircleAlert, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, Send, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { BarChart3, Brain, CheckCircle, CircleAlert, Copy, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { del, get, post, put } from '../api'
 
-const providers = {
-  deepseek: {
-    label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro']
-  },
-  custom: {
-    label: '自定义 OpenAI-compatible',
-    baseUrl: '',
-    models: []
-  }
-}
-
-const provider = ref('deepseek')
-const config = reactive({ api_key: '', base_url: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: 'disabled' })
+const router = useRouter()
+const profiles = ref([])
+const activeProfileId = ref('')
 const status = ref(null)
 const loading = ref(true)
-const saving = ref(false)
-const testing = ref(false)
+const profileBusy = ref(false)
 const notice = ref('')
 const error = ref('')
-const modelOptions = computed(() => providers[provider.value].models)
 const wechat = ref(null)
 const wechatConfig = reactive({ allow_all: false, allow_users: [], source: 'local' })
 const newWechatUser = ref('')
@@ -45,7 +32,7 @@ let loginTimer = null
 let statusTimer = null
 
 function getCurrentWebSessionId() {
-  try { return window.localStorage.getItem('meimei_agent_web_session_id') || 'web:default' } catch { return 'web:default' }
+  try { return window.localStorage.getItem('meimei_agent_web_session_id') || '' } catch { return '' }
 }
 
 function dispatchSessionChange(sessionId) {
@@ -54,8 +41,17 @@ function dispatchSessionChange(sessionId) {
   window.dispatchEvent(new CustomEvent('meimei-agent-session-change', { detail: { sessionId } }))
 }
 
-function newWebSession() {
-  dispatchSessionChange(`web:${window.crypto?.randomUUID?.() || Date.now()}`)
+async function newWebSession() {
+  sessionBusy.value = true
+  try {
+    const created = await post('/api/agent/sessions', {})
+    dispatchSessionChange(String(created.session_id || ''))
+    await loadAgentOperations()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    sessionBusy.value = false
+  }
 }
 
 async function loadAgentOperations() {
@@ -99,7 +95,7 @@ async function deleteWebSession(session) {
   sessionBusy.value = true
   try {
     await del(`/api/agent/sessions/${encodeURIComponent(session.session_id)}`)
-    if (session.session_id === currentWebSessionId.value) newWebSession()
+    if (session.session_id === currentWebSessionId.value) await newWebSession()
     await loadAgentOperations()
     notice.value = '会话已删除。'
   } catch (e) {
@@ -109,30 +105,17 @@ async function deleteWebSession(session) {
   }
 }
 
-function detectProvider(baseUrl) {
-  return baseUrl?.includes('api.deepseek.com') ? 'deepseek' : 'custom'
-}
-
-function selectProvider() {
-  const selected = providers[provider.value]
-  if (provider.value === 'deepseek') {
-    config.base_url = selected.baseUrl
-    if (!selected.models.includes(config.model)) config.model = selected.models[0]
-  } else if (config.base_url === providers.deepseek.baseUrl) {
-    config.base_url = ''
-    config.model = ''
-  }
-}
-
 async function load() {
   loading.value = true
   error.value = ''
   try {
     const [saved, current] = await Promise.all([get('/api/agent/config'), get('/api/agent/status')])
-    provider.value = detectProvider(saved.base_url)
-    config.base_url = saved.base_url || config.base_url
-    config.model = saved.model || config.model
-    config.thinking = saved.thinking || 'disabled'
+    const loadedProfiles = Array.isArray(saved.profiles) ? saved.profiles : []
+    profiles.value = loadedProfiles.length ? loadedProfiles : [{
+      profile_id: saved.profile_id || 'default',
+      profile_name: saved.profile_name || '默认配置',
+    }]
+    activeProfileId.value = saved.active_profile_id || saved.profile_id || profiles.value[0]?.profile_id || ''
     status.value = current
   } catch (e) {
     error.value = e.message
@@ -141,43 +124,68 @@ async function load() {
   }
 }
 
-async function save() {
-  saving.value = true
+async function switchProfile() {
+  if (!activeProfileId.value) return
+  profileBusy.value = true
   notice.value = ''
   error.value = ''
   try {
-    const result = await put('/api/agent/config', {
-      api_key: config.api_key.trim() || null,
-      base_url: config.base_url.trim(),
-      model: config.model.trim(),
-      thinking: config.thinking,
-    })
-    config.api_key = ''
-    notice.value = `配置已保存${result.api_key_masked ? `（${result.api_key_masked}）` : ''}`
+    await post(`/api/agent/config/profiles/${encodeURIComponent(activeProfileId.value)}/select`, {})
     await load()
+    notice.value = '已切换配置档案。'
   } catch (e) {
     error.value = e.message
   } finally {
-    saving.value = false
+    profileBusy.value = false
   }
 }
 
-async function testModel() {
-  testing.value = true
+async function switchToProfile(profileId) {
+  if (!profileId || profileId === activeProfileId.value) return
+  activeProfileId.value = profileId
+  await switchProfile()
+}
+
+function openCreateProfile() {
+  router.push('/agent/config/new')
+}
+
+function openProfileEditor(profileId) {
+  router.push(`/agent/config/${encodeURIComponent(profileId)}`)
+}
+
+async function duplicateProfile(profile) {
+  profileBusy.value = true
   notice.value = ''
   error.value = ''
   try {
-    const result = await post('/api/agent/chat', {
-      session_id: 'web:settings-test',
-      message: '请只回复：模型连接成功。',
-      channel: 'local',
-      actor_id: 'settings'
+    await post(`/api/agent/config/profiles/${encodeURIComponent(profile.profile_id)}/duplicate`, {
+      name: `${profile.profile_name} 副本`,
     })
-    notice.value = result.answer || '模型已返回结果'
+    await load()
+    notice.value = `已复制“${profile.profile_name}”，当前正在使用副本。`
   } catch (e) {
     error.value = e.message
   } finally {
-    testing.value = false
+    profileBusy.value = false
+  }
+}
+
+async function removeProfile() {
+  if (profiles.value.length <= 1 || !activeProfileId.value) return
+  const current = profiles.value.find((item) => item.profile_id === activeProfileId.value)
+  if (!window.confirm(`删除“${current?.profile_name || '当前配置'}”吗？`)) return
+  profileBusy.value = true
+  notice.value = ''
+  error.value = ''
+  try {
+    await del(`/api/agent/config/profiles/${encodeURIComponent(activeProfileId.value)}`)
+    await load()
+    notice.value = '配置档案已删除。'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    profileBusy.value = false
   }
 }
 
@@ -357,35 +365,31 @@ onBeforeUnmount(() => {
 
       <div class="card">
         <div class="card-title"><Brain :size="16" /> 模型连接</div>
-        <div class="form-grid agent-form-grid">
-          <label>模型服务
-            <select v-model="provider" class="form-select" @change="selectProvider">
-              <option v-for="(item, key) in providers" :key="key" :value="key">{{ item.label }}</option>
-            </select>
-          </label>
-          <label>模型名称
-            <select v-if="provider === 'deepseek'" v-model="config.model" class="form-select">
-              <option v-for="model in modelOptions" :key="model" :value="model">{{ model }}</option>
-            </select>
-            <input v-else v-model="config.model" class="form-input" placeholder="例如 deepseek-v4-flash" />
-          </label>
-          <label class="form-grid-wide">API Base URL
-            <input v-model="config.base_url" class="form-input" placeholder="https://api.deepseek.com" />
-          </label>
-          <label class="form-grid-wide">API Key
-            <input v-model="config.api_key" class="form-input" type="password" autocomplete="new-password" placeholder="留空表示保留当前 Key" />
-          </label>
-          <label>Thinking 模式
-            <select v-model="config.thinking" class="form-select">
-              <option value="disabled">关闭（推荐，工具调用更稳定）</option>
-              <option value="enabled">开启（需要模型支持 reasoning_content）</option>
-            </select>
-          </label>
+        <div class="agent-profile-heading">
+          <div>
+            <strong>配置档案</strong>
+            <span>保存多个模型服务，点击卡片切换当前使用的配置</span>
+          </div>
+          <button class="btn btn-outline" type="button" :disabled="profileBusy" @click="openCreateProfile"><Plus :size="14" /> 新建配置</button>
         </div>
-        <div class="agent-security-note">Key 只保存到本机数据目录，不会通过接口返回，也不会写入 Git。</div>
-        <div class="toolbar agent-actions">
-          <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存配置' }}</button>
-          <button class="btn btn-outline" :disabled="testing" @click="testModel"><Send :size="14" /> {{ testing ? '测试中…' : '测试模型' }}</button>
+        <div class="agent-profile-list">
+          <div v-for="item in profiles" :key="item.profile_id" class="agent-profile-card" :class="{ active: item.profile_id === activeProfileId }" @click="switchToProfile(item.profile_id)">
+            <GripVertical :size="15" class="agent-profile-grip" aria-hidden="true" />
+            <div class="agent-profile-icon"><Brain :size="18" /></div>
+            <div class="agent-profile-main">
+              <div class="agent-profile-name">{{ item.profile_name }} <span v-if="item.profile_id === activeProfileId" class="agent-profile-using">✓ 使用中</span></div>
+              <div class="agent-profile-url">{{ item.base_url || '尚未配置 API Base URL' }}</div>
+            </div>
+            <div class="agent-profile-actions">
+              <button v-if="item.profile_id !== activeProfileId" class="btn btn-outline agent-profile-use" type="button" :disabled="profileBusy" @click.stop="switchToProfile(item.profile_id)">使用此配置</button>
+              <template v-else>
+                <button class="icon-button" type="button" title="编辑配置" :disabled="profileBusy" @click.stop="openProfileEditor(item.profile_id)"><Pencil :size="15" /></button>
+                <button class="icon-button" type="button" title="复制配置" :disabled="profileBusy" @click.stop="duplicateProfile(item)"><Copy :size="15" /></button>
+                <button class="icon-button" type="button" title="编辑 API Key" :disabled="profileBusy" @click.stop="openProfileEditor(item.profile_id)"><KeyRound :size="15" /></button>
+                <button v-if="profiles.length > 1" class="icon-button" type="button" title="删除配置" :disabled="profileBusy" @click.stop="removeProfile"><Trash2 :size="15" /></button>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -394,7 +398,7 @@ onBeforeUnmount(() => {
         <div class="agent-status-grid">
           <div><span>模型</span><strong>{{ status?.model || '未配置' }}</strong></div>
           <div><span>模型配置</span><strong :class="status?.model_configured ? 'status-ok' : 'status-off'">{{ status?.model_configured ? '已配置' : '未配置' }}</strong></div>
-          <div><span>可用工具</span><strong>{{ status?.tool_count || 0 }} 个只读工具</strong></div>
+          <div><span>可用工具</span><strong>{{ status?.tool_count || 0 }} 个工具</strong></div>
         </div>
       </div>
 
@@ -509,9 +513,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.agent-form-grid { max-width: 760px; }
+.agent-profile-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; max-width:900px; margin-bottom:12px; }
+.agent-profile-heading > div { display:grid; gap:4px; }
+.agent-profile-heading strong { font-size:14px; }
+.agent-profile-heading span { color:var(--text-secondary); font-size:12px; }
+.agent-profile-list { display:grid; gap:10px; max-width:900px; }
+.agent-profile-card { display:flex; align-items:center; gap:12px; min-height:78px; padding:12px 14px; border:1px solid var(--border); border-radius:14px; background:var(--surface); cursor:pointer; transition:border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.agent-profile-card:hover { border-color:var(--primary); box-shadow:0 3px 12px rgba(51,82,180,.08); }
+.agent-profile-card.active { border-color:#6d96ff; background:#f3f7ff; box-shadow:0 3px 12px rgba(51,82,180,.08); }
+.agent-profile-grip { flex:none; color:var(--text-tertiary); }
+.agent-profile-icon { display:grid; place-items:center; flex:none; width:34px; height:34px; border:1px solid var(--border); border-radius:10px; color:#5578ee; background:#f7f9ff; }
+.agent-profile-main { min-width:0; flex:1; display:grid; gap:5px; }
+.agent-profile-name { display:flex; align-items:center; gap:8px; min-width:0; color:var(--text); font-size:15px; font-weight:600; }
+.agent-profile-using { flex:none; padding:3px 8px; border-radius:6px; color:var(--text-secondary); background:#eef0f4; font-size:11px; font-weight:500; }
+.agent-profile-url { overflow:hidden; color:#1670e8; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.agent-profile-actions { display:flex; align-items:center; gap:4px; flex:none; }
+.agent-profile-use { white-space:nowrap; }
 .agent-security-note { margin-top: 14px; color: var(--text-secondary); font-size: 12px; }
-.agent-actions { margin-top: 18px; }
+.agent-key-status { color: var(--success); font-size: 12px; font-weight: 400; }
 .agent-error { display:flex; align-items:center; gap:8px; padding:10px 14px; margin:-8px 0 18px; border-radius:var(--radius); color:#a33a32; background:var(--danger-bg); font-size:13px; }
 .agent-status-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
 .agent-status-grid div { display:grid; gap:4px; padding:12px; border-radius:10px; background:var(--bg); }
@@ -568,4 +587,5 @@ onBeforeUnmount(() => {
 @media (max-width: 850px) { .wechat-connection-grid { grid-template-columns:1fr; } }
 @media (max-width: 700px) { .agent-status-grid { grid-template-columns:1fr; } }
 @media (max-width: 700px) { .session-toolbar { align-items:flex-start; flex-direction:column; }.usage-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width: 700px) { .agent-profile-heading { align-items:flex-start; flex-direction:column; }.agent-profile-card { align-items:flex-start; }.agent-profile-actions { flex-wrap:wrap; margin-left:auto; }.agent-profile-main { padding-top:2px; } }
 </style>

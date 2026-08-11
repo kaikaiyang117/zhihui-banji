@@ -10,7 +10,13 @@ import { ActionError } from './agentService.js';
 import { expireActions, validateArguments } from './agentService.js';
 import * as workItems from '../services/workItems.js';
 import * as points from '../services/points.js';
-import { createCommunication, saveDailyAttendance } from '../services/p0Service.js';
+import * as education from '../services/education.js';
+import * as classTasks from '../services/classTasks.js';
+import * as knowledge from '../services/knowledge.js';
+import {
+  createCommunication, createEvent, createFocus, getAttendanceRecord, getCommunication,
+  getEvent, getFocus, saveDailyAttendance,
+} from '../services/p0Service.js';
 
 export { ActionError };
 
@@ -34,6 +40,25 @@ function tokenHash(token: string, argumentsHash: string): string {
 
 function connOf(conn?: Database): Database {
   return conn ?? getDb().connInstance;
+}
+
+/** 写入工具同时兼容内部学生 ID 和教师常用的学号，统一转换为业务服务使用的内部 ID。 */
+function resolveStudentId(value: unknown, conn: Database): number {
+  const raw = String(value ?? '').trim();
+  const numericId = Number.isInteger(Number(raw)) ? Number(raw) : -1;
+  const [classId, termId] = scopeIds({ write: true, conn });
+  const row = conn.prepare(
+    'SELECT s.id FROM students s JOIN student_enrollments e ON e.student_id=s.id '
+    + "WHERE e.class_id=? AND e.term_id=? AND e.status='在读' AND s.deleted_at='' "
+    + 'AND (s.id=? OR s.学号=?) LIMIT 1',
+  ).get(classId, termId, numericId, raw) as { id: number } | undefined;
+  if (!row) throw new ActionError('学生不在当前班级和学期中，或当前不是在读状态');
+  return Number(row.id);
+}
+
+function resolveStudentIds(value: unknown, conn: Database): number[] {
+  if (!Array.isArray(value)) throw new ActionError('student_ids必须是学生 ID 或学号数组');
+  return value.map((item) => resolveStudentId(item, conn));
 }
 
 function getPending(actionId: number, sessionId: string, actorId: string, conn: Database):
@@ -82,9 +107,10 @@ function executeOperation(
   validateArguments(toolName, args);
   const sourceKey = `agent_action:${actionId}`;
   if (toolName === 'create_task') {
+    const studentId = args.student_id !== undefined
+      ? resolveStudentId(args.student_id, conn) : null;
     const result = workItems.createWorkItem({
-      title: String(args.title ?? ''), studentId: args.student_id !== undefined
-        ? Number(args.student_id) : null,
+      title: String(args.title ?? ''), studentId,
       sourceType: 'agent_action', sourceId: actionId,
       sourceLabel: 'Agent 创建待办', owner: String(args.owner ?? '班主任'),
       priority: String(args.priority ?? '普通'), scheduledAt: String(args.scheduled_at ?? ''),
@@ -109,7 +135,7 @@ function executeOperation(
       student_id: Number(args.student_id), status: String(args.status ?? ''),
       reason: String(args.reason ?? ''), arrive: String(args.arrive ?? ''),
       leave: String(args.leave ?? ''), note: String(args.note ?? ''),
-    }]);
+    }], { conn });
   }
   if (toolName === 'record_points') {
     const result = points.createEntry({
@@ -120,7 +146,180 @@ function executeOperation(
     });
     return result;
   }
+  if (toolName === 'update_task') {
+    const result = workItems.updateWorkItem(Number(args.task_id), {
+      title: args.title !== undefined ? String(args.title) : undefined,
+      owner: args.owner !== undefined ? String(args.owner) : undefined,
+      priority: args.priority !== undefined ? String(args.priority) : undefined,
+      scheduledAt: args.scheduled_at !== undefined ? String(args.scheduled_at) : undefined,
+      dueAt: args.due_at !== undefined ? String(args.due_at) : undefined,
+      status: args.status !== undefined ? String(args.status) : undefined,
+      notes: args.notes !== undefined ? String(args.notes) : undefined,
+      result: args.result !== undefined ? String(args.result) : undefined,
+      conn,
+    });
+    return { task_id: result.id, status: result.status, updated: true };
+  }
+  if (toolName === 'create_event') {
+    return createEvent({
+      studentId: resolveStudentId(args.student_id, conn), occurredAt: String(args.occurred_at ?? ''),
+      eventType: String(args.event_type ?? ''), description: String(args.description ?? ''),
+      handling: String(args.handling ?? ''), parentContacted: Boolean(args.parent_contacted),
+      needsFollowup: Boolean(args.needs_followup), followupDue: String(args.followup_due ?? ''),
+      status: String(args.status ?? '已完成'), conn,
+    });
+  }
+  if (toolName === 'create_focus') {
+    return createFocus({
+      studentId: resolveStudentId(args.student_id, conn), topic: String(args.topic ?? ''),
+      reason: String(args.reason ?? ''), evidence: String(args.evidence ?? ''),
+      actionPlan: String(args.action_plan ?? ''), status: String(args.status ?? '待确认'),
+      nextReviewAt: String(args.next_review_at ?? ''), conn,
+    });
+  }
+  if (toolName === 'create_meeting') {
+    const result = education.createMeeting({
+      heldOn: String(args.held_on ?? ''), topic: String(args.topic ?? ''),
+      format: String(args.format ?? '主题班会'), content: String(args.content ?? ''),
+      participation: String(args.participation ?? ''), conclusion: String(args.conclusion ?? ''),
+      status: String(args.status ?? '已记录'),
+      studentIds: args.student_ids === undefined ? [] : resolveStudentIds(args.student_ids, conn),
+      actionItems: Array.isArray(args.action_items) ? args.action_items as Array<Record<string, unknown>> : null,
+      followupTitle: String(args.followup_title ?? ''), followupDue: String(args.followup_due ?? ''), conn,
+    });
+    return { meeting_id: result.id, topic: result.topic, held_on: result.held_on };
+  }
+  if (toolName === 'create_activity') {
+    const result = education.createActivity({
+      occurredOn: String(args.occurred_on ?? ''), name: String(args.name ?? ''),
+      activityType: String(args.activity_type ?? '其他'), budget: args.budget,
+      participantCount: args.participant_count, summary: String(args.summary ?? ''),
+      result: String(args.result ?? ''), retrospective: String(args.retrospective ?? ''),
+      status: String(args.status ?? '计划中'),
+      studentIds: args.student_ids === undefined ? [] : resolveStudentIds(args.student_ids, conn),
+      followupTitle: String(args.followup_title ?? ''), followupDue: String(args.followup_due ?? ''), conn,
+    });
+    return { activity_id: result.id, name: result.name, occurred_on: result.occurred_on };
+  }
+  if (toolName === 'create_diary') {
+    const result = education.createDiary({
+      diaryDate: String(args.diary_date ?? ''), weather: String(args.weather ?? ''),
+      work: String(args.work ?? ''), event: String(args.event ?? ''),
+      reflection: String(args.reflection ?? ''), todo: String(args.todo ?? ''), conn,
+    });
+    return { diary_id: result.id, diary_date: result.diary_date };
+  }
+  if (toolName === 'create_knowledge_note') {
+    const result = knowledge.createNote({
+      title: String(args.title ?? ''), category: String(args.category ?? '个人成长'),
+      template: String(args.template ?? ''), content: String(args.content ?? ''),
+      tags: Array.isArray(args.tags) ? args.tags.map((item) => String(item)) : [], conn,
+    });
+    return { note_id: result.id, title: result.title, relative_path: result.relative_path };
+  }
+  if (toolName === 'create_class_task') {
+    const result = classTasks.createTask({
+      title: String(args.title ?? ''), taskType: String(args.task_type ?? '材料收集'),
+      startAt: String(args.start_at ?? ''), dueAt: String(args.due_at ?? ''),
+      materialName: String(args.material_name ?? ''), description: String(args.description ?? ''),
+      studentIds: resolveStudentIds(args.student_ids, conn),
+      templateId: args.template_id !== undefined && args.template_id !== null ? Number(args.template_id) : null, conn,
+    });
+    return { class_task_id: result.id, title: result.title, student_count: result.total };
+  }
   throw new ActionError('写入工具不存在');
+}
+
+function verifyOperation(
+  toolName: string, args: Record<string, unknown>, outcome: Record<string, unknown>, conn: Database,
+): Record<string, unknown> {
+  const checks: Array<Record<string, unknown>> = [];
+  const check = (name: string, passed: boolean, evidence: Record<string, unknown>): void => {
+    checks.push({ name, passed, evidence });
+    if (!passed) throw new ActionError(`写入结果验证失败：${name}`);
+  };
+  if (toolName === 'create_task') {
+    const row = workItems.getWorkItem(Number(outcome.task_id), { conn });
+    check('task_persisted', String(row.title) === String(args.title), {
+      task_id: row.id, title: row.title, student_id: row.student_id,
+    });
+  } else if (toolName === 'record_communication') {
+    const row = getCommunication(Number(outcome.communication_id), { conn });
+    check('communication_persisted',
+      Number(row.student_id) === Number(args.student_id)
+      && String(row.summary) === String(args.summary), {
+        communication_id: row.id, student_id: row.student_id,
+      });
+  } else if (toolName === 'save_attendance') {
+    const row = getAttendanceRecord({
+      studentId: Number(args.student_id), attendanceDate: String(args.date ?? ''),
+      scene: String(args.scene ?? '常规到校'), conn,
+    });
+    check('attendance_persisted', String(row.status) === String(args.status), {
+      attendance_id: row.id, student_id: row.student_id,
+      date: row.attendance_date, scene: row.scene, status: row.status,
+    });
+  } else if (toolName === 'record_points') {
+    const row = points.getEntry(Number(outcome.id), { conn });
+    check('points_persisted',
+      Number(row.student_id) === Number(args.student_id)
+      && Number(row.amount) === Number(args.amount), {
+      point_entry_id: row.id, student_id: row.student_id, amount: row.amount,
+    });
+  } else if (toolName === 'update_task') {
+    const row = workItems.getWorkItem(Number(outcome.task_id), { conn });
+    const matches = (key: string, rowKey = key): boolean => (
+      args[key] === undefined || String(row[rowKey]) === String(args[key])
+    );
+    check('task_updated', matches('title') && matches('status') && matches('priority')
+      && matches('due_at') && matches('result'), {
+      task_id: row.id, status: row.status, title: row.title,
+    });
+  } else if (toolName === 'create_event') {
+    const row = getEvent(Number(outcome.event_id), { conn });
+    check('event_persisted', String(row.event_type) === String(args.event_type)
+      && String(row.description) === String(args.description), {
+      event_id: row.id, student_id: row.student_id, event_type: row.event_type,
+    });
+  } else if (toolName === 'create_focus') {
+    const row = getFocus(Number(outcome.focus_id), { conn });
+    check('focus_persisted', String(row.topic) === String(args.topic)
+      && String(row.reason) === String(args.reason), {
+      focus_id: row.id, student_id: row.student_id, topic: row.topic,
+    });
+  } else if (toolName === 'create_meeting') {
+    const row = education.getMeeting(Number(outcome.meeting_id), { conn });
+    check('meeting_persisted', String(row.topic) === String(args.topic)
+      && String(row.held_on) === String(args.held_on), {
+      meeting_id: row.id, topic: row.topic, held_on: row.held_on,
+    });
+  } else if (toolName === 'create_activity') {
+    const row = education.getActivity(Number(outcome.activity_id), { conn });
+    check('activity_persisted', String(row.name) === String(args.name)
+      && String(row.occurred_on) === String(args.occurred_on), {
+      activity_id: row.id, name: row.name, occurred_on: row.occurred_on,
+    });
+  } else if (toolName === 'create_diary') {
+    const row = education.getDiary(Number(outcome.diary_id), { conn });
+    check('diary_persisted', String(row.diary_date) === String(args.diary_date), {
+      diary_id: row.id, diary_date: row.diary_date,
+    });
+  } else if (toolName === 'create_knowledge_note') {
+    const row = knowledge.readNote(String(outcome.relative_path), { conn });
+    check('knowledge_note_persisted', Number(row.id) === Number(outcome.note_id)
+      && String(row.title) === String(args.title), {
+      note_id: row.id, relative_path: row.relative_path, title: row.title,
+    });
+  } else if (toolName === 'create_class_task') {
+    const row = classTasks.getTask(Number(outcome.class_task_id), { conn });
+    check('class_task_persisted', String(row.title) === String(args.title)
+      && Number(row.total) === (args.student_ids as unknown[]).length, {
+      class_task_id: row.id, title: row.title, student_count: row.total,
+    });
+  } else {
+    throw new ActionError('写入工具没有配置结果验证器');
+  }
+  return { ok: true, checks };
 }
 
 /** 确认后执行：备份 → 执行业务服务 → 状态/结果落库；失败保留备份并标记 failed。 */
@@ -131,7 +330,10 @@ export function executeConfirmed(
   const { item } = getPending(actionId, options.sessionId, options.actorId, conn);
   if (String(item.status) === 'executed') {
     const result = JSON.parse(String(item.result_json ?? '{}')) as Record<string, unknown>;
-    return { id: item.id, status: 'executed', result, duplicate: true };
+    return {
+      id: item.id, status: 'executed', result,
+      verification: result.verification ?? null, duplicate: true,
+    };
   }
   if (String(item.status) !== 'confirmed') {
     throw new ActionError('操作尚未确认或已失效');
@@ -142,10 +344,12 @@ export function executeConfirmed(
   try {
     result = conn.transaction(() => {
       const outcome = executeOperation(String(item.tool_name), args, Number(item.id), conn);
+      const verification = verifyOperation(String(item.tool_name), args, outcome, conn);
+      const verifiedResult = { ...outcome, verification };
       conn.prepare(
         "UPDATE agent_actions SET status='executed', backup_file=?, result_json=?, executed_at=? WHERE id=?",
-      ).run(backupFile, JSON.stringify(outcome), nowStamp(), item.id);
-      return outcome;
+      ).run(backupFile, JSON.stringify(verifiedResult), nowStamp(), item.id);
+      return verifiedResult;
     })();
   } catch (error) {
     try {
@@ -157,7 +361,11 @@ export function executeConfirmed(
     }
     throw new ActionError(`写入失败，已保留备份：${(error as Error).message}`);
   }
-  return { id: item.id, status: 'executed', result, backup_file: backupFile, duplicate: false };
+  return {
+    id: item.id, status: 'executed', result,
+    verification: result.verification ?? null,
+    backup_file: backupFile, duplicate: false,
+  };
 }
 
 /** 确认（可选 token 复核）；已执行时幂等返回。 */
@@ -170,7 +378,10 @@ export function confirmAction(
   if (String(item.status) !== 'pending') {
     if (String(item.status) === 'executed') {
       const result = JSON.parse(String(item.result_json ?? '{}')) as Record<string, unknown>;
-      return { id: item.id, status: 'executed', result, duplicate: true };
+      return {
+        id: item.id, status: 'executed', result,
+        verification: result.verification ?? null, duplicate: true,
+      };
     }
     throw new ActionError('该操作已失效，请重新发起');
   }
@@ -202,8 +413,14 @@ function successMessage(toolName: string, result: Record<string, unknown>): stri
     record_communication: '家校沟通已记录',
     save_attendance: '考勤已保存',
     record_points: '行为积分已记录',
+    update_task: '待办已修改',
+    create_event: '学生事件已记录',
+    create_focus: '重点关注已创建',
   };
-  return `${labels[toolName] ?? '操作已完成'}。操作编号：${String(result.id ?? '')}`;
+  const nested = result.result as Record<string, unknown> | undefined;
+  const operationId = nested?.task_id ?? nested?.event_id ?? nested?.focus_id ?? nested?.meeting_id
+    ?? nested?.activity_id ?? nested?.diary_id ?? nested?.note_id ?? nested?.class_task_id ?? result.id;
+  return `${labels[toolName] ?? '操作已完成'}。编号：${String(operationId ?? '')}，写入校验已通过。`;
 }
 
 /** 处理聊天中的确认/取消；返回 (是否拦截, 用户可见回答)。

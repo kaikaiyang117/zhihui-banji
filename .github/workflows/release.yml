@@ -169,38 +169,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  gitee-mirror:
-    name: Mirror installers to Gitee Releases
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Download platform artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
-
-      - name: Create checksums
-        working-directory: release-assets
-        run: sha256sum * > SHA256SUMS.txt
-
-      - name: Mirror to Gitee Releases
-        if: env.GITEE_TOKEN != '' && env.GITEE_REPO != ''
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPO: ${{ secrets.GITEE_REPO }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node packaging/publish-gitee.mjs release-assets
-
-      - name: Warn about missing Gitee configuration
-        if: env.GITEE_TOKEN == '' || env.GITEE_REPO == ''
-        run: echo '::warning::未配置 GITEE_TOKEN/GITEE_REPO，跳过 Gitee 镜像发布。'
-
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')

@@ -131,7 +131,8 @@ export class WeChatService {
     }
     const command = message.text.trim();
     if (command === '/新会话' || command === '/清空会话') {
-      new SessionStore().clear(`wechat:${message.from_user_id}`);
+      new SessionStore().clearOwned(
+        `wechat:${message.from_user_id}`, message.from_user_id, 'wechat');
       await this.client.sendMessage(
         message.from_user_id,
         message.context_token,
