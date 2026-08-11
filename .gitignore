@@ -18,6 +18,7 @@ desktop/node_modules/
 desktop/dist/
 desktop/release/
 desktop/build/
+desktop/assets/icon.icns
 
 # 桌面打包临时产物
 /build/
