@@ -11,6 +11,7 @@ import { loadConfig, localIp, type ServerConfig } from './config/index.js';
 import { installSignalHandlers, startServer } from './lifecycle.js';
 import { WorkbenchDb } from './db/connection.js';
 import { setDatabase } from './services/context.js';
+import { setDb as setDbSingleton } from './db/index.js';
 
 function print(message: string): void {
   process.stdout.write(`${message}\n`);
@@ -68,6 +69,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       try {
         db.open();
         setDatabase(db);
+        setDbSingleton(db);
         print(`数据库就绪（schema v${db.schemaVersion()}）：${db.paths.dbPath}`);
         // 启动时评估规则（失败不阻断启动，与 Python 一致）
         for (const evaluate of ['attendance', 'scores', 'points', 'funds', 'comments', 'education', 'knowledge']) {

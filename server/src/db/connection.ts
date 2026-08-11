@@ -61,7 +61,11 @@ export class WorkbenchDb {
     this.closed = false;
   }
 
-  /** 同步一致性备份（迁移前使用；checkpoint 后复制主文件，避免 WAL 丢数据）。 */
+  /** 同步一致性备份（迁移前与恢复前使用；checkpoint 后复制主文件，避免 WAL 丢数据）。 */
+  createBackupSync(label: string): string {
+    return this.backupSync(this.connInstance, label);
+  }
+
   private backupSync(conn: Database.Database, label: string): string {
     conn.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     fs.mkdirSync(this.paths.backupsDir, { recursive: true });

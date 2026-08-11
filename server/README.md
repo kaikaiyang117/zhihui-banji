@@ -53,8 +53,32 @@ server/
 
 ## 下一工作包
 
-`MIG-09` 输出、个人与系统运维：周/月/学期报告与档案、健康目标/记录/提醒、
-Excel 导入导出统一、SQLite 备份/恢复/迁移包、更新检查（ready_to_install）。
+`AGENT-00` Agent 基线与模型层：固定回归轨迹、OpenAI-compatible 模型客户端、
+工具契约登记，并启用报告/评语 AI 草稿端点。
+
+## MIG-09 输出、个人与系统运维（已交付）
+
+`src/services/`：
+- `reports.ts`：周/月/学期/成长报告（指标聚合 + 来源追溯 + 数据口径）、档案快照
+  （payload_json、UNIQUE upsert、只读归档、Excel 导出）。
+- `health.ts`：健康目标/提醒/复盘/汇总（个人表与班级数据隔离）、多 sheet 汇总导出。
+- `exportService.ts` 扩展：通用工作表/考勤/成绩/积分/班费/评语/座位/健康导出（exceljs）。
+- `migrationService.ts`：迁移包导出（db+知识库 zip）与恢复（结构校验、路径穿越拒绝、
+  完整性检查、备份后原子替换）。
+- `update.ts`：更新检查（GitHub API + manifest 回退、平台资产选择、SHA-256 校验）、
+  下载状态机（checking→backing_up→downloading→verifying→ready_to_install）、
+  github-token 管理、installer-path（本机）。
+- `db/index.ts`：数据库单例 + 备份恢复（deserialize 校验 + 替换 + 重开）。
+
+`src/http/routes/mig09.ts`：报告/健康/导出/备份/恢复/迁移包/更新路由；
+`/api/reports/ai/preview` 暂 503（AGENT-00 接入）。
+
+验证（tests/integration/mig09.test.ts，12 项；总 140/140）：
+- 周报指标与来源追溯、档案创建/列表/读取/导出。
+- 健康目标唯一/提醒/复盘/汇总/多 sheet 导出（openpyxl 可解析）。
+- 通用表/考勤导出；备份创建→修改→恢复；迁移包导出→破坏→恢复往返；
+  路径穿越 zip 被拒；github-token 校验；installer-path 未就绪拒绝。
+- HTTP 全端点连通（开发模式 install 拒绝 400、AI 草稿 503）。
 
 ## MIG-08 账目与教育沉淀（已交付）
 
