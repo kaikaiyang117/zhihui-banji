@@ -35,9 +35,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -46,6 +48,10 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Install server dependencies and build (UI smoke uses Node backend)
+        working-directory: server
+        run: npm ci && npm run build:server
 
       - name: Install Chromium for UI smoke test
         run: npx --yes playwright install --with-deps chromium
