@@ -6,7 +6,7 @@
  * 渲染进程保持 nodeIntegration:false + contextIsolation:true + sandbox:true，
  * 仅通过 preload 暴露白名单 IPC。
  */
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, session, utilityProcess } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, session, utilityProcess, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -385,7 +385,11 @@ function setupDownloads() {
 function createTray() {
   const iconPath = trayIconPath();
   if (!iconPath) return;
-  tray = new Tray(iconPath);
+  const trayIcon = process.platform === 'darwin'
+    ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
+    : iconPath;
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
+  tray = new Tray(trayIcon);
   tray.setToolTip(APP_NAME);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开工作台', click: showMainWindow },
@@ -589,6 +593,10 @@ function finishSmoke(ok) {
 
 /* ---------------------------------------------------------------- 生命周期 */
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) {
+    const dockIcon = path.join(__dirname, 'assets', 'icon.png');
+    if (fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
+  }
   setupDownloads();
   ipcMain.handle('workbench:get-info', () => ({
     isDesktop: true,
