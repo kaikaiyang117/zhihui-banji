@@ -69,6 +69,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         db.open();
         setDatabase(db);
         print(`数据库就绪（schema v${db.schemaVersion()}）：${db.paths.dbPath}`);
+        // 启动时评估规则（失败不阻断启动，与 Python 一致）
+        for (const evaluate of ['attendance', 'scores']) {
+          try {
+            const module = await import(`./services/${evaluate}.js`);
+            if (typeof module.evaluateStartup === 'function') {
+              const results = module.evaluateStartup();
+              print(`${evaluate} 启动评估完成：${results.length} 个班级`);
+            }
+          } catch (error) {
+            print(`${evaluate} 启动评估失败（不阻断）：${(error as Error).message}`);
+          }
+        }
         return true;
       } catch (error) {
         print(`数据库初始化失败：${(error as Error).message}`);

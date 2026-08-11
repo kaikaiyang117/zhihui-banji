@@ -207,8 +207,16 @@ export function saveDailyAttendance(
       params: { date: attendanceDate, scene, saved }, classId, termId, conn,
     });
   })();
-  // 规则评估（MIG-07 接入）；当前返回空评估，保持 API 结构兼容。
-  return { ok: true, date: attendanceDate, scene, saved, evaluation: null, evaluation_error: '' };
+  // 保存后执行考勤规则评估（与 Python save_daily 一致）；失败作为可见警告返回，不阻断保存。
+  let evaluation = null;
+  let evaluationError = '';
+  try {
+    const { evaluateRules } = requireAttendance();
+    evaluation = evaluateRules({ referenceDate: attendanceDate, trigger: 'save' });
+  } catch (error) {
+    evaluationError = String((error as Error).message);
+  }
+  return { ok: true, date: attendanceDate, scene, saved, evaluation, evaluation_error: evaluationError };
 }
 
 export function listAttendanceRecords(options: {
@@ -541,3 +549,12 @@ function buildCommentsSummary(
 }
 
 export { WorkflowError, type WorkItemError };
+
+function requireAttendance(): { evaluateRules: (options: {
+  referenceDate?: string; trigger?: string;
+}) => Record<string, unknown> } {
+  // 延迟导入避免循环依赖（attendance → workItems，workItems 不依赖 p0Service）
+  return { evaluateRules: attendanceModule.evaluateRules };
+}
+
+import * as attendanceModule from './attendance.js';

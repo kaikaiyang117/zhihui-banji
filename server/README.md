@@ -53,8 +53,37 @@ server/
 
 ## 下一工作包
 
-`MIG-07` 高频教师业务：考勤（规则执行/命中/工作项联动）、成绩（配置/导入/统计/异常规则）、
-班级任务/值日、学期校历；并填充 `workItems.sourceTransitionHooks` 注册表。
+`MIG-08` 账目与教育沉淀：行为积分（规则/流水/撤销/旧数据迁移）、班费（分类/流水/结算/冲正）、
+评语（模板/生成/审核/版本）、教育记录（班会/活动/日志）、知识库（Markdown 同步/冲突采纳）。
+
+## MIG-07 高频教师业务（已交付）
+
+`src/services/`：
+- `attendance.ts`：考勤记录/统计（日/月/周/学生桶 + 出勤率）、规则 CRUD、`evaluateRules`
+  （命中/新建/重开/解除/失败写 failed run）、`evaluateStartup`、`dashboardCounts`；
+  注册 `sourceTransitionHooks['attendance_rule']`。
+- `scores.ts` + `scoresRules.ts`：科目/考试/选科配置、长宽表导入（幂等/原子）、
+  `scoreSummary`（缺考免考不计 0 分、完整总分、同分同名次、A/B/C 分层）、成绩规则评估；
+  注册 `sourceTransitionHooks['score_rule']`。
+- `classTasks.ts`：任务模板/材料收集/缺交例外（409 + 名单）/提醒幂等/附件（sha256 原子写入）；
+  注册 `sourceTransitionHooks['class_task']`。
+- `duty.ts`：值日 CRUD（同生同日跨区冲突 409）、轮换规则（preview/confirm 两段式生成）；
+  注册 `sourceTransitionHooks['duty_assignment']`。
+- `schoolCalendar.ts`：校历条目 CRUD、学期周次网格、矩阵/明细导入（request_id 幂等、冲突/范围外报告）。
+
+`src/http/routes/mig07.ts`：考勤规则/成绩配置/成绩导入/成绩规则/班级任务/值日/校历/搜索路由。
+
+联动接线：
+- `p0Service.saveDailyAttendance` 保存后自动触发考勤规则评估（与 Python save_daily 一致）。
+- `entry.ts` 启动任务非阻塞执行考勤/成绩 `evaluateStartup`。
+
+验证（tests/integration/mig07.test.ts，15 项；总 114/114）：
+- 考勤：阈值命中建工作项、完成→已处理、指标恢复→自动解除、停用→解除、统计口径。
+- 成绩：缺考不完整总分、同分同名次 [1,1,3]、下降规则命中→完成→已处理。
+- 任务：缺交完成被拒（409 语义 + 名单）、confirm_incomplete 例外关闭、附件落盘可读。
+- 值日：同生同日跨区冲突、轮换按周生成。
+- 校历：条目 CRUD、学期周次网格、导入 request_id 幂等。
+- HTTP：全端点连通 + 缺交 409 名单。
 
 ## MIG-06 行动闭环（已交付）
 
