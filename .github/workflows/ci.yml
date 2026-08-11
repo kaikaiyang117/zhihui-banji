@@ -19,25 +19,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies
-        run: python -m pip install -r backend/requirements.txt
-
-      - name: Run backend tests
-        run: python -m unittest discover -s backend/tests -p 'test_*.py' -v
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -47,8 +36,84 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Install server dependencies and build (UI smoke uses Node backend)
+        working-directory: server
+        run: npm ci && npm run build:server
+
       - name: Install Chromium for UI smoke test
         run: npx --yes playwright install --with-deps chromium
 
       - name: Run browser UI smoke test
         run: bash scripts/smoke-ui.sh
+
+  server:
+    name: Server skeleton (MIG-02/03)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck:server
+
+      - name: Run server tests
+        working-directory: server
+        run: npm run test:server
+
+      - name: Build server
+        working-directory: server
+        run: npm run build:server
+
+      - name: Verify built entry
+        working-directory: server
+        run: node dist/entry.js --version
+
+  desktop:
+    name: Electron desktop smoke test
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Build Node server
+        working-directory: server
+        run: npm ci && npm run build:server
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Install Electron runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2
+
+      - name: Run Electron smoke test
+        working-directory: desktop
+        run: xvfb-run -a node tests/smoke.mjs

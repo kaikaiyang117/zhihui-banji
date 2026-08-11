@@ -6,6 +6,8 @@
 
 当前桌面发布版本为 `v1.0.4`，可从 [GitHub Releases](https://github.com/aitia0718/workbench/releases/tag/v1.0.4) 下载 Windows x64、macOS Apple Silicon 和 macOS Intel 安装包。当前版本未配置代码签名证书，首次安装可能出现系统安全提示；仅建议在可信环境中使用。
 
+桌面安装包基于 **Electron 桌面壳**：双击直接打开工作台窗口（不再自动打开浏览器），由 Electron 管理窗口、系统托盘、后端子进程和更新安装；手机和平板仍通过局域网二维码访问。
+
 产品采用“本地桌面主程序 + 局域网移动访问端”方案：电脑保存唯一 SQLite 数据，手机和平板通过同一 Wi-Fi 下的浏览器和二维码访问，不需要安装独立 App。
 
 ---
@@ -50,9 +52,9 @@
 
 | 层 | v2.2（旧） | v2.3（当前） |
 |----|-----------|-----------|
-| 后端 | Flask + openpyxl 直写 Excel | **FastAPI + Uvicorn** |
+| 后端 | Flask + openpyxl 直写 Excel | **Node.js + Fastify + TypeScript** |
 | 数据库 | Excel 文件（公式 hack） | **SQLite（WAL 模式、事务安全）** |
-| Excel | 读写存储层 | **仅导入/导出层**（openpyxl） |
+| Excel | 读写存储层 | **仅导入/导出层**（ExcelJS） |
 | 前端 | 原生 JS 拼 HTML | **Vue 3 + Vite + Vue Router + ECharts** |
 | 图表 | ECharts（CDN 本地文件） | ECharts（ESM import） |
 | API 文档 | 无 | **自动 OpenAPI（`/docs`）** |
@@ -75,42 +77,22 @@
 │   ├── 移动端适配-TODO.md           # 响应式实现与真实设备验收项
 │   ├── 开发与发布流程.md
 │   └── 发布检查清单.md
-├── backend/                        # 后端
-│   ├── run.py                      # uvicorn 入口
-│   ├── requirements.txt            # fastapi, uvicorn, python-multipart, openpyxl
-│   ├── migrate.py                  # 旧 Excel → SQLite 迁移（已执行）
-│   ├── static/                     # 前端构建产物（Vite build 自动产出）
-│   │   ├── index.html
-│   │   └── assets/
-│   └── app/
-│       ├── __init__.py             # FastAPI 应用入口
-│       ├── config.py               # 路径、工作表元数据
-│       ├── db.py                   # SQLite 连接与通用表 CRUD
-│       ├── derived.py              # 旧通用工作表兼容派生列
-│       ├── export_service.py       # xlsx 导出（含座位表特例）
-│       ├── import_service.py       # 学生 Excel 导入（模板生成 + 解析 + 按学号合并）
-│       ├── agent/                   # Agent 规划、执行、模型、会话和写入确认
-│       ├── wechat/                  # 微信 iLink 凭证、消息循环和渠道适配
-│       ├── services/                # 可由页面和 Agent 共用的业务服务
-│       └── routers/
-│           ├── sheets.py           # /api/sheets, /api/sheet/<name>
-│           ├── students.py         # /api/students (CRUD + 导入/导出/模板)
-│           ├── seating.py          # /api/seating
-│           ├── stats.py            # /api/stats/* (仪表盘/考勤/成绩/积分)
-│           ├── knowledge.py        # /api/knowledge (Obsidian 笔记)
-│           ├── export.py           # /api/export/* (工作表导出+汇总报表)
-│           ├── p0.py               # 学生详情/事件/待办/关注/沟通/批量考勤
-│           ├── p1.py               # 搜索/成绩/考勤规则/班级任务/值日
-│           ├── comments.py         # 评语管理
-│           ├── education.py        # 班会/活动/日志
-│           ├── reports.py          # 报告和学期档案
-│           ├── health.py           # 个人健康
-│           ├── agent.py            # Agent 会话、流式对话和确认写入
-│           ├── wechat.py           # 微信 iLink 配置、登录和消息循环
-│           └── system.py           # 本地备份与恢复
+├── backend/static/                 # Vite 前端构建产物
+├── server/                         # Node.js/TypeScript 后端
+│   ├── src/entry.ts                # CLI / Electron 共用入口
+│   ├── src/app.ts                  # Fastify 应用工厂
+│   ├── src/db/                     # SQLite 连接、schema 与迁移
+│   ├── src/services/               # 页面和 Agent 共用业务服务
+│   ├── src/agent/                  # LangGraph Agent 核心
+│   ├── src/wechat/                 # 微信 iLink 渠道适配
+│   └── src/http/routes/             # HTTP API 路由
 ├── scripts/                        # 开发环境、UI 冒烟测试脚本
-├── backend/tests/                  # 隔离 SQLite 后端测试与测试数据
+├── server/tests/                   # 隔离 SQLite Node 后端测试与测试夹具
 ├── packaging/                      # 桌面打包配置与构建脚本
+├── desktop/                        # Electron 桌面壳（窗口/托盘/Node 后端生命周期/更新安装）
+│   ├── main.js / preload.js        # 主进程与受限 IPC 桥
+│   ├── electron-builder.yml        # Windows/macOS 安装包配置
+│   └── tests/smoke.mjs             # Electron 冒烟测试
 ├── frontend/                       # 前端（Vue 3 + Vite）
 │   ├── package.json
 │   ├── vite.config.js              # 构建到 ../backend/static
@@ -141,14 +123,17 @@
 ### 4.1 总体架构
 
 ```
-浏览器 (Vue 3 SPA, Vite build)
+Electron 桌面壳（窗口/托盘/单实例/更新安装协调）
+      │  启动 Node.js 后端，健康检查后加载 127.0.0.1
+      ▼
+浏览器 (Vue 3 SPA, Vite build) ←── 手机/平板经局域网二维码访问同一 SPA
       │  fetch /api/*
       ▼
-Uvicorn :: FastAPI
-      │  Pydantic 校验
+Node.js :: Fastify
+      │  TypeScript / schema 校验
       ▼
    Services
-   ├── 导入/导出（openpyxl）
+   ├── 导入/导出（ExcelJS）
    ├── 结构化业务服务（学生/成绩/考勤/任务/评语/班费等）
    ├── 旧通用工作表兼容派生计算（成绩/积分/余额/腰臀比）
    └── 知识库（文件系统）
@@ -265,10 +250,13 @@ Planner → Runner → 工具注册与权限/审计 → 业务 Services → SQLi
 
 开发启动脚本默认将业务日期设为 `2026-04-15`（春季学期内的正常上课日），用于验证今日工作台、待办、考勤和 Agent 日期判断。它不修改电脑系统时间或数据库真实时间；设置 `WORKBENCH_BUSINESS_DATE=` 可恢复使用系统日期。
 
-后端 P0 工作流使用隔离 SQLite 测试数据，不会修改 `data/workbench.db`：
+Node 后端使用隔离 SQLite 测试数据，不会修改 `data/workbench.db`：
 
 ```bash
-python -m unittest discover -s backend/tests -p 'test_*.py' -v
+cd server
+npm run typecheck:server
+npm run test:server
+npm run build:server
 ```
 
 前端构建：
@@ -284,7 +272,13 @@ npm run build
 bash scripts/smoke-ui.sh
 ```
 
-当前基线包含 122 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
+Electron 桌面壳冒烟测试（需要 Node.js，使用临时数据目录）：
+
+```bash
+cd desktop && npm install && npm test
+```
+
+CI 会自动执行 Node 后端测试、前端构建、浏览器冒烟和 Electron 冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
 
 ### 文档分工
 
@@ -301,8 +295,7 @@ bash scripts/smoke-ui.sh
 
 ### 环境要求
 - Windows、macOS 或 Linux
-- Python 3.11+
-- Node.js 20+（仅首次构建前端时需要，运行时不需要）
+- Node.js 20+
 - Obsidian（知识库功能可选）
 
 ### 首次安装
@@ -319,25 +312,31 @@ Windows PowerShell：
 .\scripts\setup-dev.ps1
 ```
 
-这两个脚本会检查 Python/Node.js 版本，创建项目 `.venv`，安装后端依赖和前端依赖。也可以按下面步骤手动安装：
+这两个脚本会检查 Node.js 版本，安装前端、Node 后端和 Electron 依赖，并构建 Node 后端。也可以按下面步骤手动安装：
 
 ```bash
-# 1. 后端依赖
-cd backend
-pip install -r requirements.txt
-
-# 2. 迁移旧 Excel 数据（如已有）
-python migrate.py
-
-# 3. 前端构建（需要 Node.js + npm）
-cd ../frontend
+# 1. 前端构建
+cd frontend
 npm install
 npm run build
 
-# 4. 启动
-cd ../backend
-python run.py
-# 浏览器打开 http://localhost:5000
+# 2. Node 后端
+cd ../server
+npm install
+npm run build:server
+
+# 3. Electron
+cd ../desktop
+npm install
+npm run dev
+```
+
+桌面壳开发模式（使用源码后端，打开 Electron 窗口）：
+
+```bash
+cd desktop
+npm install
+npm run dev
 ```
 
 ### 日常使用
@@ -351,7 +350,7 @@ macOS 使用：
 双击 启动工作台.command
 ```
 
-如果使用 GitHub Release 安装包，则不需要安装 Python 或 Node.js，直接运行安装后的桌面程序即可。
+如果使用 GitHub Release 安装包，则不需要安装 Python 或 Node.js，直接运行安装后的桌面程序即可。安装包是 Electron 桌面客户端：双击打开工作台窗口，关闭窗口会隐藏到系统托盘，托盘“退出工作台”才停止服务。
 
 安装包启动后默认允许同一局域网中的手机和平板访问。进入工作台后点击右上角“手机访问”，使用手机或平板扫描二维码即可打开。
 
@@ -360,7 +359,8 @@ macOS 使用：
 电脑作为本地数据主机时，也可以使用以下命令启动局域网模式：
 
 ```bash
-python backend/run.py --lan
+cd desktop
+npm run dev -- --lan
 ```
 
 程序默认已经监听可信局域网地址；`--lan` 用于显式指定局域网模式。点击“手机访问”后会生成 5 分钟有效、仅可使用一次的配对二维码；配对设备获得 90 天有效的本地凭证，可在电脑端查看最近访问时间、单独撤权或全部撤权，也可在移动端主动退出。凭证只保存哈希到 SQLite，服务重启后仍有效。局域网模式仅适用于可信网络，不要将端口映射到公网。桌面打包说明见 [`packaging/README.md`](packaging/README.md)。
@@ -390,7 +390,7 @@ bash scripts/smoke-ui.sh
 | 原生 JS 单个 848 行文件 | 17 个 Vue SFC 组件，按路由懒加载 |
 | 导出原始 xlsx 文件 | 从 SQLite 重新生成 xlsx + 汇总报表 |
 | 无导入功能 | 学生信息 Excel 模板导入 + 按学号合并 |
-| 无 API 文档 | FastAPI 自动生成 `/docs` |
+| 无 API 文档 | Fastify 自动生成 `/docs` |
 
 ---
 

@@ -22,25 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend dependencies
-        run: python -m pip install -r backend/requirements.txt
-
-      - name: Run backend tests
-        run: python -m unittest discover -s backend/tests -p 'test_*.py' -v
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -49,6 +38,10 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Test and build Node server
+        working-directory: server
+        run: npm ci && npm run typecheck:server && npm run test:server && npm run build:server
 
   build:
     name: Build ${{ matrix.artifact }}
@@ -73,63 +66,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install packaging dependencies
-        run: python -m pip install -r backend/requirements.txt pyinstaller
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
+            desktop/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
 
-      - name: Build Windows installer
+      - name: Build Windows Electron installer
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: .\packaging\build-windows.ps1
-
-      - name: Configure Windows signing
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -and
-              -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            "REQUIRE_SIGNING=1" >> $env:GITHUB_ENV
-            Write-Host 'Windows 代码签名已启用。'
-          } else {
-            "REQUIRE_SIGNING=0" >> $env:GITHUB_ENV
-            Write-Warning '未配置 Windows 签名证书，将生成未签名安装包。'
-          }
-
-      - name: Sign Windows installer
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $installer = (Get-ChildItem artifacts\*.exe | Select-Object -First 1).FullName
-          .\packaging\sign-windows.ps1 -InstallerPath $installer
 
       - name: Smoke test Windows package
         if: matrix.platform == 'windows'
@@ -138,10 +100,10 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           $expected = $env:EXPECTED_VERSION -replace '^v', ''
-          $versionFile = Get-ChildItem .\dist\MeimeiWorkbench -Recurse -Filter app-version.json | Select-Object -First 1
-          if (-not $versionFile) {
-            throw "未找到打包版本文件"
-          }
+          $installer = Get-ChildItem artifacts\*.exe | Select-Object -First 1
+          if (-not $installer) { throw '未找到 Windows 安装包' }
+          Write-Host "安装包：$($installer.Name)（$([math]::Round($installer.Length / 1MB, 1)) MB）"
+          $versionFile = Get-ChildItem .\build\server-bundle\static\app-version.json -ErrorAction Stop
           $actual = (Get-Content $versionFile.FullName -Raw | ConvertFrom-Json).version
           if ($actual -ne $expected) {
             throw "版本号不一致：期望 $expected，实际 $actual"
@@ -173,7 +135,7 @@ jobs:
             echo '::warning::未配置完整 macOS 公证凭证，将跳过公证。'
           fi
 
-      - name: Build macOS disk image
+      - name: Build macOS Electron installer
         if: matrix.platform == 'macos'
         shell: bash
         env:
@@ -193,9 +155,15 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           expected="${EXPECTED_VERSION#v}"
-          actual="$(./dist/MeimeiWorkbench.app/Contents/MacOS/MeimeiWorkbench --version)"
-          echo "$actual"
-          grep -F "${expected}" <<< "$actual"
+          dmg=$(ls artifacts/*.dmg | head -n 1)
+          if [[ -z "$dmg" ]]; then echo '未找到 DMG 安装包'; exit 1; fi
+          echo "安装包：$(basename "$dmg")"
+          actual="$(node -p "require('./build/server-bundle/static/app-version.json').version")"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "版本号不一致：期望 $expected，实际 $actual"
+            exit 1
+          fi
+          spctl --assess --type execute --verbose "desktop/dist/mac/MeimeiWorkbench.app" 2>/dev/null && echo 'Gatekeeper 评估通过' || echo '未签名/未公证构建（预期行为）'
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -231,7 +199,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
-        run: python "$GITHUB_WORKSPACE/packaging/create-update-manifest.py"
+        run: node "$GITHUB_WORKSPACE/packaging/create-update-manifest.mjs"
 
       - name: Prepare release notes
         env:

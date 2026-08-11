@@ -1,0 +1,36 @@
+{
+  "name": "meimei-workbench-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "美美大王工作台 Node.js/TypeScript 后端",
+  "main": "dist/entry.js",
+  "scripts": {
+    "typecheck:server": "tsc --noEmit",
+    "test:server": "vitest run",
+    "build:server": "tsc -p tsconfig.build.json",
+    "start": "node dist/entry.js",
+    "dev": "tsx src/entry.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/static": "10.1.3",
+    "@fastify/swagger": "9.8.1",
+    "@fastify/swagger-ui": "6.1.1",
+    "@langchain/core": "^1.2.5",
+    "@langchain/langgraph": "^1.4.9",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.4.1",
+    "exceljs": "^4.4.0",
+    "fastify": "5.11.3",
+    "pino": "10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3",
+    "vitest": "4.1.10"
+  }
+}

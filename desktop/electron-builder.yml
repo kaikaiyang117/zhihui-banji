@@ -1,0 +1,54 @@
+# Electron 桌面壳打包配置
+# 构建顺序（由发布脚本执行）：前端 build → Node 后端编译 → server-bundle → electron-builder → 签名/公证
+appId: com.meimei.workbench
+productName: MeimeiWorkbench
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - main.js
+  - preload.js
+  - package.json
+# Node 后端资源包放在 extraResources，不能打进 app.asar；
+# 运行在 Electron utilityProcess 中（MIG-10），不再包含 Python sidecar。
+extraResources:
+  - from: ../build/server-bundle
+    to: server
+    filter:
+      - '**/*'
+  - from: ../packaging/macos-updater.sh
+    to: backend/updater/macos-updater.sh
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  artifactName: MeimeiWorkbench-Setup-Windows-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  shortcutName: 美美大王工作台
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  icon: assets/icon.icns
+  category: public.app-category.education
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: assets/entitlements.mac.plist
+  entitlementsInherit: assets/entitlements.mac.plist
+  artifactName: MeimeiWorkbench-macOS-${arch}.${ext}
+dmg:
+  title: 美美大王工作台
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
