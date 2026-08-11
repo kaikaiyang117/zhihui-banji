@@ -241,7 +241,7 @@ describe('更新状态机', () => {
   });
 });
 
-describe.skipIf(process.platform === 'linux')('更新源（Gitee 优先 / GitHub 回退）', () => {
+describe('更新源（Gitee 优先 / GitHub 回退）', () => {
   const INSTALLER_NAMES = [
     'MeimeiWorkbench-Setup-Windows-x64.exe',
     'MeimeiWorkbench-macOS-arm64.dmg',
@@ -253,6 +253,7 @@ describe.skipIf(process.platform === 'linux')('更新源（Gitee 优先 / GitHub
   let server: http.Server;
   let base = '';
   let failGiteeDownloads = false;
+  let processPlatformDescriptor: PropertyDescriptor | undefined;
 
   function expectedMarker(): string {
     if (process.platform === 'win32') return 'MeimeiWorkbench-Setup-Windows-x64.exe';
@@ -279,6 +280,10 @@ describe.skipIf(process.platform === 'linux')('更新源（Gitee 优先 / GitHub
   }
 
   beforeAll(async () => {
+    /* platformAsset 只支持 win32/darwin，统一按 darwin 模拟，
+     * 让多源用例在 CI（Linux）与本地表现一致，不再按平台跳过。 */
+    processPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     server = http.createServer((req, res) => {
       const url = req.url ?? '';
       const send = (body: string): void => {
@@ -355,6 +360,9 @@ describe.skipIf(process.platform === 'linux')('更新源（Gitee 优先 / GitHub
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
+    if (processPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', processPlatformDescriptor);
+    }
   });
 
   afterEach(() => {

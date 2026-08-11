@@ -50,6 +50,8 @@ async function api(method, pathname, { json, form, token = true } = {}) {
     options.body = JSON.stringify(json);
   }
   if (form !== undefined) options.body = form;
+  /* 大附件上传给足时间；连接挂死 4 分钟视为失败并触发重试。 */
+  options.signal = AbortSignal.timeout(240_000);
   const response = await fetch(url, options);
   const text = await response.text();
   let data = null;
@@ -95,10 +97,27 @@ async function removeExistingRelease() {
 
 async function uploadAttachment(releaseId, filename) {
   const buffer = fs.readFileSync(path.join(ASSETS_DIR, filename));
-  const form = new FormData();
-  form.append('file', new Blob([buffer]), filename);
-  const attached = await api('POST', `/repos/${REPO}/releases/${releaseId}/attach_files`, { form });
-  return String(attached.browser_download_url ?? '');
+  /* GitHub runner → gitee.com 上传大文件可能连接中断，最多重试 2 次。 */
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      console.log(`上传 ${filename} 失败，${(attempt + 1) * 5} 秒后重试（第 ${attempt + 1} 次）`);
+      await sleep(attempt * 5000);
+    }
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([buffer]), filename);
+      const attached = await api('POST', `/repos/${REPO}/releases/${releaseId}/attach_files`, { form });
+      return String(attached.browser_download_url ?? '');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error(`上传 ${filename} 失败`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function main() {
