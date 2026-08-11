@@ -50,8 +50,9 @@ async function api(method, pathname, { json, form, token = true } = {}) {
     options.body = JSON.stringify(json);
   }
   if (form !== undefined) options.body = form;
-  /* 大附件上传给足时间；连接挂死 4 分钟视为失败并触发重试。 */
-  options.signal = AbortSignal.timeout(240_000);
+  /* GitHub runner → gitee.com 实测带宽约 0.6MB/s，152MB 安装包需要约 5 分钟；
+   * 600 秒超时给足余量，连接挂死才触发重试。 */
+  options.signal = AbortSignal.timeout(600_000);
   const response = await fetch(url, options);
   const text = await response.text();
   let data = null;
