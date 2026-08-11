@@ -5,6 +5,7 @@ import { MessageCircle, Plus, Trash2 } from 'lucide-vue-next'
 import { del, get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 import WorkflowModal from '../components/WorkflowModal.vue'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const communications = ref([])
 const loading = ref(true)
@@ -13,6 +14,7 @@ const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
 const studentId = Number(route.query.student_id || 0)
 const workflowTarget = ref(null)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 async function load() {
   loading.value = true
@@ -22,7 +24,7 @@ async function load() {
   try { communications.value = (await get(`/api/communications?${params}`)).communications || [] } finally { loading.value = false }
 }
 async function removeCommunication(item) {
-  if (!confirm(`删除“${item.reason}”沟通记录并移入回收站吗？关联待办会一同隐藏。`)) return
+  if (!(await confirmDialog({ title: '删除沟通记录？', message: `将删除“${item.reason}”并移入回收站，关联待办会一同隐藏。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/communication/${item.id}`)
   await load()
 }

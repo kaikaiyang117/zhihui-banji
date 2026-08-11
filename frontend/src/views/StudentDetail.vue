@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, Camera
 import { del, get, upload } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 import AddModal from '../components/AddModal.vue'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,6 +21,7 @@ const photoError = ref('')
 const photoVersion = ref(0)
 const photoBroken = ref(false)
 const showPhotoPreview = ref(false)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 const studentIndex = computed(() => students.value.findIndex(item => Number(item.id) === Number(data.value?.student?.id)))
 const previousStudent = computed(() => studentIndex.value > 0 ? students.value[studentIndex.value - 1] : null)
@@ -163,7 +165,7 @@ async function uploadPhoto(event) {
 }
 
 async function removePhoto() {
-  if (!photoUrl.value || !window.confirm('确定移除这名学生的照片吗？')) return
+  if (!photoUrl.value || !(await confirmDialog({ title: '移除学生照片？', message: '移除后可以重新上传照片。', confirmText: '移除照片' }))) return
   photoBusy.value = true
   photoError.value = ''
   try {

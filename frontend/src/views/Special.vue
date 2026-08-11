@@ -5,6 +5,7 @@ import { Plus, Tag, Trash2 } from 'lucide-vue-next'
 import { del, get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 import WorkflowModal from '../components/WorkflowModal.vue'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const focus = ref([])
 const loading = ref(true)
@@ -13,6 +14,7 @@ const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
 const reviewDue = String(route.query.review_due || '').slice(0, 10)
 const workflowTarget = ref(null)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 function openWorkflow(item, initialStatus = '') {
   workflowTarget.value = { item, initialStatus, actionLabel: initialStatus === '已结束' ? '结束关注' : '更新关注进展' }
@@ -29,7 +31,7 @@ async function load() {
   } finally { loading.value = false }
 }
 async function removeFocus(item) {
-  if (!confirm(`删除“${item.topic}”并移入回收站吗？关联待办会一同隐藏。`)) return
+  if (!(await confirmDialog({ title: '删除关注事项？', message: `将删除“${item.topic}”并移入回收站，关联待办会一同隐藏。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/focus/${item.id}`)
   await load()
 }

@@ -7,9 +7,11 @@ import {
 } from 'lucide-vue-next'
 import { del, get, put } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const router = useRouter()
 const route = useRoute()
+const { confirm: confirmDialog } = useConfirmDialog()
 const tasks = ref([])
 const summary = ref({})
 const loading = ref(true)
@@ -159,7 +161,7 @@ async function saveTask() {
 }
 
 async function removeTask(task) {
-  if (!confirm(`删除工作项“${task.title}”并移入回收站吗？`)) return
+  if (!(await confirmDialog({ title: '删除工作项？', message: `将删除“${task.title}”并移入回收站。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/work_item/${task.id}`)
   await load()
 }

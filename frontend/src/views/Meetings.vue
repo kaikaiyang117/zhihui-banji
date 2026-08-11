@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { CalendarPlus, CheckCircle2, ClipboardList, FileText, Plus, Trash2, Users } from 'lucide-vue-next'
 import { del, get, post } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const meetings = ref([])
 const students = ref([])
@@ -18,6 +19,7 @@ const form = reactive({
   student_ids: [], action_items: [],
 })
 const action = reactive({ title: '', due_at: '' })
+const { confirm: confirmDialog } = useConfirmDialog()
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -102,7 +104,7 @@ async function saveTemplate() {
 }
 
 async function removeMeeting() {
-  if (!selected.value || !confirm('删除这条班会记录？记录会进入回收站，行动项也会一并处理。')) return
+  if (!selected.value || !(await confirmDialog({ title: '删除班会记录？', message: '记录会进入回收站，行动项也会一并处理。', confirmText: '移入回收站' }))) return
   try {
     await del(`/api/education/meetings/${selected.value.id}`)
     selectedId.value = null

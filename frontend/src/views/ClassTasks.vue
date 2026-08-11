@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Check, ClipboardList, ListChecks, Paperclip, Plus, Trash2 } from 'lucide-vue-next'
 import { del, get, post, put, upload } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
@@ -22,6 +23,7 @@ const selectedItemIds = ref([])
 const closeDraft = ref({ result: '', confirm_incomplete: false })
 const templateForm = ref({ name: '', task_type: '材料收集', material_name: '', description: '', default_due_days: 7 })
 const form = ref({ title: '', task_type: '材料收集', start_at: '', due_at: '', material_name: '', description: '', student_ids: [], template_id: null })
+const { confirm: confirmDialog } = useConfirmDialog()
 const activeTask = computed(() => tasks.value.find(task => task.id === activeId.value))
 const filteredStudents = computed(() => {
   const keyword = studentKeyword.value.trim().toLowerCase()
@@ -204,7 +206,7 @@ async function bulkUpdateItems(status) {
 }
 
 async function removeTask() {
-  if (!activeTask.value || !confirm(`删除“${activeTask.value.title}”并移入回收站吗？`)) return
+  if (!activeTask.value || !(await confirmDialog({ title: '删除班级任务？', message: `将删除“${activeTask.value.title}”并移入回收站。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/class_task/${activeTask.value.id}`)
   activeId.value = null
   await load()

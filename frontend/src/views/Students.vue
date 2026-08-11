@@ -5,6 +5,7 @@ import { get, del } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { Plus, Upload, FileDown, Download } from 'lucide-vue-next'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const students = ref([])
 const loading = ref(true)
@@ -14,6 +15,7 @@ const editId = ref(null)
 const editData = ref(null)
 const keyword = ref('')
 const router = useRouter()
+const { confirm: confirmDialog } = useConfirmDialog()
 const studentHeaders = ['学号', '姓名', '性别', '出生年月', '民族', '是否住校', '班级任职', '监护人']
 const studentColWidths = [72, 76, 48, 86, 58, 72, 88, 100]
 
@@ -72,7 +74,7 @@ function startEdit(rowNo) {
 }
 
 async function removeStudent(id) {
-  if (!confirm('删除后学生会进入回收站，相关记录不会丢失。确定继续吗？')) return
+  if (!(await confirmDialog({ title: '删除学生？', message: '学生会进入回收站，相关记录不会丢失。', confirmText: '移入回收站' }))) return
   await del(`/api/students/${id}`)
   load()
 }

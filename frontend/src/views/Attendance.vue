@@ -6,6 +6,7 @@ import {
   History, MessageSquareText, Save, Trash2, UserRound, XCircle
 } from 'lucide-vue-next'
 import { del, get, post, put } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const SCENES = ['常规到校', '早自习', '上午', '下午', '晚自习']
 const STATUS_OPTIONS = ['出勤', '迟到', '请假', '早退', '缺勤']
@@ -45,6 +46,7 @@ const newRule = ref({
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
 const rulesExpanded = ref(Boolean(sourceId))
+const { confirm: confirmDialog } = useConfirmDialog()
 
 function localDate() {
   const d = new Date()
@@ -175,7 +177,7 @@ async function toggleRule(rule) {
 }
 
 async function removeRule(rule) {
-  if (!confirm(`删除规则“${rule.name}”并移入回收站吗？`)) return
+  if (!(await confirmDialog({ title: '删除考勤规则？', message: `将删除规则“${rule.name}”并移入回收站。`, confirmText: '移入回收站' }))) return
   try {
     await del(`/api/records/attendance_rule/${rule.id}`)
     ruleMessage.value = '规则已移入回收站'

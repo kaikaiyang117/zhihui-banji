@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import { BarChart3, Brain, CheckCircle, CircleAlert, Copy, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, UserPlus } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { del, get, post, put } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const router = useRouter()
+const { confirm: confirmDialog } = useConfirmDialog()
 const profiles = ref([])
 const activeProfileId = ref('')
 const status = ref(null)
@@ -91,7 +93,11 @@ async function renameWebSession(session) {
 }
 
 async function deleteWebSession(session) {
-  if (!window.confirm(`删除“${session.title || '新会话'}”及其历史记录吗？`)) return
+  if (!(await confirmDialog({
+    title: '删除会话？',
+    message: `将删除“${session.title || '新会话'}”及其历史记录，此操作无法恢复。`,
+    confirmText: '删除',
+  }))) return
   sessionBusy.value = true
   try {
     await del(`/api/agent/sessions/${encodeURIComponent(session.session_id)}`)
@@ -174,7 +180,11 @@ async function duplicateProfile(profile) {
 async function removeProfile() {
   if (profiles.value.length <= 1 || !activeProfileId.value) return
   const current = profiles.value.find((item) => item.profile_id === activeProfileId.value)
-  if (!window.confirm(`删除“${current?.profile_name || '当前配置'}”吗？`)) return
+  if (!(await confirmDialog({
+    title: '删除配置？',
+    message: `将删除“${current?.profile_name || '当前配置'}”，此操作无法恢复。`,
+    confirmText: '删除',
+  }))) return
   profileBusy.value = true
   notice.value = ''
   error.value = ''
@@ -509,6 +519,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </template>
+
   </div>
 </template>
 

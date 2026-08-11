@@ -5,6 +5,7 @@ import { FileEdit, Plus, Trash2 } from 'lucide-vue-next'
 import { del, get } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 import WorkflowModal from '../components/WorkflowModal.vue'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const events = ref([])
 const loading = ref(true)
@@ -13,6 +14,7 @@ const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
 const studentId = Number(route.query.student_id || 0)
 const workflowTarget = ref(null)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 async function load() {
   loading.value = true
@@ -22,7 +24,7 @@ async function load() {
   try { events.value = (await get(`/api/events?${params}`)).events || [] } finally { loading.value = false }
 }
 async function removeEvent(event) {
-  if (!confirm(`删除“${event.event_type}”并移入回收站吗？关联待办会一同隐藏。`)) return
+  if (!(await confirmDialog({ title: '删除学生事件？', message: `将删除“${event.event_type}”并移入回收站，关联待办会一同隐藏。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/event/${event.id}`)
   await load()
 }

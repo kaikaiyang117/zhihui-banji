@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Check, ChevronLeft, ChevronRight, Plus, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { del, get, post, put } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
@@ -20,6 +21,7 @@ const completionResult = ref('')
 const preview = ref(null)
 const form = ref({ area: '', student_id: '', status: '待完成', note: '' })
 const ruleForm = ref({ name: '', area: '', start_date: localDate(), end_date: '', weekday_mask: 31, student_ids: [] })
+const { confirm: confirmDialog } = useConfirmDialog()
 
 function localDate(offset = 0) {
   const d = new Date(); d.setDate(d.getDate() + offset)
@@ -77,7 +79,7 @@ async function submitCompletion() {
 }
 
 async function removeDuty(item) {
-  if (!confirm(`删除“${item.area} · ${item.姓名}”值日安排并移入回收站吗？`)) return
+  if (!(await confirmDialog({ title: '删除值日安排？', message: `将删除“${item.area} · ${item.姓名}”并移入回收站。`, confirmText: '移入回收站' }))) return
   await del(`/api/records/duty_assignment/${item.id}`); await load()
 }
 

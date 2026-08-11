@@ -5,6 +5,7 @@ import { get, del } from '../api'
 import DataTable from './DataTable.vue'
 import AddModal from './AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const props = defineProps({
   title: String,          // 页面标题
@@ -20,6 +21,7 @@ const headers = ref([])
 const rows = ref([])
 const loading = ref(true)
 const showModal = ref(false)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 async function load() {
   loading.value = true
@@ -35,7 +37,7 @@ async function load() {
 }
 
 async function removeRow(rowNo) {
-  if (!confirm('删除后记录会进入回收站，可以恢复。确定继续吗？')) return
+  if (!(await confirmDialog({ title: '删除记录？', message: '删除后记录会进入回收站，可以恢复。', confirmText: '移入回收站' }))) return
   try {
     await del(`/api/sheet/${props.sheetName}/row/${rowNo}`)
     load()

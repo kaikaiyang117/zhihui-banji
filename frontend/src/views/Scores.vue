@@ -6,6 +6,7 @@ import {
   Settings2, Trash2, TrendingDown, TrendingUp, Users, X
 } from 'lucide-vue-next'
 import { del, get, post, put, upload } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const route = useRoute()
 const sourceId = Number(route.query.source_id || 0)
@@ -39,6 +40,7 @@ const batchCombinationCode = ref('')
 const applyingPreset = ref(false)
 const batchSaving = ref(false)
 const detailSection = ref(null)
+const { confirm: confirmDialog } = useConfirmDialog()
 
 const selectedExam = computed(() => summary.value.exams.find(item => Number(item.id) === Number(selectedExamId.value)) || null)
 const selectedRecords = computed(() => summary.value.records.filter(item => Number(item.exam_id) === Number(selectedExamId.value)))
@@ -375,7 +377,7 @@ async function toggleRule(rule) {
 }
 
 async function removeRule(rule) {
-  if (!confirm(`删除规则“${rule.name}”并移入回收站吗？`)) return
+  if (!(await confirmDialog({ title: '删除成绩规则？', message: `将删除规则“${rule.name}”并移入回收站。`, confirmText: '移入回收站' }))) return
   try {
     await del(`/api/records/score_rule/${rule.id}`)
     message.value = '成绩规则已移入回收站'

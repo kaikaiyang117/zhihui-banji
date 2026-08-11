@@ -6,6 +6,7 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import zhCnLocale from '@fullcalendar/core/locales/zh-cn'
 import { del, get, post, put } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const businessDate = ref(new Date().toISOString().slice(0, 10))
 const month = ref(businessDate.value.slice(0, 7))
@@ -25,6 +26,7 @@ const loading = ref(true)
 const error = ref('')
 const notice = ref('')
 const form = reactive({ diary_date: `${month.value}-01`, weather: '', work: '', event: '', reflection: '', todo: '', link_type: '', link_id: '' })
+const { confirm: confirmDialog } = useConfirmDialog()
 
 const selected = computed(() => entries.value.find(item => item.id === selectedId.value) || null)
 const selectedDayEntries = computed(() => selected.value ? entriesFor(selected.value.diary_date) : [])
@@ -140,7 +142,7 @@ async function save() {
 }
 
 async function removeEntry() {
-  if (!selected.value || !confirm('删除这条日志？记录会进入回收站。')) return
+  if (!selected.value || !(await confirmDialog({ title: '删除日志？', message: '记录会进入回收站。', confirmText: '移入回收站' }))) return
   try { await del(`/api/education/diary/${selected.value.id}`); selectedId.value = null; notice.value = '日志已移入回收站。'; await load() } catch (e) { error.value = e.message }
 }
 

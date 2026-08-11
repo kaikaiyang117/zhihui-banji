@@ -11,6 +11,7 @@ import { clearDeviceCredential, del, fetchWithAccess, get, post } from './api'
 import { renderAgentMarkdown } from './markdown'
 import UpdateDialog from './components/UpdateDialog.vue'
 import ContextSwitcher from './components/ContextSwitcher.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -623,6 +624,7 @@ onBeforeUnmount(() => {
       </button>
     </header>
     <UpdateDialog :open="updateOpen" @close="updateOpen = false" />
+    <ConfirmDialog />
     <div v-if="accessBlocked" class="access-scrim access-blocked-scrim">
       <section class="access-blocked-card" role="alertdialog" aria-modal="true" aria-labelledby="access-blocked-title">
         <div class="access-blocked-icon"><component :is="renderIcon('ShieldAlert')" :size="24" /></div>

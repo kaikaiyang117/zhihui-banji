@@ -2,11 +2,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { CalendarDays, ClipboardCheck, FileText, Paperclip, Plus, Trash2, Users } from 'lucide-vue-next'
 import { del, get, post, upload } from '../api'
+import { useConfirmDialog } from '../composables/confirmDialog'
 
 const activities = ref([])
 const students = ref([])
 const templates = ref([])
 const selectedId = ref(null)
+const { confirm: confirmDialog } = useConfirmDialog()
 const showForm = ref(false)
 const loading = ref(true)
 const saving = ref(false)
@@ -81,7 +83,7 @@ async function handleUpload(event) {
 }
 
 async function removeActivity() {
-  if (!selected.value || !confirm('删除这条活动记录？记录会进入回收站。')) return
+  if (!selected.value || !(await confirmDialog({ title: '删除活动记录？', message: '记录会进入回收站。', confirmText: '移入回收站' }))) return
   try { await del(`/api/education/activities/${selected.value.id}`); selectedId.value = null; notice.value = '活动记录已移入回收站。'; await load() } catch (e) { error.value = e.message }
 }
 
