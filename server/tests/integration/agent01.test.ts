@@ -224,6 +224,11 @@ describe('检查点与恢复', () => {
     for (const message of messages) {
       expect(message.reasoning_content).toBeUndefined();
     }
+    store.save('s-private', [
+      { role: 'user', content: '问题' },
+      { role: 'assistant', content: '可见结论', reasoning_content: '不应持久化' },
+    ]);
+    expect(store.load('s-private').some((message) => message.reasoning_content !== undefined)).toBe(false);
   });
 
   it('模型未配置时 Agent 报明确错误（业务不受影响）', async () => {

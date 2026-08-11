@@ -16,6 +16,8 @@ extraResources:
     to: server
     filter:
       - '**/*'
+  - from: ../packaging/macos-updater.sh
+    to: backend/updater/macos-updater.sh
 win:
   target:
     - target: nsis

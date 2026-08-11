@@ -105,36 +105,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void app.register(fastifyCookie);
   void app.register(fastifyMultipart, { limits: { fileSize: 50 * 1024 * 1024 } });
   installRequestContext(app, config);
-  registerSystemSecurityRoutes(app);
 
-  // ---------- 基础资料与通用数据（MIG-05） ----------
-  registerMig05Routes(app);
-
-  // ---------- 行动闭环（MIG-06） ----------
-  registerMig06Routes(app);
-
-  // ---------- 高频教师业务（MIG-07） ----------
-  registerMig07Routes(app);
-
-  // ---------- 账目与教育沉淀（MIG-08） ----------
-  registerMig08Routes(app);
-
-  // ---------- 输出、个人与系统运维（MIG-09） ----------
-  registerMig09Routes(app);
-
-  // ---------- 统计（MIG-05 补齐） ----------
-  registerStatsRoutes(app);
-
-  // ---------- 回收站与审计（MIG-09 补齐） ----------
-  registerRecycleRoutes(app);
-
-  // ---------- Agent 基础路由（AGENT-01+） ----------
-  registerAgentRoutes(app);
-
-  // ---------- 微信渠道（AGENT-03） ----------
-  registerWechatRoutes(app);
-
-  // ---------- OpenAPI 文档 ----------
+  // Swagger 必须先注册，后续业务路由才会被收集到 OpenAPI 文档。
   void app.register(fastifySwagger, {
     openapi: {
       info: {
@@ -148,30 +120,60 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     routePrefix: '/docs',
     uiConfig: { docExpansion: 'list' },
   });
-  // 与 FastAPI 一致的 OpenAPI 快照地址（SPA 回退会拦截非显式路由，必须显式注册）
   app.get('/openapi.json', async () => app.swagger());
 
-  // ---------- 系统路由（业务路由在 MIG-03+ 接入） ----------
-  app.get('/api/system/health', {
-    schema: {
-      tags: ['system'],
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            app: { type: 'string' },
-            version: { type: 'string' },
-            ready: { type: 'boolean' },
+  app.after(() => {
+    registerSystemSecurityRoutes(app);
+
+    // ---------- 基础资料与通用数据（MIG-05） ----------
+    registerMig05Routes(app);
+
+    // ---------- 行动闭环（MIG-06） ----------
+    registerMig06Routes(app);
+
+    // ---------- 高频教师业务（MIG-07） ----------
+    registerMig07Routes(app);
+
+    // ---------- 账目与教育沉淀（MIG-08） ----------
+    registerMig08Routes(app);
+
+    // ---------- 输出、个人与系统运维（MIG-09） ----------
+    registerMig09Routes(app);
+
+    // ---------- 统计（MIG-05 补齐） ----------
+    registerStatsRoutes(app);
+
+    // ---------- 回收站与审计（MIG-09 补齐） ----------
+    registerRecycleRoutes(app);
+
+    // ---------- Agent 基础路由（AGENT-01+） ----------
+    registerAgentRoutes(app);
+
+    // ---------- 微信渠道（AGENT-03） ----------
+    registerWechatRoutes(app);
+
+    // ---------- 系统路由（业务路由在 MIG-03+ 接入） ----------
+    app.get('/api/system/health', {
+      schema: {
+        tags: ['system'],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              app: { type: 'string' },
+              version: { type: 'string' },
+              ready: { type: 'boolean' },
+            },
+            required: ['app', 'version', 'ready'],
           },
-          required: ['app', 'version', 'ready'],
         },
       },
-    },
-  }, async (_request, reply) => {
-    return reply.send({
-      app: config.appName,
-      version: config.appVersion,
-      ready: options.ready ? options.ready() : true,
+    }, async (_request, reply) => {
+      return reply.send({
+        app: config.appName,
+        version: config.appVersion,
+        ready: options.ready ? options.ready() : true,
+      });
     });
   });
 

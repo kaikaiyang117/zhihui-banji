@@ -21,9 +21,15 @@ if [ -z "$ELECTRON_VERSION" ] && [ -f "desktop/package.json" ]; then
 fi
 
 echo "==> 构建前端产物"
+if [ ! -x "frontend/node_modules/.bin/vite" ]; then
+  (cd frontend && npm ci)
+fi
 (cd frontend && npm run build)
 
 echo "==> 编译 Node 后端"
+if [ ! -x "server/node_modules/.bin/tsc" ]; then
+  (cd server && npm ci)
+fi
 (cd server && npm run build:server)
 
 echo "==> 组装 server-bundle（version=${VERSION}）"

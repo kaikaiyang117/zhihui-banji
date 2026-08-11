@@ -14,12 +14,14 @@ if (-not $ElectronVersion -and (Test-Path 'desktop\package.json')) {
 
 Write-Host '==> 构建前端产物'
 Set-Location frontend
+if (-not (Test-Path 'node_modules\.bin\vite.cmd')) { npm ci }
 npm run build
 if ($LASTEXITCODE -ne 0) { throw "前端构建失败：$LASTEXITCODE" }
 Set-Location $ProjectRoot
 
 Write-Host '==> 编译 Node 后端'
 Set-Location server
+if (-not (Test-Path 'node_modules\.bin\tsc.cmd')) { npm ci }
 npm run build:server
 if ($LASTEXITCODE -ne 0) { throw "后端编译失败：$LASTEXITCODE" }
 Set-Location $ProjectRoot

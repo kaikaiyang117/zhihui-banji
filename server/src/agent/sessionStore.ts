@@ -16,7 +16,7 @@ export class SessionStore {
   }
 
   load(sessionId: string, conn?: Database): Array<Record<string, unknown>> {
-    return compactMessages(loadAgentSession(sessionId, conn), this.max_messages);
+    return compactMessages(stripPrivateFields(loadAgentSession(sessionId, conn)), this.max_messages);
   }
 
   save(
@@ -34,7 +34,7 @@ export class SessionStore {
       }
     }
     if (!title) title = '新会话';
-    saveAgentSession(sessionId, compactMessages(messages, this.max_messages), title, options.conn);
+    saveAgentSession(sessionId, compactMessages(stripPrivateFields(messages), this.max_messages), title, options.conn);
   }
 
   clear(sessionId: string, conn?: Database): void {
@@ -196,4 +196,12 @@ function contextSummary(turns: Array<Array<Record<string, unknown>>>): string {
   return lines.length > 0
     ? '历史上下文摘要（由本地会话压缩生成，仅保留用户问题和助手结论）：\n' + lines.join('\n')
     : '';
+}
+
+function stripPrivateFields(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    const clean = { ...message };
+    delete clean.reasoning_content;
+    return clean;
+  });
 }

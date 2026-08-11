@@ -12,6 +12,7 @@ import { installSignalHandlers, startServer } from './lifecycle.js';
 import { WorkbenchDb } from './db/connection.js';
 import { setDatabase } from './services/context.js';
 import { setDb as setDbSingleton } from './db/index.js';
+import { migrateStoredSecrets } from './services/secretMigration.js';
 
 function print(message: string): void {
   process.stdout.write(`${message}\n`);
@@ -56,11 +57,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 0;
   }
 
-  if (config.lanMode) {
-    process.env.WORKBENCH_LAN_URL_BASE = `http://${localIp()}:${config.port}`;
-    config.lanUrlBase = process.env.WORKBENCH_LAN_URL_BASE;
-  }
-
   // MIG-03：数据库初始化作为启动任务，health.ready 仅在打开成功后为 true。
   const db = new WorkbenchDb({ dataDir: config.dataDir });
   const app = buildApp({ config, ready: () => db.isOpen });
@@ -70,6 +66,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         db.open();
         setDatabase(db);
         setDbSingleton(db);
+        migrateStoredSecrets();
         print(`数据库就绪（schema v${db.schemaVersion()}）：${db.paths.dbPath}`);
         // 启动时评估规则（失败不阻断启动，与 Python 一致）
         for (const evaluate of ['attendance', 'scores', 'points', 'funds', 'comments', 'education', 'knowledge']) {
@@ -90,6 +87,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       }
     },
   });
+  if (config.lanMode) {
+    // startServer 可能因端口冲突选择新端口，配对地址必须使用实际监听端口。
+    config.port = result.port;
+    config.lanUrlBase = `http://${localIp()}:${result.port}`;
+    process.env.WORKBENCH_LAN_URL_BASE = config.lanUrlBase;
+  }
   const close = result.close;
   result.close = async () => {
     await close();

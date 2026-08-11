@@ -9,6 +9,9 @@ import { createHash } from 'node:crypto';
 import { getDb } from './context.js';
 import { loadAppVersion, APP_NAME } from '../config/index.js';
 import { WorkbenchDb } from '../db/connection.js';
+import { deleteSettings, readSecret, writeSecret } from './secretStore.js';
+
+const GITHUB_TOKEN_SECRET_FILE = 'github-token.json';
 
 const UPDATE_API_URL = process.env.WORKBENCH_UPDATE_URL
   ?? 'https://api.github.com/repos/aitia0718/workbench/releases/latest';
@@ -28,10 +31,24 @@ let updateRunning = false;
 function githubToken(): string {
   const env = process.env.WORKBENCH_GITHUB_TOKEN ?? '';
   if (env) return env;
+  const storedSecret = readSecret<Record<string, unknown>>(GITHUB_TOKEN_SECRET_FILE);
+  if (storedSecret?.token) return String(storedSecret.token);
   const row = getDb().connInstance.prepare(
     'SELECT value FROM agent_settings WHERE key=?',
   ).get('github_token') as { value: string } | undefined;
-  return row ? String(row.value) : '';
+  if (!row) return '';
+  const token = String(row.value);
+  writeSecret(GITHUB_TOKEN_SECRET_FILE, { token });
+  deleteSettings(getDb().connInstance, ['github_token']);
+  return token;
+}
+
+export function migrateStoredGithubToken(conn?: import('better-sqlite3').Database): void {
+  const db = conn ?? getDb().connInstance;
+  const file = readSecret<Record<string, unknown>>(GITHUB_TOKEN_SECRET_FILE);
+  const row = db.prepare('SELECT value FROM agent_settings WHERE key=?').get('github_token') as { value: string } | undefined;
+  if (!file && row?.value) writeSecret(GITHUB_TOKEN_SECRET_FILE, { token: row.value });
+  if (row) deleteSettings(db, ['github_token']);
 }
 
 async function fetchJson(url: string): Promise<Record<string, unknown>> {
@@ -241,10 +258,8 @@ export function saveGithubToken(token: string): void {
   if (!value.startsWith('ghp_') && !value.startsWith('github_pat_')) {
     throw new Error('Token 格式不正确，应为 ghp_ 或 github_pat_ 开头');
   }
-  getDb().connInstance.prepare(
-    "INSERT INTO agent_settings(key, value, updated_at) VALUES('github_token', ?, datetime('now','localtime')) "
-    + "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-  ).run(value);
+  writeSecret(GITHUB_TOKEN_SECRET_FILE, { token: value });
+  deleteSettings(getDb().connInstance, ['github_token']);
 }
 
 export function githubTokenConfigured(): boolean {

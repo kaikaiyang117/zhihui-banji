@@ -10,7 +10,7 @@ Agent 的已完成能力和后续阶段任务见：[Agent 代理清单](Agent代
 pip install -r backend/requirements.txt
 ```
 
-`keyring` 会把扫码得到的微信 Bot Token 保存到 macOS Keychain 或 Windows 系统凭据库。若开发环境没有可用的系统凭据库，可以改用环境变量提供 Token。
+微信 Bot Token、模型 API Key、微信同步 Token 和更新 Token 会保存到数据目录下独立的权限受限 JSON 文件（文件权限为当前用户可读写），不会写入业务 SQLite 或迁移包。生产环境仍建议优先使用环境变量注入凭据。
 
 ## 2. 配置模型
 
@@ -53,7 +53,7 @@ curl -X POST http://127.0.0.1:5000/api/wechat/login/start
 curl -X POST http://127.0.0.1:5000/api/wechat/login/poll
 ```
 
-返回 `status=confirmed` 后，凭证会保存到系统凭据库，并自动启动消息接收循环。
+返回 `status=confirmed` 后，凭证会保存到本机 `data/wechat-credentials.json`，并自动启动消息接收循环。
 
 也可以通过环境变量直接提供已获得的 Token：
 
@@ -63,7 +63,7 @@ export MEIMEI_WECHAT_ALLOW_USERS="微信用户ID1,微信用户ID2"
 export MEIMEI_WECHAT_ENABLED=true
 ```
 
-界面保存的授权策略位于本机 `data/wechat-config.json`，不会进入 Git。若设置了 `MEIMEI_WECHAT_ALLOW_USERS`，环境变量优先，界面会显示“由环境变量管理”。
+界面保存的授权策略位于业务 SQLite；微信连接密钥位于本机 `data/wechat-config.json`，Bot 凭证位于 `data/wechat-credentials.json`，都不会进入 Git 或迁移包。若设置了 `MEIMEI_WECHAT_ALLOW_USERS`，环境变量优先，界面会显示“由环境变量管理”。
 
 ## 4. 本地测试 Agent
 

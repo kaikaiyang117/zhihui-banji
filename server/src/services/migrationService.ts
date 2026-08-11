@@ -15,7 +15,8 @@ export const MAX_MEMBER_BYTES = 200 * 1024 * 1024;
 export const MAX_MEMBER_COUNT = 100_000;
 export const EXCLUDED_DATA_FILES: ReadonlySet<string> = new Set([
   'workbench.db', 'workbench.db-wal', 'workbench.db-shm',
-  'agent-model.json', 'wechat-config.json', '.workbench-ready',
+  'agent-model.json', 'wechat-config.json', 'wechat-credentials.json', 'github-token.json', 'agent-checkpoints.db',
+  'agent-checkpoints.db-wal', 'agent-checkpoints.db-shm', '.workbench-ready',
 ]);
 export const EXCLUDED_DATA_DIRS: ReadonlySet<string> = new Set(['backups']);
 

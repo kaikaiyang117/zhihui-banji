@@ -253,7 +253,8 @@ export function registerMig09Routes(app: FastifyInstance): void {
   });
 
   // ---------- 迁移包 ----------
-  app.post('/api/system/migration/export', async (_request, reply) => {
+  app.post('/api/system/migration/export', async (request, reply) => {
+    if (!requireLocal(request, reply)) return reply;
     try {
       const filename = await migrationService.createPackage();
       return { ok: true, filename };
@@ -263,6 +264,7 @@ export function registerMig09Routes(app: FastifyInstance): void {
   });
 
   app.get('/api/system/migration/:filename', async (request, reply) => {
+    if (!requireLocal(request, reply)) return reply;
     const { filename } = request.params as { filename: string };
     try {
       const target = safeBackupPath(dbModule().backupDir(), filename);
@@ -275,6 +277,7 @@ export function registerMig09Routes(app: FastifyInstance): void {
   });
 
   app.post('/api/system/migration/import', async (request, reply) => {
+    if (!requireLocal(request, reply)) return reply;
     const data = await readUpload(request);
     try {
       return await migrationService.restorePackage(data.buffer);
@@ -342,6 +345,14 @@ export function registerMig09Routes(app: FastifyInstance): void {
       return reply.status(400).send({ detail: (error as Error).message });
     }
   });
+}
+
+function requireLocal(request: { ip: string }, reply: FastifyReply): boolean {
+  if (!isLocalHost(request.ip)) {
+    reply.status(403).send({ detail: '迁移包只能在工作台本机管理' });
+    return false;
+  }
+  return true;
 }
 
 function safeBackupPath(backupsDir: string, filename: string): string {

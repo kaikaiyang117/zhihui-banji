@@ -38,6 +38,9 @@ echo "==> 同步桌面应用版本（${VERSION}）"
 node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='${VERSION}';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
 
 echo "==> Electron Builder 打包（${ARCH}）"
+cd ..
+bash packaging/create-macos-icon.sh
+cd desktop
 if [ -n "${APPLE_CERTIFICATE_P12_BASE64:-}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   CERT_FILE="$RUNNER_TEMP/meimei-workbench-macos.p12"
   echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_FILE"
@@ -60,10 +63,13 @@ fi
 npx electron-builder --config electron-builder.yml --mac --"${ARCH//x86_64/x64}" --publish never
 cd ..
 
-if [ ! -f "desktop/dist/MeimeiWorkbench-macOS-${ARCH}.dmg" ]; then
+BUILDER_ARCH="${ARCH//x86_64/x64}"
+DMG_PATH="desktop/dist/MeimeiWorkbench-macOS-${BUILDER_ARCH}.dmg"
+FINAL_DMG="artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+if [ ! -f "$DMG_PATH" ]; then
   echo "未生成 DMG 安装包"
   exit 1
 fi
-cp "desktop/dist/MeimeiWorkbench-macOS-${ARCH}.dmg" "artifacts/"
+cp "$DMG_PATH" "$FINAL_DMG"
 
-echo "macOS 安装包已生成：$PROJECT_ROOT/artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+echo "macOS 安装包已生成：$PROJECT_ROOT/$FINAL_DMG"

@@ -324,7 +324,11 @@ export class AgentRunner {
     };
   }
 
-  private buildGraph(): Promise<{ invoke: (input: GraphState, sessionId: string) => Promise<GraphState>; stream: (input: GraphState, sessionId: string) => Promise<AsyncGenerator<unknown>> }> {
+  private buildGraph(): Promise<{
+    invoke: (input: GraphState, sessionId: string) => Promise<GraphState>;
+    stream: (input: GraphState, sessionId: string) => Promise<AsyncGenerator<unknown>>;
+    close: () => void;
+  }> {
     const registry = buildRegistry();
     const runtime = this.runtime(registry, registry.modelTools());
     return (async () => {
@@ -341,6 +345,9 @@ export class AgentRunner {
             configurable: { thread_id: sessionId }, streamMode: ['custom'],
           });
           return stream as unknown as AsyncGenerator<unknown>;
+        },
+        close: () => {
+          if (checkpointer.db.open) checkpointer.db.close();
         },
       };
     })();
@@ -362,8 +369,12 @@ export class AgentRunner {
     const handled = handleConfirmation(input, { sessionId, actorId, channel });
     if (handled[0]) return handled[1];
     const graph = await this.buildGraph();
-    const result = await graph.invoke(this.initial(sessionId, channel, actorId, input), sessionId);
-    return result.finalAnswer || '请输入要查询的内容。';
+    try {
+      const result = await graph.invoke(this.initial(sessionId, channel, actorId, input), sessionId);
+      return result.finalAnswer || '请输入要查询的内容。';
+    } finally {
+      graph.close();
+    }
   }
 
   async *chatStream(sessionId: string, text: string, options: { channel?: string; actorId?: string } = {}):
@@ -381,19 +392,23 @@ export class AgentRunner {
       return;
     }
     const graph = await this.buildGraph();
-    const stream = await graph.stream(this.initial(sessionId, channel, actorId, input), sessionId);
-    let finalAnswer = '';
-    for await (const event of stream) {
-      const payload = (Array.isArray(event) ? event[1] : event) as Record<string, unknown>;
-      if (payload.type === 'delta') {
-        finalAnswer += String(payload.content ?? '');
-        yield { type: 'delta', content: String(payload.content ?? '') };
-      } else if (payload.type === 'plan' || payload.type === 'plan_step') {
-        yield payload as unknown as Record<string, string>;
+    try {
+      const stream = await graph.stream(this.initial(sessionId, channel, actorId, input), sessionId);
+      let finalAnswer = '';
+      for await (const event of stream) {
+        const payload = (Array.isArray(event) ? event[1] : event) as Record<string, unknown>;
+        if (payload.type === 'delta') {
+          finalAnswer += String(payload.content ?? '');
+          yield { type: 'delta', content: String(payload.content ?? '') };
+        } else if (payload.type === 'plan' || payload.type === 'plan_step') {
+          yield payload as unknown as Record<string, string>;
+        }
       }
-    }
-    if (!finalAnswer) {
-      yield { type: 'delta', content: '查询未返回结果，请稍后重试。' };
+      if (!finalAnswer) {
+        yield { type: 'delta', content: '查询未返回结果，请稍后重试。' };
+      }
+    } finally {
+      graph.close();
     }
   }
 }
@@ -624,7 +639,6 @@ function assistantToolMessage(response: ModelResponse): Record<string, unknown> 
       function: { name: call.name, arguments: call.arguments },
     })),
   };
-  if (response.reasoning_content) message.reasoning_content = response.reasoning_content;
   return message;
 }
 

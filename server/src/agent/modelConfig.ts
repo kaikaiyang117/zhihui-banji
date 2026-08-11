@@ -1,8 +1,10 @@
 import type { Database } from 'better-sqlite3';
 
 import { getDb } from '../services/context.js';
+import { deleteSettings, readSecret, writeSecret } from '../services/secretStore.js';
 
 export const MODEL_SETTING_KEYS = ['model_base_url', 'model_name', 'model_api_key', 'model_thinking'] as const;
+const MODEL_SECRET_FILE = 'agent-model.json';
 
 export class ModelConfigError extends Error {}
 
@@ -46,7 +48,7 @@ function text(value: unknown): string {
   return String(value ?? '').trim();
 }
 
-function loadStored(db: Database): Record<string, string> {
+function loadStoredFromDb(db: Database): Record<string, string> {
   const result: Record<string, string> = {};
   for (const row of db.prepare(
     `SELECT key, value FROM agent_settings WHERE key IN (${MODEL_SETTING_KEYS.map(() => '?').join(',')})`,
@@ -54,6 +56,27 @@ function loadStored(db: Database): Record<string, string> {
     result[row.key] = row.value;
   }
   return result;
+}
+
+function loadStored(db: Database): Record<string, string> {
+  const file = readSecret<Record<string, unknown>>(MODEL_SECRET_FILE);
+  if (file) {
+    return Object.fromEntries(MODEL_SETTING_KEYS.map((key) => [key, String(file[key] ?? '')]));
+  }
+  const stored = loadStoredFromDb(db);
+  if (Object.values(stored).some(Boolean)) {
+    writeSecret(MODEL_SECRET_FILE, stored);
+    deleteSettings(db, MODEL_SETTING_KEYS);
+  }
+  return stored;
+}
+
+export function migrateStoredConfig(conn?: Database): void {
+  const db = conn ?? getDb().connInstance;
+  const file = readSecret<Record<string, unknown>>(MODEL_SECRET_FILE);
+  const stored = loadStoredFromDb(db);
+  if (!file && Object.values(stored).some(Boolean)) writeSecret(MODEL_SECRET_FILE, stored);
+  if (Object.keys(stored).length > 0) deleteSettings(db, MODEL_SETTING_KEYS);
 }
 
 export function loadConfig(conn?: Database): ModelConfigOptions {
@@ -103,15 +126,8 @@ export function saveConfig(
   values['model_base_url'] = baseUrl;
   values['model_name'] = model;
   values['model_thinking'] = thinking;
-  const upsert = db.prepare(
-    `INSERT INTO agent_settings(key, value, updated_at) VALUES(?,?,datetime('now','localtime'))
-     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
-  );
-  db.transaction(() => {
-    for (const key of MODEL_SETTING_KEYS) {
-      upsert.run(key, values[key]);
-    }
-  })();
+  writeSecret(MODEL_SECRET_FILE, values);
+  deleteSettings(db, MODEL_SETTING_KEYS);
   return publicConfig({
     api_key: values['model_api_key'],
     base_url: values['model_base_url'],

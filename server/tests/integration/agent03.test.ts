@@ -15,6 +15,7 @@ import { loadConfig as loadWechatConfig, saveConfig as saveWechatConfig, publicC
 import { SessionStore } from '../../src/agent/sessionStore.js';
 import { parseTextMessages } from '../../src/wechat/messageParser.js';
 import { wechatService } from '../../src/wechat/service.js';
+import { secretPath } from '../../src/services/secretStore.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -69,6 +70,11 @@ describe('微信配置', () => {
     expect(String(pub.client_secret_masked ?? '')).not.toContain('secret123');
     expect(String(pub.client_secret_masked ?? '')).toContain('…');
     expect(pub.sync_token_masked).toBeDefined();
+    expect(db.connInstance.prepare(
+      "SELECT value FROM agent_settings WHERE key='wechat_client_secret'",
+    ).get()).toBeUndefined();
+    expect(JSON.parse(fs.readFileSync(secretPath('wechat-config.json'), 'utf8')).wechat_client_secret)
+      .toBe('secret123');
   });
 });
 
@@ -138,11 +144,12 @@ describe('登录与消息循环（mock iLink）', () => {
       expect(String(started.qrcode ?? '')).toContain('qrcode-test-abc');
       const polled = await wechatService.pollLogin();
       expect(polled.status).toBe('confirmed');
-      // 凭据已保存（agent_settings）
+      // 凭据保存在独立的权限受限文件，不再进入业务 SQLite。
       const credential = db.connInstance.prepare(
         "SELECT value FROM agent_settings WHERE key='wechat_credentials'",
       ).get();
-      expect(credential).toBeTruthy();
+      expect(credential).toBeUndefined();
+      expect(fs.existsSync(secretPath('wechat-credentials.json'))).toBe(true);
     } finally {
       server.close();
     }

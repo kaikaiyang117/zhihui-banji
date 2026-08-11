@@ -156,6 +156,8 @@ describe('错误映射与 OpenAPI', () => {
     const parsed = spec.json();
     expect(parsed.info.title).toBe('MeimeiWorkbench');
     expect(parsed.info.version).toBe('9.8.7');
+    expect(Object.keys(parsed.paths)).toContain('/api/system/health');
+    expect(Object.keys(parsed.paths).length).toBeGreaterThan(20);
     await app.close();
   });
 });

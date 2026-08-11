@@ -16,6 +16,7 @@ import * as exportService from '../../src/services/exportService.js';
 import * as migrationService from '../../src/services/migrationService.js';
 import * as updateService from '../../src/services/update.js';
 import { createBackup } from '../../src/db/connection.js';
+import { secretPath } from '../../src/services/secretStore.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -188,6 +189,11 @@ describe('更新状态机', () => {
   it('github-token 保存与校验', () => {
     updateService.saveGithubToken('ghp_testtoken1234567890');
     expect(updateService.githubTokenConfigured()).toBe(true);
+    expect(db.connInstance.prepare(
+      "SELECT value FROM agent_settings WHERE key='github_token'",
+    ).get()).toBeUndefined();
+    expect(JSON.parse(fs.readFileSync(secretPath('github-token.json'), 'utf8')).token)
+      .toBe('ghp_testtoken1234567890');
     expect(() => updateService.saveGithubToken('bad')).toThrow(/Token 格式/);
     expect(() => updateService.saveGithubToken('')).toThrow(/不能为空/);
   });
@@ -198,6 +204,16 @@ describe('更新状态机', () => {
 });
 
 describe('HTTP 冒烟', () => {
+  it('迁移包只能在工作台本机管理', async () => {
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const response = await app.inject({
+      method: 'POST', url: '/api/system/migration/export', remoteAddress: '192.168.31.99',
+    });
+    expect(response.statusCode).toBe(403);
+    await app.close();
+  });
+
   it('报告/健康/导出/备份/迁移/更新端点连通', async () => {
     const app = buildApp({ config: testConfig() });
     await app.ready();
