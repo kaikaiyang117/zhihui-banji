@@ -445,15 +445,15 @@ onMounted(load)
 
 <style scoped>
 .context-switcher { position: relative; display: flex; align-items: center; margin-left: 10px; }
-.context-trigger { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.7); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.context-trigger { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 36px; padding: 0 12px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-pill); background: rgba(255,255,255,.84); color: var(--ds-color-ink); font: var(--ds-type-label); cursor: pointer; }
 .context-trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-archive-badge { padding: 1px 5px; border-radius: 999px; background: var(--warning-bg); color: #9a6200; font-size: 10px; }
-.context-popover { position: absolute; z-index: 320; top: 43px; left: 0; display: grid; width: min(330px, calc(100vw - 24px)); gap: 11px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,.98); box-shadow: var(--shadow-lg); }
+.context-popover { position: absolute; z-index: 320; top: 45px; left: 0; display: grid; width: min(330px, calc(100vw - 24px)); gap: 11px; padding: 16px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: rgba(255,255,255,.98); box-shadow: var(--ds-shadow-overlay); }
 .context-popover-title { font-size: 14px; font-weight: 700; }
 label { display: grid; gap: 5px; min-width: 0; }
 label > span { color: var(--text-secondary); font-size: 11px; }
-input, select { width: 100%; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: #fff; color: var(--text); font: inherit; font-size: 13px; outline: none; }
-input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.1); }
+input, select { width: 100%; min-width: 0; height: 38px; padding: 0 10px; border: 1px solid var(--ds-color-border-strong); border-radius: var(--ds-radius-control); background: var(--ds-color-surface); color: var(--ds-color-ink); font: var(--ds-type-body); outline: none; }
+input:focus, select:focus { border-color: var(--ds-color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 .context-primary, .context-secondary, .context-danger, .context-manage-link, .context-transfer button { min-height: 36px; padding: 0 12px; border-radius: 9px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .context-primary { border: 0; background: var(--primary); color: #fff; }
 .context-primary.inline { width: fit-content; margin-top: 12px; }
@@ -463,7 +463,7 @@ button:disabled { opacity: .45; cursor: default; }
 .context-manage-link { display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--primary); }
 .context-error { color: var(--danger); font-size: 12px; }
 .context-modal-scrim { position: fixed; inset: 0; z-index: 650; display: grid; place-items: center; padding: 20px; background: rgba(20,24,38,.34); backdrop-filter: blur(8px); }
-.context-modal { display: flex; flex-direction: column; width: min(920px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: hidden; border: 1px solid rgba(255,255,255,.7); border-radius: 22px; background: #fff; box-shadow: 0 24px 70px rgba(21,28,58,.24); }
+.context-modal { display: flex; flex-direction: column; width: min(920px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: hidden; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-dialog); background: var(--ds-color-surface); box-shadow: var(--ds-shadow-overlay); }
 .context-modal-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 22px 16px; border-bottom: 1px solid var(--border); }
 .context-modal-head h2 { font-size: 20px; }
 .context-modal-head p { margin-top: 3px; color: var(--text-secondary); font-size: 12px; }

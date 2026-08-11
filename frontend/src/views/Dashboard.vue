@@ -143,19 +143,19 @@ onMounted(load)
 <template>
   <div v-if="errorMsg" class="empty-state">
     <div>{{ errorMsg }}</div>
-    <button class="btn btn-outline" @click="load">重新加载</button>
+    <button class="btn btn-outline ds-button" @click="load">重新加载</button>
   </div>
-  <div v-else-if="stats" class="dashboard-page">
-    <div class="page-title-bar">
+  <div v-else-if="stats" class="dashboard-page ds-page">
+    <div class="page-title-bar ds-page-header">
       <div>
-        <div class="page-title">今日工作台</div>
-        <div class="page-subtitle">{{ stats.date }} · 从最需要处理的事情开始</div>
+        <div class="page-title ds-page-title">今日工作台</div>
+        <div class="page-subtitle ds-page-subtitle">{{ stats.date }} · 从最需要处理的事情开始</div>
       </div>
       <div class="toolbar dashboard-toolbar">
-        <router-link class="btn btn-primary" to="/attendance"><ClipboardList :size="14" /> 开始点名</router-link>
-        <button class="btn btn-outline" @click="modalMode = 'event'"><Plus :size="14" /> 快速记录</button>
+        <router-link class="btn btn-primary ds-button" to="/attendance"><ClipboardList :size="14" /> 开始点名</router-link>
+        <button class="btn btn-outline ds-button" @click="modalMode = 'event'"><Plus :size="14" /> 快速记录</button>
         <details class="dashboard-more-actions">
-          <summary class="btn btn-outline">更多操作</summary>
+          <summary class="btn btn-outline ds-button">更多操作</summary>
           <div class="dashboard-more-menu">
             <button @click="backup"><ShieldCheck :size="14" /> 备份数据</button>
             <button @click="fileInput?.click()"><Upload :size="14" /> 恢复数据</button>
@@ -195,7 +195,7 @@ onMounted(load)
     <div v-if="backupMessage" class="notice-bar"><ShieldCheck :size="16" /> {{ backupMessage }}</div>
 
     <section class="action-board" aria-labelledby="action-board-title">
-      <div class="section-heading">
+      <div class="section-heading ds-section-heading">
         <div><h2 id="action-board-title">今天要做</h2><p>进入事项后可完成、延期或继续处理来源记录</p></div>
         <router-link to="/tasks">全部 {{ stats.work_summary.open }} 项 <ArrowRight :size="14" /></router-link>
       </div>
@@ -219,8 +219,8 @@ onMounted(load)
       </div>
     </section>
 
-    <section class="card dashboard-calendar-card" aria-labelledby="dashboard-calendar-title">
-      <div class="section-heading dashboard-calendar-heading">
+    <section class="card ds-card dashboard-calendar-card" aria-labelledby="dashboard-calendar-title">
+      <div class="section-heading ds-section-heading dashboard-calendar-heading">
         <div><h2 id="dashboard-calendar-title"><CalendarDays :size="17" /> 本月安排</h2><p>点击日期查看当天校历和待办，未来 7 天安排也会集中列在下方</p></div>
         <router-link to="/school-calendar">管理完整校历 <ArrowRight :size="13" /></router-link>
       </div>
@@ -247,7 +247,7 @@ onMounted(load)
     </section>
 
     <div class="dashboard-grid operational-grid">
-      <section class="card operational-card">
+      <section class="card ds-card operational-card">
         <div class="card-title"><Phone :size="16" /> 待回访家长 <span class="count">{{ stats.pending_communication_count }}</span><router-link to="/parent-comm" class="card-action">管理 <ArrowRight :size="13" /></router-link></div>
         <div v-if="!stats.pending_communications.length" class="empty-state compact-empty">暂无待回访家长</div>
         <router-link v-for="item in stats.pending_communications.slice(0, 5)" :key="item.id" :to="{ path: '/parent-comm', query: { student_id: item.student_id } }" class="compact-action-row">
@@ -256,7 +256,7 @@ onMounted(load)
         </router-link>
       </section>
 
-      <section class="card operational-card">
+      <section class="card ds-card operational-card">
         <div class="card-title"><ClipboardList :size="16" /> 材料收集进度 <span class="count">{{ stats.material_task_count }}</span><router-link to="/class-tasks" class="card-action">管理 <ArrowRight :size="13" /></router-link></div>
         <div v-if="!stats.material_tasks.length" class="empty-state compact-empty">暂无进行中的班级任务</div>
         <router-link v-for="task in stats.material_tasks.slice(0, 5)" :key="task.id" :to="`/class-tasks?source_id=${task.id}`" class="material-row">
@@ -268,7 +268,7 @@ onMounted(load)
     </div>
 
     <div class="dashboard-grid">
-      <section class="card">
+      <section class="card ds-card">
         <div class="card-title"><UserRound :size="16" /> 需要复查的学生 <span class="count">{{ stats.review_student_count }}</span><router-link :to="{ path: '/special', query: { review_due: stats.date } }" class="card-action">管理 <ArrowRight :size="13" /></router-link></div>
         <div v-if="!stats.review_students.length" class="empty-state compact-empty">今天没有到期的学生复查</div>
         <router-link v-for="item in stats.review_students" :key="item.id" :to="`/student/${item.student_id}`" class="focus-row linked-row">
@@ -277,7 +277,7 @@ onMounted(load)
         </router-link>
       </section>
 
-      <section class="card class-snapshot">
+      <section class="card ds-card class-snapshot">
         <div class="card-title"><Users :size="16" /> 今日班级概况</div>
         <div class="snapshot-grid">
           <router-link to="/students"><span>在班学生</span><strong>{{ stats.total_students }}</strong></router-link>
@@ -288,7 +288,7 @@ onMounted(load)
       </section>
     </div>
 
-    <section class="card">
+    <section class="card ds-card">
       <div class="card-title">最近动态</div>
       <div v-if="!stats.recent_events.length" class="empty-state compact-empty">记录事件后，这里会形成班级动态</div>
       <router-link v-for="item in stats.recent_events" :key="item.id" :to="`/student/${item.student_id}`" class="activity-row linked-row">
@@ -298,14 +298,14 @@ onMounted(load)
       </router-link>
     </section>
 
-    <section class="card dashboard-quick-actions-card">
+    <section class="card ds-card dashboard-quick-actions-card">
       <div class="card-title">快捷操作</div>
       <div class="toolbar dashboard-quick-actions">
-        <router-link to="/attendance" class="btn btn-primary"><ClipboardList :size="14" /> 开始点名</router-link>
-        <button class="btn btn-outline" @click="modalMode = 'event'"><FileText :size="14" /> 记录学生事件</button>
-        <button class="btn btn-outline" @click="modalMode = 'comm'"><Phone :size="14" /> 家校沟通</button>
-        <button class="btn btn-outline" @click="modalMode = 'focus'"><Tag :size="14" /> 添加关注</button>
-        <router-link to="/scores" class="btn btn-outline"><TrendingUp :size="14" /> 查看成绩</router-link>
+        <router-link to="/attendance" class="btn btn-primary ds-button"><ClipboardList :size="14" /> 开始点名</router-link>
+        <button class="btn btn-outline ds-button" @click="modalMode = 'event'"><FileText :size="14" /> 记录学生事件</button>
+        <button class="btn btn-outline ds-button" @click="modalMode = 'comm'"><Phone :size="14" /> 家校沟通</button>
+        <button class="btn btn-outline ds-button" @click="modalMode = 'focus'"><Tag :size="14" /> 添加关注</button>
+        <router-link to="/scores" class="btn btn-outline ds-button"><TrendingUp :size="14" /> 查看成绩</router-link>
       </div>
     </section>
 
@@ -315,108 +315,117 @@ onMounted(load)
 </template>
 
 <style scoped>
-.dashboard-page { display: grid; gap: 16px; }
+.dashboard-page { display: grid; gap: var(--ds-space-6); color: var(--ds-color-ink); }
+.dashboard-page .page-title-bar { margin-bottom: 0; }
 .dashboard-toolbar { margin-bottom: 0; }
-.dashboard-page .card { box-shadow: none; }
+.dashboard-page .card { margin: 0; padding: var(--ds-space-6); box-shadow: none; }
+.dashboard-page .card-title { margin-bottom: var(--ds-space-4); color: var(--ds-color-ink); font: var(--ds-type-section); letter-spacing: -.015em; }
+.dashboard-page .card-title::before { display: none; }
+.dashboard-page .count { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.dashboard-page .card-action { color: var(--ds-color-primary); font: var(--ds-type-label); }
+.dashboard-page .empty-state { color: var(--ds-color-ink-secondary); font: var(--ds-type-body); }
 .dashboard-more-actions { position: relative; }
 .dashboard-more-actions summary { list-style: none; cursor: pointer; }
 .dashboard-more-actions summary::-webkit-details-marker { display: none; }
-.dashboard-more-menu { position: absolute; z-index: 5; top: calc(100% + 6px); right: 0; display: grid; min-width: 132px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-md); }
-.dashboard-more-menu button { display: flex; align-items: center; gap: 7px; padding: 8px 9px; border: 0; border-radius: 7px; color: var(--text); background: transparent; cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
-.dashboard-more-menu button:hover { background: var(--primary-bg); color: var(--primary); }
-.action-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.action-summary-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 5px 9px; min-height: 86px; padding: 15px 16px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); color: var(--text-secondary); text-decoration: none; box-shadow: var(--shadow-sm); }
-.action-summary-card > svg { grid-row: 1 / span 2; color: var(--primary); }
-.action-summary-card span { color: var(--text-secondary); font-size: 12px; }
-.action-summary-card strong { color: var(--text); font-size: 25px; line-height: 1; }
-.action-summary-card small { color: var(--text-tertiary); font-size: 11px; }
-.action-summary-card.danger { border-color: rgba(220,64,54,.2); background: var(--danger-bg); }
-.action-summary-card.danger > svg, .action-summary-card.danger strong { color: var(--danger); }
-.action-summary-card.primary { border-color: rgba(91,106,191,.2); background: var(--primary-bg); }
-.attendance-summary-card { border-color: rgba(45, 180, 95, .2); background: var(--success-bg); }
-.attendance-summary-card > svg, .attendance-summary-card strong { color: #26834b; }
-.action-board { padding: 2px 0; border: 0; background: transparent; }
-.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
-.section-heading h2 { margin: 0; color: var(--text); font-size: 16px; }
-.section-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
-.section-heading > a, .column-more { display: inline-flex; align-items: center; gap: 4px; color: var(--primary); font-size: 12px; text-decoration: none; }
-.action-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dashboard-more-menu { position: absolute; z-index: 5; top: calc(100% + var(--ds-space-2)); right: 0; display: grid; min-width: 152px; padding: var(--ds-space-2); border-radius: var(--ds-radius-control); background: var(--ds-color-surface); box-shadow: var(--ds-shadow-raised); }
+.dashboard-more-menu button { display: flex; align-items: center; gap: var(--ds-space-2); min-height: 36px; padding: 0 var(--ds-space-3); border: 0; border-radius: var(--ds-radius-sm); color: var(--ds-color-ink); background: transparent; cursor: pointer; font: var(--ds-type-label); text-align: left; }
+.dashboard-more-menu button:hover { background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); }
+.action-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ds-space-3); }
+.action-summary-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--ds-space-2) var(--ds-space-3); min-height: 98px; padding: var(--ds-space-4) 18px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); color: var(--ds-color-ink-secondary); text-decoration: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); }
+.action-summary-card:hover { border-color: var(--ds-color-primary-border); background: var(--ds-color-surface-subtle); }
+.action-summary-card > svg { grid-row: 1 / span 2; color: var(--ds-color-primary); }
+.action-summary-card span { color: var(--ds-color-ink-secondary); font: var(--ds-type-label); }
+.action-summary-card strong { color: var(--ds-color-ink); font: var(--ds-type-metric); font-variant-numeric: tabular-nums; }
+.action-summary-card small { color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }
+.action-summary-card.danger { border-color: var(--ds-color-danger-border); background: var(--ds-color-danger-soft); }
+.action-summary-card.danger > svg, .action-summary-card.danger strong { color: var(--ds-color-danger); }
+.action-summary-card.primary { border-color: var(--ds-color-primary-border); background: var(--ds-color-primary-soft); }
+.attendance-summary-card { border-color: var(--ds-color-success-border); background: var(--ds-color-success-soft); }
+.attendance-summary-card > svg, .attendance-summary-card strong { color: var(--ds-color-success); }
+.action-board { padding: var(--ds-space-6); border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ds-space-4); margin-bottom: var(--ds-space-4); }
+.section-heading h2 { margin: 0; }
+.section-heading p { margin: var(--ds-space-1) 0 0; }
+.section-heading > a, .column-more { display: inline-flex; align-items: center; gap: var(--ds-space-1); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.action-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ds-space-3); }
 .action-columns-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.action-column { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 13px; background: var(--bg); }
-.action-column.danger { border-color: rgba(220,64,54,.16); background: rgba(255,245,244,.75); }
-.action-column.primary { border-color: rgba(91,106,191,.16); background: rgba(246,247,253,.8); }
+.action-column { min-width: 0; padding: var(--ds-space-4); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); }
+.action-column.danger, .action-column.primary { background: var(--ds-color-surface-subtle); }
 .action-column > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; }
 .action-column header > div { display: grid; gap: 2px; min-width: 0; }
-.action-column header strong { color: var(--text); font-size: 13px; }
-.action-column header span { color: var(--text-secondary); font-size: 11px; }
-.action-column header em { display: grid; place-items: center; min-width: 26px; height: 26px; border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; font-style: normal; font-weight: 700; }
-.dashboard-task { display: grid; gap: 7px; padding: 10px 0; border-top: 1px solid var(--border); }
+.action-column header strong { color: var(--ds-color-ink); font: var(--ds-type-title); }
+.action-column header span { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.action-column header em { display: grid; place-items: center; min-width: 28px; height: 28px; border-radius: var(--ds-radius-sm); background: var(--ds-color-surface); color: var(--ds-color-ink); font: var(--ds-type-label); font-style: normal; font-variant-numeric: tabular-nums; }
+.action-column.danger header em { background: var(--ds-color-danger-soft); color: var(--ds-color-danger); }
+.action-column.primary header em { background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); }
+.dashboard-task { display: grid; gap: var(--ds-space-2); padding: var(--ds-space-3) 0; border-top: 1px solid color-mix(in srgb, var(--ds-color-border) 82%, transparent); }
 .dashboard-task-copy { display: grid; gap: 3px; min-width: 0; }
-.dashboard-task-copy strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-task-copy span { color: var(--text-secondary); font-size: 11px; }
+.dashboard-task-copy strong { overflow: hidden; color: var(--ds-color-ink); font: var(--ds-type-title); text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-task-copy span { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
 .dashboard-task-actions { display: flex; gap: 5px; }
-.dashboard-task-actions a { display: inline-flex; min-height: 30px; box-sizing: border-box; align-items: center; gap: 2px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text-secondary); font-size: 12px; text-decoration: none; }
-.dashboard-task-actions a:last-child { margin-left: auto; border-color: transparent; background: transparent; color: var(--primary); }
-.action-empty { padding: 22px 4px; border-top: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; text-align: center; }
-.column-more { justify-content: center; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
-.dashboard-calendar-card { padding: 16px; border: 1px solid var(--border); background: var(--surface); }
-.dashboard-calendar-heading { align-items: center; margin-bottom: 12px; }
+.dashboard-task-actions a { display: inline-flex; min-height: 32px; box-sizing: border-box; align-items: center; gap: 2px; padding: 5px var(--ds-space-2); border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-sm); background: var(--ds-color-surface); color: var(--ds-color-ink-secondary); font: var(--ds-type-label); text-decoration: none; }
+.dashboard-task-actions a:hover { border-color: var(--ds-color-primary-border); color: var(--ds-color-primary-hover); }
+.dashboard-task-actions a:last-child { margin-left: auto; border-color: transparent; background: transparent; color: var(--ds-color-primary); }
+.action-empty { padding: var(--ds-space-6) var(--ds-space-1); border-top: 1px solid var(--ds-color-border); color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-align: center; }
+.column-more { justify-content: center; margin-top: var(--ds-space-2); padding-top: var(--ds-space-3); border-top: 1px solid var(--ds-color-border); }
+.dashboard-calendar-card { background: var(--ds-color-surface); }
+.dashboard-calendar-heading { align-items: center; margin-bottom: var(--ds-space-4); }
 .dashboard-calendar-heading h2 { display: flex; align-items: center; gap: 7px; }
-.dashboard-calendar-heading > a { display: inline-flex; align-items: center; gap: 4px; color: var(--primary); font-size: 12px; text-decoration: none; }
-.dashboard-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(220px, .55fr); grid-template-rows: 520px; gap: 16px; align-items: stretch; }
+.dashboard-calendar-heading > a { display: inline-flex; align-items: center; gap: var(--ds-space-1); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.dashboard-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .55fr); grid-template-rows: 520px; gap: var(--ds-space-4); align-items: stretch; }
 .dashboard-calendar-month { min-width: 0; height: 100%; }
-.dashboard-calendar-component :deep(.fc) { --fc-border-color: #d5d8df; --fc-today-bg-color: rgba(91, 106, 191, .08); color: var(--text); font-size: 12px; }
-.dashboard-calendar-component :deep(.fc-scrollgrid) { border: 1px solid #d0d3da; border-radius: 10px; overflow: hidden; }
-.dashboard-calendar-component :deep(.fc-col-header-cell) { background: #f1f2f5; }
-.dashboard-calendar-component :deep(.fc-col-header-cell-cushion) { padding: 8px 4px; color: #626873; font-size: 11px; font-weight: 600; text-decoration: none; }
+.dashboard-calendar-component :deep(.fc) { --fc-border-color: var(--ds-color-border); --fc-today-bg-color: var(--ds-color-primary-soft); color: var(--ds-color-ink); font: var(--ds-type-meta); }
+.dashboard-calendar-component :deep(.fc-scrollgrid) { border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-control); overflow: hidden; }
+.dashboard-calendar-component :deep(.fc-col-header-cell) { background: var(--ds-color-surface-subtle); }
+.dashboard-calendar-component :deep(.fc-col-header-cell-cushion) { padding: 8px 4px; color: var(--ds-color-ink-secondary); font: var(--ds-type-label); text-decoration: none; }
 .dashboard-calendar-component :deep(.fc-daygrid-day-frame) { min-height: 76px; padding: 3px; }
-.dashboard-calendar-component :deep(.fc-daygrid-day-number) { padding: 4px 5px; color: #626873; font-size: 11px; font-weight: 500; text-decoration: none; }
-.dashboard-calendar-component :deep(.fc-day-other .fc-daygrid-day-number) { color: #9da2ab; }
-.dashboard-calendar-component :deep(.fc-day-today .fc-daygrid-day-number) { color: #4053a5; font-weight: 700; }
-.dashboard-calendar-component :deep(.fc-daygrid-event) { margin: 2px 3px; padding: 2px 4px; border: 0; border-radius: 5px; font-size: 10px; line-height: 1.25; cursor: pointer; }
-.dashboard-calendar-component :deep(.dashboard-calendar-school) { --fc-event-bg-color: #e4e9ff; --fc-event-border-color: #e4e9ff; --fc-event-text-color: #3f51a1; background: #e4e9ff; color: #3f51a1; }
-.dashboard-calendar-component :deep(.dashboard-calendar-holiday) { --fc-event-bg-color: #ffe1e5; --fc-event-border-color: #ffe1e5; --fc-event-text-color: #a43d50; background: #ffe1e5; color: #a43d50; }
-.dashboard-calendar-component :deep(.dashboard-calendar-task) { --fc-event-bg-color: #dcefe2; --fc-event-border-color: #dcefe2; --fc-event-text-color: #246b42; background: #dcefe2; color: #246b42; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-number) { padding: 4px 5px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
+.dashboard-calendar-component :deep(.fc-day-other .fc-daygrid-day-number) { color: var(--ds-color-ink-muted); }
+.dashboard-calendar-component :deep(.fc-day-today .fc-daygrid-day-number) { color: var(--ds-color-primary-hover); font-weight: 700; }
+.dashboard-calendar-component :deep(.fc-daygrid-event) { margin: 2px 3px; padding: 2px 4px; border: 0; border-radius: var(--ds-radius-sm); font: var(--ds-type-meta); line-height: 1.3; cursor: pointer; }
+.dashboard-calendar-component :deep(.dashboard-calendar-school) { --fc-event-bg-color: var(--ds-color-primary-soft); --fc-event-border-color: var(--ds-color-primary-soft); --fc-event-text-color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); }
+.dashboard-calendar-component :deep(.dashboard-calendar-holiday) { --fc-event-bg-color: var(--ds-color-danger-soft); --fc-event-border-color: var(--ds-color-danger-soft); --fc-event-text-color: var(--ds-color-danger); background: var(--ds-color-danger-soft); color: var(--ds-color-danger); }
+.dashboard-calendar-component :deep(.dashboard-calendar-task) { --fc-event-bg-color: var(--ds-color-success-soft); --fc-event-border-color: var(--ds-color-success-soft); --fc-event-text-color: var(--ds-color-success); background: var(--ds-color-success-soft); color: var(--ds-color-success); }
 .dashboard-calendar-component :deep(.fc-event-main) { color: inherit; }
-.dashboard-calendar-component :deep(.dashboard-calendar-holiday-cell) { background: #fff8f8; }
-.dashboard-day-detail { display: grid; align-content: start; gap: 8px; min-width: 0; height: 100%; max-height: 100%; box-sizing: border-box; overflow-y: auto; padding: 12px; border: 1px solid var(--border-light); border-radius: 11px; background: var(--bg); }
-.dashboard-day-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-.dashboard-day-title strong { font-size: 14px; }
-.dashboard-day-title span { color: var(--text-secondary); font-size: 11px; }
-.dashboard-day-school { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px; border-radius: 8px; background: var(--primary-bg); color: var(--primary); font-size: 12px; }
-.dashboard-day-school.holiday { background: rgba(235, 90, 105, .1); color: #b5465a; }
-.dashboard-day-school small { font-size: 10px; }
-.dashboard-day-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; padding: 8px 0; border-top: 1px solid var(--border); color: var(--text); text-decoration: none; }
-.dashboard-day-task span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-day-task small { color: var(--text-secondary); font-size: 10px; }
-.dashboard-day-task svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--primary); }
-.dashboard-upcoming { display: grid; gap: 7px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border); }
+.dashboard-calendar-component :deep(.dashboard-calendar-holiday-cell) { background: var(--ds-color-danger-soft); }
+.dashboard-day-detail { display: grid; align-content: start; gap: var(--ds-space-2); min-width: 0; height: 100%; max-height: 100%; box-sizing: border-box; overflow-y: auto; padding: var(--ds-space-4); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); }
+.dashboard-day-title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ds-space-2); padding-bottom: var(--ds-space-2); border-bottom: 1px solid var(--ds-color-border); }
+.dashboard-day-title strong { font: var(--ds-type-title); }
+.dashboard-day-title span { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.dashboard-day-school { display: flex; align-items: center; justify-content: space-between; gap: var(--ds-space-2); padding: 9px var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); font: var(--ds-type-label); }
+.dashboard-day-school.holiday { background: var(--ds-color-danger-soft); color: var(--ds-color-danger); }
+.dashboard-day-school small { font: var(--ds-type-meta); }
+.dashboard-day-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; padding: var(--ds-space-2) 0; border-top: 1px solid var(--ds-color-border); color: var(--ds-color-ink); text-decoration: none; }
+.dashboard-day-task span { overflow: hidden; font: var(--ds-type-label); text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-day-task small { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.dashboard-day-task svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--ds-color-primary); }
+.dashboard-upcoming { display: grid; gap: var(--ds-space-2); margin-top: var(--ds-space-4); padding-top: var(--ds-space-4); border-top: 1px solid var(--ds-color-border); }
 .dashboard-upcoming-title { display: flex; align-items: center; gap: 7px; }
-.dashboard-upcoming-title span { color: var(--text-secondary); font-size: 11px; }
-.dashboard-upcoming-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 9px; border: 1px solid var(--border-light); border-radius: 8px; color: var(--text); text-decoration: none; }
-.dashboard-upcoming-row:hover { border-color: rgba(91, 106, 191, .35); background: var(--primary-bg); }
-.dashboard-upcoming-date { display: grid; justify-items: center; gap: 2px; color: var(--primary); }
+.dashboard-upcoming-title span { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.dashboard-upcoming-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: var(--ds-space-3); padding: var(--ds-space-2) var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink); text-decoration: none; }
+.dashboard-upcoming-row:hover { background: var(--ds-color-primary-soft); }
+.dashboard-upcoming-date { display: grid; justify-items: center; gap: 2px; color: var(--ds-color-primary-hover); }
 .dashboard-upcoming-date strong { font-size: 15px; line-height: 1; }
-.dashboard-upcoming-date small, .dashboard-upcoming-copy small { color: var(--text-secondary); font-size: 10px; }
+.dashboard-upcoming-date small, .dashboard-upcoming-copy small { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
 .dashboard-upcoming-copy { display: grid; gap: 3px; min-width: 0; }
-.dashboard-upcoming-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-upcoming-row > svg { color: var(--primary); }
+.dashboard-upcoming-copy strong { overflow: hidden; font: var(--ds-type-label); text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-upcoming-row > svg { color: var(--ds-color-primary); }
 .operational-grid { align-items: stretch; }
 .operational-card { margin: 0; }
-.compact-action-row, .material-row { display: grid; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); color: var(--text); text-decoration: none; }
+.compact-action-row, .material-row { display: grid; align-items: center; gap: var(--ds-space-2); padding: var(--ds-space-3) 0; border-top: 1px solid var(--ds-color-border); color: var(--ds-color-ink); text-decoration: none; }
 .compact-action-row { grid-template-columns: minmax(0, 1fr) auto; }
 .compact-action-row > div, .material-copy { display: grid; gap: 3px; min-width: 0; }
-.compact-action-row strong, .material-row strong { font-size: 12px; }
-.compact-action-row span, .material-row span { overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.compact-action-row strong, .material-row strong { font: var(--ds-type-title); }
+.compact-action-row span, .material-row span { overflow: hidden; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-overflow: ellipsis; white-space: nowrap; }
 .material-row { grid-template-columns: minmax(0, 1fr) 76px 34px; }
-.material-progress { height: 6px; overflow: hidden; border-radius: 999px; background: var(--border); }
-.material-progress i { display: block; height: 100%; border-radius: inherit; background: var(--success); }
-.material-row em { color: var(--text-secondary); font-size: 11px; font-style: normal; text-align: right; }
+.material-progress { height: 6px; overflow: hidden; border-radius: var(--ds-radius-pill); background: var(--ds-color-surface-sunken); }
+.material-progress i { display: block; height: 100%; border-radius: inherit; background: var(--ds-color-success); transform-origin: left center; }
+.material-row em { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); font-style: normal; text-align: right; }
 .linked-row { color: inherit; text-decoration: none; }
 .class-snapshot { margin: 0; }
 .snapshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.snapshot-grid a { display: grid; gap: 3px; padding: 12px; border-radius: 11px; background: var(--bg); color: var(--text-secondary); font-size: 11px; text-decoration: none; }
-.snapshot-grid strong { color: var(--text); font-size: 20px; }
+.snapshot-grid a { display: grid; gap: var(--ds-space-1); padding: var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
+.snapshot-grid strong { color: var(--ds-color-ink); font: var(--ds-type-section); font-variant-numeric: tabular-nums; }
 .dashboard-quick-actions-card { margin-top: -2px; }
 .dashboard-quick-actions { margin-bottom: 0; }
 @media (max-width: 900px) {
@@ -430,13 +439,18 @@ onMounted(load)
   .dashboard-toolbar .btn { flex: 1; justify-content: center; }
   .dashboard-more-actions { flex: 1; }
   .dashboard-more-actions summary { justify-content: center; text-align: center; }
-  .action-summary { gap: 8px; }
-  .action-summary-card { min-height: 78px; padding: 12px; }
-  .action-summary-card strong { font-size: 22px; }
-  .action-board { padding: 14px; }
-  .section-heading { align-items: center; }
-  .section-heading p { display: none; }
-  .dashboard-calendar-card { padding: 12px; }
+  .dashboard-page { gap: var(--ds-space-4); }
+  .dashboard-page .card { padding: var(--ds-space-4); }
+  .action-summary { gap: var(--ds-space-2); }
+  .action-summary-card { grid-template-columns: minmax(0, 1fr) auto; min-height: 88px; padding: var(--ds-space-3); gap: var(--ds-space-1) var(--ds-space-2); }
+  .action-summary-card > svg { display: none; }
+  .action-summary-card span, .action-summary-card strong { white-space: nowrap; }
+  .action-summary-card small { grid-column: 1 / -1; }
+  .action-summary-card strong { font-size: 23px; }
+  .action-board { padding: var(--ds-space-4); }
+  .section-heading { align-items: flex-start; }
+  .section-heading p { display: block; }
+  .dashboard-calendar-card { padding: var(--ds-space-4); }
   .material-row { grid-template-columns: minmax(0, 1fr) 60px 30px; }
 }
 </style>

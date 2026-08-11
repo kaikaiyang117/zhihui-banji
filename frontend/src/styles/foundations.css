@@ -1,0 +1,25 @@
+/* Accessible focus is a system state, not a browser accident. */
+html {
+  font-optical-sizing: auto;
+}
+
+.app button:focus-visible,
+.app a:focus-visible,
+.app input:focus-visible,
+.app select:focus-visible,
+.app textarea:focus-visible,
+.app [tabindex]:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ds-color-focus) 72%, white);
+  outline-offset: 2px;
+}
+
+@media (prefers-contrast: more) {
+  .app button:focus-visible,
+  .app a:focus-visible,
+  .app input:focus-visible,
+  .app select:focus-visible,
+  .app textarea:focus-visible,
+  .app [tabindex]:focus-visible {
+    outline-color: var(--ds-color-focus);
+  }
+}

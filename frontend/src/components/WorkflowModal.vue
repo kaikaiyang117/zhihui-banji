@@ -102,7 +102,7 @@ onMounted(load)
 .workflow-modal:focus { outline: none; }
 .workflow-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .workflow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.workflow-task-choice { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 12px 0; padding: 13px; border: 1px solid #f1d6a5; border-radius: 11px; background: #fff9ed; font-size: 12px; }
+.workflow-task-choice { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 12px 0; padding: 13px; border: 1px solid var(--ds-color-warning-border); border-radius: var(--ds-radius-control); background: var(--ds-color-warning-soft); font: var(--ds-type-meta); }
 .workflow-task-choice strong { width: 100%; }
 .workflow-task-choice label { display: flex; align-items: center; gap: 6px; }
 .workflow-history { display: grid; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-light); }

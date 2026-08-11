@@ -1,44 +1,46 @@
-/* 美美大王工作台 v2.3 — Apple Design */
+/* 美美大王工作台 v2.3 — Apple-inspired system workbench */
 :root {
-  --system-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --system-font: var(--ds-font-sans);
   --system-rounded: "SF Pro Rounded", -apple-system, sans-serif;
 
-  --primary: #5b6abf;
-  --primary-hover: #4a57a8;
-  --primary-bg: rgba(91,106,191,0.08);
-  --blue: #0071e3;
-  --blue-bg: rgba(0,113,227,0.08);
+  /* Legacy aliases keep page-specific styles on the shared design system. */
+  --primary: var(--ds-color-primary);
+  --primary-hover: var(--ds-color-primary-hover);
+  --primary-light: var(--ds-color-primary-border);
+  --primary-bg: var(--ds-color-primary-soft);
+  --blue: var(--ds-color-info);
+  --blue-bg: var(--ds-color-info-soft);
 
-  --success: #34c759;
-  --success-bg: rgba(52,199,89,0.08);
-  --warning: #ff9f0a;
-  --warning-bg: rgba(255,159,10,0.08);
-  --danger: #ff3b30;
-  --danger-bg: rgba(255,59,48,0.08);
+  --success: var(--ds-color-success);
+  --success-bg: var(--ds-color-success-soft);
+  --warning: var(--ds-color-warning);
+  --warning-bg: var(--ds-color-warning-soft);
+  --danger: var(--ds-color-danger);
+  --danger-bg: var(--ds-color-danger-soft);
 
-  --text: #1d1d1f;
-  --text-secondary: #86868b;
-  --text-tertiary: #aeaeb2;
-  --bg: #f5f5f7;
-  --bg-elevated: #ffffff;
-  --surface: #ffffff;
-  --surface-subtle: #f5f5f7;
-  --border: rgba(0,0,0,0.08);
-  --border-strong: rgba(0,0,0,0.12);
-  --border-light: rgba(0,0,0,0.06);
+  --text: var(--ds-color-ink);
+  --text-secondary: var(--ds-color-ink-secondary);
+  --text-tertiary: var(--ds-color-ink-muted);
+  --bg: var(--ds-color-canvas);
+  --bg-elevated: var(--ds-color-surface);
+  --surface: var(--ds-color-surface);
+  --surface-subtle: var(--ds-color-surface-subtle);
+  --border: var(--ds-color-border);
+  --border-strong: var(--ds-color-border-strong);
+  --border-light: color-mix(in srgb, var(--ds-color-border) 72%, transparent);
 
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
+  --radius-sm: var(--ds-radius-sm);
+  --radius: var(--ds-radius-control);
+  --radius-lg: var(--ds-radius-card);
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-sm: 0 1px 2px rgba(32, 36, 47, .04);
+  --shadow: none;
+  --shadow-md: var(--ds-shadow-raised);
+  --shadow-lg: var(--ds-shadow-overlay);
 
-  --transition-fast: 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition: 250ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition-spring: 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: var(--ds-duration-fast) var(--ds-ease-out);
+  --transition: var(--ds-duration-standard) var(--ds-ease-out);
+  --transition-spring: var(--ds-duration-response) var(--ds-ease-out);
 
   --sidebar-width: 220px;
   --topbar-height: 48px;
@@ -48,12 +50,13 @@
 
 body {
   font-family: var(--system-font);
+  font-optical-sizing: auto;
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--ds-color-canvas);
+  color: var(--ds-color-ink);
   min-height: 100vh;
   letter-spacing: 0;
 }
@@ -70,10 +73,10 @@ body {
   align-items: center;
   height: var(--topbar-height);
   min-width: 0;
-  background: rgba(255,255,255,0.72);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.78);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  border-bottom: 1px solid var(--ds-color-border);
   padding: 0 16px;
   position: sticky;
   top: 0;
@@ -89,7 +92,7 @@ body {
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--ds-color-ink-secondary);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   transition: color var(--transition-fast), border-color var(--transition-fast);
@@ -99,11 +102,11 @@ body {
   letter-spacing: -0.01em;
 }
 
-.top-tab:hover { color: var(--text); }
+.top-tab:hover { color: var(--ds-color-ink); }
 
 .top-tab.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  color: var(--ds-color-primary-hover);
+  border-bottom-color: var(--ds-color-primary);
   font-weight: 600;
 }
 
@@ -114,10 +117,8 @@ body {
 
 .sidebar {
   width: var(--sidebar-width);
-  background: rgba(28,28,30,0.92);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  color: #f5f5f7;
+  background: #272931;
+  color: #f7f5f0;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -146,7 +147,7 @@ body {
 }
 
 .sidebar-header .sub {
-  font-size: 11px;
+  font: var(--ds-type-meta);
   color: rgba(255,255,255,0.45);
   margin-top: 2px;
   letter-spacing: 0;
@@ -162,10 +163,10 @@ body {
 
 .nav-group-title {
   padding: 6px 18px 3px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,.48);
   letter-spacing: 0.06em;
 }
 
@@ -177,20 +178,20 @@ body {
   margin: 0 8px;
   cursor: pointer;
   font-size: 13px;
-  color: rgba(255,255,255,0.7);
-  border-radius: 8px;
+  color: rgba(255,255,255,.76);
+  border-radius: var(--ds-radius-control);
   text-decoration: none;
   transition: background var(--transition-fast), color var(--transition-fast);
   letter-spacing: -0.01em;
 }
 
 .nav-item:hover {
-  background: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,.08);
   color: #ffffff;
 }
 
 .nav-item.active {
-  background: rgba(255,255,255,0.12);
+  background: rgba(238,240,251,.14);
   color: #ffffff;
   font-weight: 500;
 }
@@ -206,7 +207,7 @@ body {
 .sidebar-footer {
   padding: 14px 18px;
   border-top: 1px solid rgba(255,255,255,0.08);
-  font-size: 11px;
+  font: var(--ds-type-meta);
   color: rgba(255,255,255,0.35);
 }
 
@@ -218,6 +219,7 @@ body {
   max-width: none;
   padding: 24px 32px;
   overflow: auto;
+  background: var(--ds-color-canvas);
 }
 
 .page-title-bar {
@@ -1120,15 +1122,4 @@ body {
 
   .btn:active { transform: none; }
   .overview-card:hover { transform: none; }
-}
-
-/* Keep focus states visually quiet across the workbench. */
-.app button:focus-visible,
-.app a:focus-visible,
-.app input:focus-visible,
-.app select:focus-visible,
-.app textarea:focus-visible,
-.app [tabindex]:focus-visible {
-  outline: none;
-  outline-offset: 0;
 }

@@ -241,7 +241,7 @@ onUnmounted(clearPoll)
 
 <style>
 .update-scrim { position: fixed; inset: 0; z-index: 500; display: grid; place-items: center; padding: 20px; background: rgba(20,24,38,.28); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.update-dialog { width: min(440px, 100%); padding: 22px; border: 1px solid rgba(255,255,255,.72); border-radius: 24px; background: rgba(255,255,255,.94); box-shadow: 0 24px 70px rgba(21,28,58,.22); animation: update-dialog-in 250ms cubic-bezier(.16,1,.3,1); }
+.update-dialog { width: min(440px, 100%); padding: 22px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-dialog); background: rgba(255,255,255,.98); box-shadow: var(--ds-shadow-overlay); animation: update-dialog-in var(--ds-duration-standard) var(--ds-ease-out); }
 .update-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .update-title { font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
 .update-subtitle { margin-top: 4px; color: var(--text-secondary); font-size: 12px; }

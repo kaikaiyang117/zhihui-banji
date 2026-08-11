@@ -1,0 +1,74 @@
+:root {
+  /* Typography — one stable system family, roles carry the hierarchy. */
+  --ds-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-type-page: 700 30px/1.18 var(--ds-font-sans);
+  --ds-type-section: 650 18px/1.35 var(--ds-font-sans);
+  --ds-type-title: 650 14px/1.45 var(--ds-font-sans);
+  --ds-type-body: 400 14px/1.58 var(--ds-font-sans);
+  --ds-type-label: 600 12px/1.5 var(--ds-font-sans);
+  --ds-type-meta: 400 12px/1.5 var(--ds-font-sans);
+  --ds-type-metric: 700 26px/1 var(--ds-font-sans);
+
+  /* Cool system-gray surfaces with a restrained indigo action color. */
+  --ds-color-canvas: #f2f2f7;
+  --ds-color-surface: #ffffff;
+  --ds-color-surface-subtle: #f8f8fa;
+  --ds-color-surface-sunken: #e5e5ea;
+  --ds-color-ink: #1d1d1f;
+  --ds-color-ink-secondary: #636366;
+  --ds-color-ink-muted: #6e6e73;
+  --ds-color-border: #d9d9de;
+  --ds-color-border-strong: #c7c7cc;
+
+  --ds-color-primary: #5663b6;
+  --ds-color-primary-hover: #4b57a2;
+  --ds-color-primary-soft: #eef0fb;
+  --ds-color-primary-border: #d8dcf2;
+  --ds-color-focus: #5663b6;
+
+  --ds-color-success: #237a4b;
+  --ds-color-success-soft: #edf7f1;
+  --ds-color-success-border: #cfe6d8;
+  --ds-color-warning: #9a5a00;
+  --ds-color-warning-soft: #fff5e8;
+  --ds-color-warning-border: #efd9b8;
+  --ds-color-danger: #b42318;
+  --ds-color-danger-soft: #fff0ed;
+  --ds-color-danger-border: #f1cbc5;
+  --ds-color-info: #2563a6;
+  --ds-color-info-soft: #edf5fb;
+  --ds-color-info-border: #d0e2f1;
+
+  /* Four-point rhythm. */
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 16px;
+  --ds-space-6: 24px;
+  --ds-space-8: 32px;
+  --ds-space-10: 40px;
+
+  /* Radius communicates scale; pills are reserved for compact status. */
+  --ds-radius-sm: 6px;
+  --ds-radius-control: 10px;
+  --ds-radius-card: 14px;
+  --ds-radius-dialog: 18px;
+  --ds-radius-pill: 999px;
+
+  /* Flat by default. Depth appears only for floating or transient UI. */
+  --ds-shadow-raised: 0 12px 30px rgba(32, 36, 47, .09), 0 2px 8px rgba(32, 36, 47, .05);
+  --ds-shadow-overlay: 0 26px 70px rgba(32, 36, 47, .18), 0 8px 24px rgba(32, 36, 47, .08);
+
+  --ds-duration-fast: 140ms;
+  --ds-duration-standard: 220ms;
+  --ds-duration-response: 300ms;
+  --ds-ease-out: cubic-bezier(.16, 1, .3, 1);
+  --ds-ease-standard: cubic-bezier(.25, .1, .25, 1);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --ds-type-page: 700 24px/1.22 var(--ds-font-sans);
+    --ds-type-section: 650 17px/1.35 var(--ds-font-sans);
+  }
+}
