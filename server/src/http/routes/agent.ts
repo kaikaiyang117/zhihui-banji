@@ -10,6 +10,7 @@ import { listTools, invokeTool, listAudits, usageStats } from '../../agent/agent
 import { ToolError } from '../../agent/toolRegistry.js';
 import { loadConfig, saveConfig, publicConfig, ModelConfigError } from '../../agent/modelConfig.js';
 import { ModelError, ModelNotConfigured } from '../../agent/modelClient.js';
+import { wechatService } from '../../wechat/service.js';
 
 function mapAgentError(reply: FastifyReply, error: unknown): FastifyReply | undefined {
   if (error instanceof ModelNotConfigured || error instanceof ModelError || error instanceof ModelConfigError) {
@@ -21,18 +22,21 @@ function mapAgentError(reply: FastifyReply, error: unknown): FastifyReply | unde
   return undefined;
 }
 
-function toolErrorDetail(error: unknown): { message: string; code?: string } | null {
-  if (error instanceof ToolError) return { message: error.message, code: error.code };
-  return null;
-}
-
 export function registerAgentRoutes(app: FastifyInstance): void {
-  app.get('/api/agent/status', async () => ({
-    enabled: true,
-    configured: Boolean(loadConfig().api_key || process.env.MEIMEI_MODEL_API_KEY),
-    model: loadConfig().model,
-    model_configured: Boolean(loadConfig().api_key || process.env.MEIMEI_MODEL_API_KEY),
-  }));
+  app.get('/api/agent/status', async () => {
+    const config = loadConfig();
+    const wechatStatus = wechatService.status();
+    return {
+      enabled: true,
+      model: config.model || 'not_configured',
+      model_configured: Boolean(config.api_key && config.model && config.base_url),
+      wechat: 'iLink',
+      wechat_configured: Boolean(wechatStatus.configured),
+      wechat_running: Boolean(wechatStatus.running),
+      tool_count: listTools().length,
+      message: 'Agent 工具、模型客户端和微信接入接口已就绪，是否启用取决于本地配置。',
+    };
+  });
 
   app.get('/api/agent/config', async (request, reply) => {
     const host = request.ip;
@@ -76,22 +80,34 @@ export function registerAgentRoutes(app: FastifyInstance): void {
         channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
         sessionId: body.session_id ?? '',
       });
-      return result;
+      return { ok: true, tool: toolName, result };
     } catch (error) {
-      const mappedError = toolErrorDetail(error);
-      if (mappedError) return reply.status(400).send(mappedError);
+      if (error instanceof ToolError) {
+        return reply.status(400).send({ detail: error.message });
+      }
       throw error;
     }
   });
 
   app.post('/api/agent/chat', async (request, reply) => {
     const body = request.body as { session_id: string; message: string; channel?: string; actor_id?: string };
+    if (String(body.message ?? '').length < 1) {
+      return reply.status(422).send({
+        detail: [{
+          ctx: { min_length: 1 },
+          input: String(body.message ?? ''),
+          loc: ['body', 'message'],
+          msg: 'String should have at least 1 character',
+          type: 'string_too_short',
+        }],
+      });
+    }
     try {
       const runner = new AgentRunner({ sessionStore: new SessionStore() });
       const answer = await runner.chat(body.session_id, body.message, {
         channel: body.channel ?? 'local', actorId: body.actor_id ?? '',
       });
-      return { answer, session_id: body.session_id };
+      return { answer, session_id: body.session_id, ok: true };
     } catch (error) {
       const mapped = mapAgentError(reply, error);
       if (mapped) return mapped;
@@ -102,8 +118,9 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   app.post('/api/agent/chat/stream', async (request, reply) => {
     const body = request.body as { session_id: string; message: string; channel?: string; actor_id?: string };
     reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
+      'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
     });
     const runner = new AgentRunner({ sessionStore: new SessionStore() });
@@ -114,9 +131,9 @@ export function registerAgentRoutes(app: FastifyInstance): void {
         reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
       }
     } catch (error) {
-      const message = (error as Error).message;
-      reply.raw.write(`data: ${JSON.stringify({ type: 'error', content: message })}\n\n`);
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: (error as Error).message })}\n\n`);
     } finally {
+      reply.raw.write('data: {"type":"done"}\n\n');
       reply.raw.end();
     }
     return reply;

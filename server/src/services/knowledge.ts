@@ -37,7 +37,7 @@ export interface NoteIndex {
   tags: string[];
   content_hash: string;
   current_hash: string;
-  file_mtime: number;
+  file_mtime: string;
   sync_status: string;
 }
 
@@ -222,7 +222,7 @@ function syncFile(relativePath: string, options: { conn?: Database; acceptChange
     tags: metadata.tags,
     content_hash: storedHash,
     current_hash: digest,
-    file_mtime: fileMtime,
+    file_mtime: String(fileMtime),
     sync_status: status,
   };
 }
@@ -230,6 +230,7 @@ function syncFile(relativePath: string, options: { conn?: Database; acceptChange
 function decorate(note: NoteIndex, conn?: Database): Record<string, unknown> {
   const db = conn ?? getDb().connInstance;
   const item = { ...note } as Record<string, unknown>;
+  item.file_mtime = String(item.file_mtime ?? '');
   try {
     item.tags = JSON.parse(String(item.tags ?? '[]'));
   } catch {

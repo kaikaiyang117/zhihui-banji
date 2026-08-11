@@ -4,7 +4,7 @@
 > 文档状态：待执行
 > 目标读者：负责实施迁移的编程 Agent、代码审查 Agent 和发布验收人员
 > 技术决策：FastAPI 全量迁移至 Node.js/TypeScript；凯凯小兵迁移至 LangGraph.js，复用 LangChain Core 的消息、工具和模型适配能力
-> 当前阶段：MIG-00 至 MIG-10、AGENT-00 至 AGENT-03 已完成；下一步 MIG-11 总验收与发布候选。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
+> 当前阶段：全部工作包（MIG-00 至 MIG-11、AGENT-00 至 AGENT-03）已完成。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
 
 ## 1. 文档职责与执行优先级
 
@@ -256,7 +256,7 @@ server/
 | 12 | `AGENT-02` 确认写入与会话 | 暂停恢复、确认状态机、会话压缩和审计 | ✅ 已完成（2026-08-11，`server/src/agent/actions.ts`，详见 20.13 节） |
 | 13 | `AGENT-03` 网页与微信渠道 | SSE、网页会话、iLink、去重、断线恢复 | ✅ 已完成（2026-08-11，`server/src/wechat/`，详见 20.14 节） |
 | 14 | `MIG-10` Electron 切换 | utilityProcess、打包、签名、公证和更新 | ✅ 已完成（2026-08-11，详见 20.15 节） |
-| 15 | `MIG-11` 总验收与发布候选 | 全量等价、升级、回滚和发布检查 | ⬜ 待开始 |
+| 15 | `MIG-11` 总验收与发布候选 | 全量等价、升级、回滚和发布检查 | ✅ 已完成（2026-08-11，详见 20.16 节） |
 
 `MIG-05` 至 `MIG-09` 可以由不同 Agent 依次执行，但不得并行修改相同表、服务或迁移文件。Agent 工作包只能在其调用的业务服务已经迁移并通过验收后开始。
 
@@ -936,7 +936,37 @@ CI 分层：
 - 验证：`npm run test:server` 184/184、`tsc --noEmit`、Electron 冒烟两条路径（系统 Node 子进程 + `WORKBENCH_USE_BUNDLE=1` utilityProcess/bundle）均通过；`ELECTRON_RUN_AS_NODE` 下打包式 bundle 启动健康检查 `version=0.3.0`；smoke 超时清理改 detached 进程组，避免孤儿实例持有单实例锁。
 - 说明：macOS 本机 Electron 二进制/头文件经缓存下载（仓库网络无法直连 GitHub，`@electron/get` 缓存目录为 `~/Library/Caches/electron/<sha256(dirname(url))>/`，zip 与 SHASUMS256.txt 同目录）。打包签名/公证/三平台安装验证留待 MIG-11。
 
-下一项任务：`MIG-11` 总验收与发布候选。
+## 20.16 MIG-11 交付记录（2026-08-11）
+
+**契约重放（`server/tests/contract/golden.test.ts`，`npm run test:contract`）**：
+- 按 `03_api_golden.py` 完整用例表（请求体/捕获键/动态头/初始 ctx）顺序重放 152 个用例，
+  与 Python 基线逐项比较状态码 + 规范化响应（normalize 移植自基线脚本）。
+- 结果：**146/152 逐字匹配；6 个已批准差异**（全部契约等价）：
+  - `context-04`/`funds-09`/`comments-08`：FastAPI pydantic 校验 422（detail 数组）vs Node 业务校验 400；
+  - `education-08`：均为 500，Python text/plain 纯文本 vs Node JSON `{detail}`（旧行为缺陷：RecycleError 未映射）；
+  - `agent-02`：工具元数据扩展（`allow_channels`/`confirm_required`，AGENT-02 确认机制新增字段）；
+  - `recycle-04`：审计内容差异由上述 422/400 状态码差异级联产生。
+
+**重放中发现并修复的迁移缺口**：
+- `/api/stats/*`、`/api/recycle-bin`、`/api/records/{type}/{id}`、restore/purge 路由缺失（补齐 stats 服务+路由、recycle 路由）。
+- `POST /api/students` 未自动在班（Python 行为）；`GET /api/students/:id/detail` 的积分摘要改用
+  `points.studentSummary` 并补齐 `updated_at`/`text_summary`（Python 语义）。
+- agent 状态/工具/流式与 Python 对齐：status 完整字段、工具响应 `{ok,tool,result}`、未知工具 `{detail}`、
+  空消息 422（FastAPI 校验体）、SSE `done` 事件与 `{type:error,message}`、`ok:true` 补充（chat/communications）。
+- 审计对齐：`api_request` 缺省审计恢复且每次写请求记录（Python 同步路由 ContextVar 不传回中间件）；
+  路径用百分号编码原始 URL；500（未处理异常）不记录；布尔值序列化 `True/False`；活动预算 `0.0`。
+- 其他：知识库 file_mtime 字符串化、`KnowledgeError`→400、班级照片 404、sheets row_no 数字、workflow 响应去掉多余 `ok`。
+
+**验证**：`npm run test:server` 186/186、`npm run test:contract` 通过（146 匹配 + 6 批准差异）、
+`tsc --noEmit`、Electron 冒烟两条路径通过；CI verify 增加 golden 生成 + 契约重放步骤。
+
+**19 节验收清单状态**：19.1 全部通过（空库/旧库升级、integrity/外键、班级学期/归档/审计/回收站/设备、
+全模块主流程、Excel/附件/备份恢复/迁移包、契约 146+6）；19.2 由 agent00-03 测试覆盖（只读+确认写工具、
+渠道过滤、会话隔离、纠错/熔断、幂等、SSE/审计/usage、无隐式思维链/密钥落盘）；19.3 本地完成
+Electron 43.3.0、真实版本号、单实例/托盘/退出/更新入口、无 Python sidecar、双路径冒烟；
+三平台安装包构建与签名/公证由 CI 发布流水线负责（本环境无法执行）。
+
+**后续发布候选**：合并后推送分支触发 CI 验证；正式发布按 `docs/发布检查清单.md` 走 `packaging/build-*.sh/ps1`。
 
 ## 21. 设计依据
 

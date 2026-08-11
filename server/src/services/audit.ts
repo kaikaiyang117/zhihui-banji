@@ -60,7 +60,9 @@ function sanitize(value: unknown, key = ''): unknown {
   if (Array.isArray(value)) {
     return value.slice(0, 20).map((item) => sanitize(item));
   }
-  const text = value === null || value === undefined ? '' : String(value);
+  /* Python str() 的布尔值为 True/False；JS String(false) 为 'false'，对齐 Python。 */
+  const text = value === null || value === undefined ? ''
+    : typeof value === 'boolean' ? (value ? 'True' : 'False') : String(value);
   return text.slice(0, 200);
 }
 

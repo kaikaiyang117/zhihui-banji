@@ -23,6 +23,9 @@ function mapError(reply: FastifyReply, error: unknown): FastifyReply | undefined
   for (const ErrorType of known) {
     if (error instanceof ErrorType) {
       const message = (error as Error).message;
+      if (error instanceof knowledge.KnowledgeError) {
+        return reply.status(400).send({ detail: message });
+      }
       const status = message.includes('不存在') || message.includes('不在当前') ? 404 : 400;
       return reply.status(status).send({ detail: message });
     }
@@ -601,9 +604,9 @@ export function registerMig08Routes(app: FastifyInstance): void {
   // ---------- 知识库 ----------
   app.get('/api/knowledge/notes', async (request) => {
     const query = request.query as Record<string, string>;
-    return { notes: knowledge.listNotes({
+    return knowledge.listNotes({
       query: query.q ?? '', tag: query.tag ?? '', category: query.category ?? '',
-    }) };
+    });
   });
 
   app.get('/api/knowledge/notes/read', async (request, reply) => {

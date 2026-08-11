@@ -10,7 +10,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { ServerConfig } from '../../config/index.js';
 import { bindRequestScope, resetRequestScope } from '../../services/context.js';
-import { bindActor, resetActor, beginRequest, resetRequest, hasRecorded, record } from '../../services/audit.js';
+import { bindActor, resetActor, beginRequest, resetRequest, record } from '../../services/audit.js';
 import { authenticate, isLocalHost } from '../../services/devices.js';
 
 export function isProtectedPath(url: string): boolean {
@@ -84,13 +84,18 @@ export function installRequestContext(
       resetRequestScope();
     };
     reply.raw.once('finish', () => {
+      /* 与 Python 中间件一致的缺省写操作审计（api_request）。 */
       const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
       const separateChannel = request.url.startsWith('/api/agent') || request.url.startsWith('/api/wechat');
-      if (mutating && request.url.startsWith('/api/') && !separateChannel && !hasRecorded()) {
+      const pathOnly = String(request.raw.url ?? request.url ?? '').split('?')[0];
+      /* Python 的业务路由为同步 def（线程池执行），审计 ContextVar 不传回中间件，
+       * has_recorded() 恒为 False → 每次写请求都记 api_request；Node 保持同一可观察行为。
+       * 500（未处理异常）时 Python 的 call_next 抛错、中间件不记录，Node 对齐。 */
+      if (mutating && pathOnly.startsWith('/api/') && !separateChannel && reply.statusCode < 500) {
         try {
-          record('api_request', '', request.method.toLowerCase(), {
+          record('api_request', pathOnly, request.method.toLowerCase(), {
             status: reply.statusCode < 400 ? 'success' : 'failed',
-            summary: `${request.method} ${request.url}`,
+            summary: `${request.method} ${pathOnly}`,
             params: { query: request.query as Record<string, unknown>, status_code: reply.statusCode },
           });
         } catch {

@@ -258,7 +258,7 @@ describe('HTTP 冒烟', () => {
       payload: { arguments: { title: 'HTTP确认任务', student_id: 1 }, channel: 'web', actor_id: 't', session_id: 'web:http:1' },
     });
     expect(toolsRes.statusCode).toBe(200);
-    const preview = toolsRes.json();
+    const preview = toolsRes.json().result;
     expect(preview.confirmation_required).toBe(true);
 
     const pending = await app.inject({

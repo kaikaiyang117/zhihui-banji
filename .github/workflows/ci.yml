@@ -84,6 +84,9 @@ jobs:
       - name: Generate database baselines (MIG-00 fixtures)
         run: python migrate/baseline/02_db_baselines.py
 
+      - name: Generate API golden cases (MIG-11 contract fixture)
+        run: python migrate/baseline/03_api_golden.py
+
       - name: Typecheck
         working-directory: server
         run: npm run typecheck:server
@@ -91,6 +94,10 @@ jobs:
       - name: Run server tests
         working-directory: server
         run: npm run test:server
+
+      - name: Run contract replay (MIG-11)
+        working-directory: server
+        run: npm run test:contract
 
       - name: Build server
         working-directory: server

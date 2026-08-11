@@ -72,6 +72,11 @@ function intValue(value: unknown, label: string, minimum = 0): number {
   return number;
 }
 
+function pyFloatString(value: number): string {
+  /* Python str() 对浮点数输出 '0.0'，JS 无浮点类型；审计参数对齐 Python。 */
+  return Number.isInteger(value) ? `${value}.0` : String(value);
+}
+
 function money(value: unknown): number {
   const raw = value === null || value === undefined || value === '' ? 0 : value;
   const number = Number(raw);
@@ -457,7 +462,7 @@ export function createActivity(options: {
     }
     audit.record('activity', createdId, 'create', {
       summary: `新增活动：${name}`,
-      params: { occurred_on: occurredOn, participant_count: count, budget: money(options.budget) },
+      params: { occurred_on: occurredOn, participant_count: count, budget: pyFloatString(money(options.budget)) },
       classId, termId, conn,
     });
     return createdId;

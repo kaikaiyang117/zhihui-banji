@@ -34,7 +34,7 @@ function errorHandler(reply: FastifyReply, error: unknown): FastifyReply | undef
   if (error instanceof ArchivedScopeError) return reply.status(409).send({ detail: error.message });
   if (error instanceof ScopeError) return reply.status(400).send({ detail: error.message });
   if (error instanceof StudentDuplicateError) return reply.status(409).send({ detail: error.message });
-  if (error instanceof StudentPhotoError) return reply.status(400).send({ detail: error.message });
+  if (error instanceof StudentPhotoError) return reply.status(404).send({ detail: error.message });
   if (error instanceof SheetError) return reply.status(404).send({ detail: error.message });
   if (error instanceof RecycleError) return reply.status(404).send({ detail: error.message });
   const record = error as { code?: unknown; message?: string };
@@ -193,6 +193,7 @@ export function registerMig05Routes(app: FastifyInstance): void {
     const body = request.body as StudentFields;
     try {
       const studentId = createStudent(body);
+      enrollStudent(studentId);
       return { ok: true, id: studentId };
     } catch (error) {
       const mapped = errorHandler(reply, error);
@@ -354,7 +355,7 @@ export function registerMig05Routes(app: FastifyInstance): void {
       const rowNo = sheetsService.insertRow(name, body.data);
       sheetsService.recordSheetAudit('sheet_row', `${name}:${rowNo}`, 'create',
         `新增${name}记录`, { sheet: name, row_no: rowNo });
-      return { ok: true, row_no: rowNo };
+      return { ok: true, row_no: Number(rowNo) };
     } catch (error) {
       const mapped = errorHandler(reply, error);
       if (mapped) return mapped;
@@ -374,7 +375,7 @@ export function registerMig05Routes(app: FastifyInstance): void {
       sheetsService.updateCell(name, Number(body.row_no), Number(body.col), body.value);
       sheetsService.recordSheetAudit('sheet_row', `${name}:${body.row_no}`, 'update',
         `更新${name}记录`, { sheet: name, row_no: body.row_no, col: body.col, value: body.value });
-      return { ok: true, row_no: body.row_no, col: body.col };
+      return { ok: true, row_no: Number(body.row_no), col: Number(body.col) };
     } catch (error) {
       const mapped = errorHandler(reply, error);
       if (mapped) return mapped;

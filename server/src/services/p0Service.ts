@@ -8,6 +8,7 @@ import { getDb, scopeIds, ensureStudentInScope } from './context.js';
 import * as audit from './audit.js';
 import { todayString } from './clock.js';
 import { ensureSourceWorkItem, listWorkItems, type WorkItemError } from './workItems.js';
+import * as points from './points.js';
 import { WorkflowError } from './workflow.js';
 
 export class CommunicationError extends Error {}
@@ -280,7 +281,15 @@ export function studentDetail(studentId: number): Record<string, unknown> {
   const attendance = listAttendanceRecords({ studentId, limit: 5000 });
 
   const scoreSummary = buildScoreSummary(studentId, conn, classId, termId);
-  const pointsSummary = buildPointsSummary(studentId, conn, classId, termId);
+  const pointsSummary = points.studentSummary(studentId) as Record<string, unknown>;
+  const pointEntries = (pointsSummary.entries ?? []) as Array<Record<string, unknown>>;
+  pointsSummary.updated_at = pointEntries
+    .map((item) => String(item.updated_at ?? item.created_at ?? ''))
+    .filter(Boolean)
+    .sort()
+    .pop() ?? '';
+  const pointWeeks = (pointsSummary.weekly ?? []) as Array<number>;
+  pointsSummary.text_summary = `累计 ${pointsSummary.total ?? 0} 分，${pointWeeks.filter((value) => value).length} 个周次有积分记录。`;
   const commentsSummary = buildCommentsSummary(studentId, conn, classId, termId);
 
   const timeline: Array<Record<string, unknown>> = [];
@@ -478,55 +487,6 @@ function buildScoreSummary(
     },
     text_summary: textSummary,
   };
-}
-
-function buildPointsSummary(
-  studentId: number, conn: Database, classId: number, termId: number,
-): Record<string, unknown> {
-  const rows = conn.prepare(
-    'SELECT p.*, s.学号, s.姓名 FROM point_ledger p JOIN students s ON s.id=p.student_id '
-    + "WHERE p.class_id=? AND p.term_id=? AND p.student_id=? AND s.deleted_at=''",
-  ).all(classId, termId, studentId) as Array<Record<string, unknown>>;
-  const entries = rows.map((row) => ({ ...row }));
-  const valid = entries.filter((item) => String(item.status) === '有效');
-  const total = valid.reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
-  const reference = new Date(`${todayString()}T00:00:00`);
-  const mondayOffset = (reference.getDay() + 6) % 7;
-  const monday = new Date(reference);
-  monday.setDate(reference.getDate() - mondayOffset);
-  const weekly: number[] = [];
-  for (let index = 7; index >= 0; index -= 1) {
-    const start = new Date(monday);
-    start.setDate(monday.getDate() - index * 7);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    const weekTotal = valid
-      .filter((item) => {
-        const date = String(item.occurred_at ?? '').slice(0, 10);
-        return date >= start.toISOString().slice(0, 10) && date <= end.toISOString().slice(0, 10);
-      })
-      .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
-    weekly.push(roundAmount(weekTotal));
-  }
-  return {
-    student_id: studentId,
-    weekly,
-    total: roundAmount(total),
-    positive_total: roundAmount(valid.filter((item) => Number(item.amount ?? 0) > 0)
-      .reduce((sum, item) => sum + Number(item.amount ?? 0), 0)),
-    negative_total: roundAmount(valid.filter((item) => Number(item.amount ?? 0) < 0)
-      .reduce((sum, item) => sum + Number(item.amount ?? 0), 0)),
-    entry_count: valid.length,
-    revoked_count: entries.length - valid.length,
-    entries,
-    text_summary: weekly.some((value) => value !== 0)
-      ? `累计 ${roundAmount(total)} 分，${weekly.filter((value) => value !== 0).length} 个周次有积分记录。`
-      : '暂无行为积分趋势数据。',
-  };
-}
-
-function roundAmount(value: number): number {
-  return Number.isInteger(value) ? value : Math.round(value * 100) / 100;
 }
 
 function buildCommentsSummary(

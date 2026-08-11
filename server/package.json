@@ -10,7 +10,8 @@
     "test:server": "vitest run",
     "build:server": "tsc -p tsconfig.build.json",
     "start": "node dist/entry.js",
-    "dev": "tsx src/entry.ts"
+    "dev": "tsx src/entry.ts",
+    "test:contract": "vitest run tests/contract"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

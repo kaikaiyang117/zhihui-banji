@@ -210,7 +210,7 @@ export function registerMig06Routes(app: FastifyInstance): void {
   app.post('/api/communications', async (request, reply) => {
     const body = request.body as Record<string, unknown>;
     try {
-      return createCommunication({
+      const result = createCommunication({
         studentId: Number(body.student_id), communicatedAt: String(body.communicated_at ?? ''),
         method: String(body.method ?? ''), reason: String(body.reason ?? ''),
         summary: String(body.summary ?? ''), feedback: String(body.feedback ?? ''),
@@ -218,6 +218,7 @@ export function registerMig06Routes(app: FastifyInstance): void {
         status: String(body.status ?? '已完成'),
         eventId: body.event_id !== undefined && body.event_id !== null ? Number(body.event_id) : null,
       });
+      return { ok: true, ...result };
     } catch (error) {
       const mapped = mapError(reply, error);
       if (mapped) return mapped;
@@ -306,7 +307,7 @@ export function registerMig06Routes(app: FastifyInstance): void {
         requestId: String(body.request_id ?? ''),
         fields: body.fields as Record<string, unknown> | null | undefined,
       });
-      return { ok: true, ...result };
+      return result;
     } catch (error) {
       const mapped = mapError(reply, error);
       if (mapped) return mapped;
