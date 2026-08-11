@@ -70,7 +70,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         setDatabase(db);
         print(`数据库就绪（schema v${db.schemaVersion()}）：${db.paths.dbPath}`);
         // 启动时评估规则（失败不阻断启动，与 Python 一致）
-        for (const evaluate of ['attendance', 'scores']) {
+        for (const evaluate of ['attendance', 'scores', 'points', 'funds', 'comments', 'education', 'knowledge']) {
           try {
             const module = await import(`./services/${evaluate}.js`);
             if (typeof module.evaluateStartup === 'function') {

@@ -16,12 +16,14 @@ export interface DbPaths {
   dataDir: string;
   dbPath: string;
   backupsDir: string;
+  kbDir: string;
 }
 
 export interface WorkbenchDbOptions {
   dataDir: string;
   dbPath?: string;
   backupsDir?: string;
+  kbDir?: string;
 }
 
 export class WorkbenchDb {
@@ -34,6 +36,7 @@ export class WorkbenchDb {
       dataDir: options.dataDir,
       dbPath: options.dbPath ?? path.join(options.dataDir, 'workbench.db'),
       backupsDir: options.backupsDir ?? path.join(options.dataDir, 'backups'),
+      kbDir: options.kbDir ?? path.join(options.dataDir, '知识库'),
     };
   }
 

@@ -21,6 +21,7 @@ import { registerSystemSecurityRoutes } from './http/routes/system.js';
 import { registerMig05Routes } from './http/routes/mig05.js';
 import { registerMig06Routes } from './http/routes/mig06.js';
 import { registerMig07Routes } from './http/routes/mig07.js';
+import { registerMig08Routes } from './http/routes/mig08.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
 const REDACT_PATHS = [
@@ -109,6 +110,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   // ---------- 高频教师业务（MIG-07） ----------
   registerMig07Routes(app);
+
+  // ---------- 账目与教育沉淀（MIG-08） ----------
+  registerMig08Routes(app);
 
   // ---------- OpenAPI 文档 ----------
   void app.register(fastifySwagger, {

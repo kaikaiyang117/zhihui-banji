@@ -53,8 +53,35 @@ server/
 
 ## 下一工作包
 
-`MIG-08` 账目与教育沉淀：行为积分（规则/流水/撤销/旧数据迁移）、班费（分类/流水/结算/冲正）、
-评语（模板/生成/审核/版本）、教育记录（班会/活动/日志）、知识库（Markdown 同步/冲突采纳）。
+`MIG-09` 输出、个人与系统运维：周/月/学期报告与档案、健康目标/记录/提醒、
+Excel 导入导出统一、SQLite 备份/恢复/迁移包、更新检查（ready_to_install）。
+
+## MIG-08 账目与教育沉淀（已交付）
+
+`src/services/`：
+- `points.ts`：积分流水/撤销/规则/周期评估（命中/重开/解除 + 工作项联动）、
+  `classSummary`/`studentSummary`、旧"日常行为积分"周快照迁移（防重 + 报告）；
+  注册 `sourceTransitionHooks['point_rule']`。
+- `funds.ts`：班费分类/流水（未结算可改可撤、已结算只能冲正、撤销后不可操作）、
+  结算/对账、凭证附件（sha256 原子写入）、旧班费表迁移。
+- `comments.ts`：评语模板/条目/状态机（草稿→待审核→完成→已发送 + 版本历史）、
+  模板变量渲染与缺失标记、人工编辑保护、AI 草稿保存、旧评语表迁移。
+- `education.ts`：班会（行动项→统一工作项 `meeting_action`）、活动（跟进→工作项
+  `activity`、附件）、日志（五类关联）、旧通用表迁移（domain4_migration_runs）。
+- `knowledge.ts`：Markdown 知识库（frontmatter/标签/关联）、外部修改冲突检测
+  （expected_hash/force/adopt）、目录增量同步；`WorkbenchDb` 增加 `kbDir`。
+
+`src/http/routes/mig08.ts`：积分/班费/评语（含打印页）/教育/知识库路由；
+`/api/comments/ai/preview` 暂返回 503（AGENT-00 接入模型后启用）。
+`entry.ts` 启动评估补全 points/funds/comments/education/knowledge。
+
+验证（tests/integration/mig08.test.ts，15 项；总 128/128）：
+- 积分流水/撤销/汇总、规则命中→完成已处理、旧周快照迁移幂等。
+- 班费撤销/冲正/结算对账业务规则（含已结算限制）。
+- 评语状态机+版本历史、模板缺失变量标记。
+- 班会行动项→工作项、活动附件落盘、日志关联。
+- 知识库创建/读取/外部冲突/force 覆盖/重名拒绝。
+- HTTP 全端点连通。
 
 ## MIG-07 高频教师业务（已交付）
 
