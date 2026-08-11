@@ -24,6 +24,7 @@ import { registerMig07Routes } from './http/routes/mig07.js';
 import { registerMig08Routes } from './http/routes/mig08.js';
 import { registerMig09Routes } from './http/routes/mig09.js';
 import { registerAgentRoutes } from './http/routes/agent.js';
+import { registerWechatRoutes } from './http/routes/wechat.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
 const REDACT_PATHS = [
@@ -121,6 +122,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   // ---------- Agent 基础路由（AGENT-01+） ----------
   registerAgentRoutes(app);
+
+  // ---------- 微信渠道（AGENT-03） ----------
+  registerWechatRoutes(app);
 
   // ---------- OpenAPI 文档 ----------
   void app.register(fastifySwagger, {

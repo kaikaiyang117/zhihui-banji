@@ -53,7 +53,26 @@ server/
 
 ## 下一工作包
 
-`AGENT-03` 网页与微信渠道：SSE 打磨、微信 iLink 适配器（登录/消息循环/去重/断线恢复）。
+`MIG-10` Electron 切换：utilityProcess 运行 Node 后端（替代 Python sidecar）、打包/签名/更新验证。
+
+## AGENT-03 网页与微信渠道（已交付）
+
+`src/wechat/`（子代理移植，与 Python 逐条对应）：
+- `config.ts`：微信配置（env > DB agent_settings、白名单策略、脱敏输出）。
+- `ilinkClient.ts`：iLink HTTP 客户端（fetch + AbortSignal 超时/取消、ret 错误映射、
+  `-14` 会话过期、X-WECHAT-UIN、base_info 注入、可注入 httpClient 便于测试）。
+- `authService.ts`：扫码登录状态机（start/poll、凭据保存）。
+- `messageLoop.ts`：长轮询 + receipt 去重（wechat_message_receipts）+ cursor 续传 + 有限退避。
+- `messageParser.ts`：消息文本解析（跳过图片、拼接文本）。
+- `service.ts`：`wechatService` 单例（登录/循环/停止/状态/策略/提醒去重
+  `wechat_reminder_receipts`；`wechat:{from_user_id}` 会话调 AgentRunner.chat，
+  确认拦截由 runner 承担）；配置变更自动重建客户端（syncConfig）。
+- 路由 `wechat.ts`：config GET/PUT、login start/poll、loop start/stop、status、
+  reminders/send（已注册到 app.ts）。
+
+验证（tests/integration/agent03.test.ts，6 项；总 179/179）：
+- 配置脱敏、消息解析、receipt 去重、会话命名空间隔离、登录→凭据落库、
+  消息循环启动/停止（mock iLink 服务）、HTTP 冒烟。
 
 ## AGENT-02 确认写入与会话（已交付）
 

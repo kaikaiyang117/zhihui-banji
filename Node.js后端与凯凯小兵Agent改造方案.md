@@ -4,7 +4,7 @@
 > 文档状态：待执行
 > 目标读者：负责实施迁移的编程 Agent、代码审查 Agent 和发布验收人员
 > 技术决策：FastAPI 全量迁移至 Node.js/TypeScript；凯凯小兵迁移至 LangGraph.js，复用 LangChain Core 的消息、工具和模型适配能力
-> 当前阶段：MIG-00 至 MIG-09、AGENT-00/01/02 已完成；下一步 AGENT-03 网页与微信渠道。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
+> 当前阶段：MIG-00 至 MIG-09、AGENT-00 至 AGENT-03 已完成；下一步 MIG-10 Electron 切换。不授权删除 Python 后端、修改真实数据库、提交、推送或发布
 
 ## 1. 文档职责与执行优先级
 
@@ -254,7 +254,7 @@ server/
 | 10 | `AGENT-00` Agent 基线与模型层 | 固定轨迹并移植模型/工具契约 | ✅ 已完成（2026-08-11，`server/src/agent/`，详见 20.11 节） |
 | 11 | `AGENT-01` LangGraph Harness | 状态图、检查点、计划、执行、验证和纠错 | ✅ 已完成（2026-08-11，`server/src/agent/`，详见 20.12 节） |
 | 12 | `AGENT-02` 确认写入与会话 | 暂停恢复、确认状态机、会话压缩和审计 | ✅ 已完成（2026-08-11，`server/src/agent/actions.ts`，详见 20.13 节） |
-| 13 | `AGENT-03` 网页与微信渠道 | SSE、网页会话、iLink、去重、断线恢复 | ⬜ 待开始 |
+| 13 | `AGENT-03` 网页与微信渠道 | SSE、网页会话、iLink、去重、断线恢复 | ✅ 已完成（2026-08-11，`server/src/wechat/`，详见 20.14 节） |
 | 14 | `MIG-10` Electron 切换 | utilityProcess、打包、签名、公证和更新 | ⬜ 待开始 |
 | 15 | `MIG-11` 总验收与发布候选 | 全量等价、升级、回滚和发布检查 | ⬜ 待开始 |
 
@@ -921,7 +921,13 @@ CI 分层：
 - 验证（11 项新增，总 173/173）：全链路确认执行+备份+幂等、错误 token、取消/过期、参数校验、聊天拦截（模型不被调用）、压缩摘要、HTTP。
 - 关键实现：confirmation_token 只接口返回、不落明文；`agent_actions` 为授权/幂等权威来源（interrupt 仅暂停）。
 
-下一项任务：`AGENT-03` 网页与微信渠道。
+## 20.14 AGENT-03 交付记录（2026-08-11）
+
+- `src/wechat/`（子代理移植，9 文件 + 路由）：配置（env+DB+白名单）、iLink 客户端（fetch/超时/取消/`-14` 会话过期/可注入 http）、登录状态机、消息循环（receipt 去重/cursor/退避）、消息解析、`wechatService` 单例（`wechat:{user}` 会话、提醒去重、配置变更 syncConfig 重建客户端）。
+- 验证（6 项新增，总 179/179）：配置脱敏、解析、去重、会话隔离、登录→凭据、循环启停（mock iLink）、HTTP。
+- 关键实现：`_request` 返回完整响应体、服务读顶层字段（与 Python 一致）；服务单例在导入时固定配置 → 增加 syncConfig 按最新配置刷新；提醒按 `(class_id,term_id,task_id,recipient,reminder_key)` 幂等。
+
+下一项任务：`MIG-10` Electron 切换。
 
 ## 21. 设计依据
 
