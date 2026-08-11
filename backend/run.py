@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""启动入口：python run.py [--lan] [--port 5000]"""
+"""启动入口：python run.py [--lan] [--port 5000] [--desktop-child]"""
 import argparse
 import sys
 import os
@@ -45,8 +45,18 @@ def parse_args(argv=None):
     parser.add_argument('--port', type=int, default=None, help='覆盖端口，默认读取 WORKBENCH_PORT')
     parser.add_argument('--open-browser', action='store_true', help='启动后打开浏览器')
     parser.add_argument('--no-browser', action='store_true', help='不自动打开浏览器')
+    parser.add_argument('--desktop-child', action='store_true',
+                        help='Electron 子进程模式：不打开浏览器、不创建 Python 托盘，'
+                             '输出单行机器可读地址 WORKBENCH_URL=...')
     parser.add_argument('--version', action='version', version=f'%(prog)s {APP_VERSION}')
     return parser.parse_args(argv)
+
+
+def should_open_browser(args) -> bool:
+    """Electron 子进程永远不打开浏览器；其余逻辑沿用原规则。"""
+    if args.desktop_child:
+        return False
+    return not args.no_browser and (args.open_browser or IS_FROZEN)
 
 
 def main(argv=None):
@@ -60,13 +70,19 @@ def main(argv=None):
     if lan_mode:
         os.environ['WORKBENCH_PORT'] = str(port)
         os.environ['WORKBENCH_LAN_URL_BASE'] = f'http://{local_ip()}:{port}'
+    if args.desktop_child:
+        os.environ['WORKBENCH_PORT'] = str(port)
+        os.environ['WORKBENCH_DESKTOP_CHILD'] = '1'
     print(f'美美大王工作台启动中 -> http://localhost:{port}')
     if lan_mode:
         print(f'局域网配对入口 -> {os.environ["WORKBENCH_LAN_URL_BASE"]}')
         print('请在工作台点击“手机访问”生成 5 分钟有效的单次配对二维码。')
         print('安全提示：仅在可信局域网使用，不要将此端口映射到公网。')
-    open_browser = not args.no_browser and (args.open_browser or IS_FROZEN)
-    if open_browser:
+    if args.desktop_child:
+        print(f'WORKBENCH_URL=http://127.0.0.1:{port}', flush=True)
+        uvicorn.run(application, host=host, port=port, reload=False, log_level='warning')
+        return
+    if should_open_browser(args):
         browser_url = f'http://127.0.0.1:{port}/'
         threading.Timer(0.8, lambda: webbrowser.open(browser_url)).start()
     if IS_FROZEN:

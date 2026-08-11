@@ -179,6 +179,15 @@ Agent 核心层：planner / runner / tools / session / audit
 - 导航配置和工作表字段定义集中在 `frontend/src/sheets.js`；新增工作表页面时同步检查导航、字段、后端元数据和导出逻辑。
 - Vite 构建输出到 `backend/static/`，不是 `frontend/dist/`。任何前端修改后都要重新构建。
 
+### Electron 桌面壳
+
+- `desktop/` 是 Electron 桌面壳：窗口、托盘、单实例、后端子进程、下载/外部协议、更新安装协调和退出清理都集中在 `desktop/main.js`；`desktop/preload.js` 只暴露逐项白名单 IPC，不暴露完整 `ipcRenderer`。
+- 后端以 sidecar 子进程方式启动：`python run.py --desktop-child`（打包模式为 PyInstaller 构建的 `MeimeiWorkbench` 可执行文件）。子进程模式不打开浏览器、不创建 Python 托盘，打印单行 `WORKBENCH_URL=http://127.0.0.1:<port>` 后由 Electron 轮询 `/api/system/health` 判断就绪。
+- Electron 是唯一桌面宿主：托盘、退出权和更新安装权都在 Electron；Python 托盘（`backend/app/tray.py`）只在旧打包模式下使用。退出时必须由 Electron 终止后端，等待端口释放；`--desktop-child` 模式正常退出会清理 `.workbench-ready` 标记。
+- 更新所有权边界：后端只负责检查、升级前备份、下载和 SHA-256 校验，校验通过后进入 `ready_to_install` 状态；Electron 通过受限 IPC 调用 `/api/system/update/installer-path`（仅本机）取得安装包后关闭应用并启动安装器。后端不得再自行启动安装器或 `os._exit`。
+- Electron 安全基线：`nodeIntegration: false`、`contextIsolation: true`、`sandbox: true`、不关闭 `webSecurity`；主窗口只加载后端回环地址，非白名单导航一律拦截，外部链接仅放行 http(s) 与 `obsidian://`；同源 `window.open` 视为下载交给下载策略，不打开外部浏览器。
+- Electron 的 `userData` 使用独立的 `MeimeiWorkbench-Electron` 目录，不能与后端数据目录（`MeimeiWorkbench`）混用；打包时 Python sidecar 放在 `extraResources`，不能打进 `app.asar`。
+
 路由示例：
 
 ```js
@@ -224,6 +233,17 @@ bash scripts/smoke-ui.sh
 
 该脚本会启动临时服务并使用临时数据目录，检查工作台页面、手机访问入口和更新入口。涉及主要页面、设备配对凭证、局域网入口或桌面壳层的改动，应执行该测试。
 
+### Electron 冒烟测试
+
+需要 Node.js 和 Electron（首次 `cd desktop && npm install`）：
+
+```bash
+cd desktop
+npm test
+```
+
+该测试用临时 `WORKBENCH_DATA_DIR`/`WORKBENCH_KB_DIR` 启动 Electron，检查窗口标题、手机访问/更新入口、后端健康检查，退出后确认端口释放。涉及 `desktop/`、`backend/run.py` 启动契约、健康检查或更新安装边界的改动，应执行该测试和对应后端测试。
+
 ### CI
 
 `.github/workflows/ci.yml` 会执行后端测试、前端构建和浏览器 UI 冒烟测试。发布前还应参考 `docs/发布检查清单.md`，但不要把发布操作当作普通代码修改的一部分自动执行。
@@ -268,6 +288,8 @@ bash scripts/smoke-ui.sh
 | 微信模块 | `backend/app/wechat/` |
 | Agent 核心状态机 | `backend/app/agent/planner.py`、`runner.py`、`actions.py`、`tool_registry.py` |
 | Agent/微信配置 | `backend/app/agent/model_config.py`、`backend/app/wechat/config.py` |
+| Electron 桌面壳 | `desktop/main.js`、`desktop/preload.js`、`desktop/electron-builder.yml` |
+| Electron 冒烟测试 | `desktop/tests/smoke.mjs` |
 | 系统功能开发计划 | `docs/系统功能开发计划.md` |
 | Agent 能力矩阵 | `docs/Agent能力矩阵.md` |
 | 后端测试 | `backend/tests/` |

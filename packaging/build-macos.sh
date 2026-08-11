@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# macOS Electron 构建：Vue build → PyInstaller sidecar → Electron Builder → 签名/公证 → DMG
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,35 +18,49 @@ case "$ARCH" in
   *) echo "不支持的 macOS 架构：$ARCH"; exit 1 ;;
 esac
 
-rm -rf dist/MeimeiWorkbench.app build artifacts
-python -m PyInstaller packaging/meimei-workbench.spec --noconfirm --clean
+echo "==> 清理旧产物"
+rm -rf dist/MeimeiWorkbench build/backend-sidecar desktop/dist desktop/release artifacts
+mkdir -p artifacts
 
-if [ ! -d "dist/MeimeiWorkbench.app" ]; then
-  echo "未生成 MeimeiWorkbench.app"
+echo "==> 构建 Python sidecar（${ARCH}）"
+export MEIMEI_SIDECAR=1
+python -m PyInstaller packaging/meimei-workbench.spec --noconfirm --clean --distpath dist --workpath build/pyinstaller
+if [ ! -d "build/backend-sidecar/MeimeiWorkbench" ]; then
+  echo "未生成后端 sidecar 目录"
   exit 1
 fi
 
-./packaging/sign-macos.sh "dist/MeimeiWorkbench.app"
+echo "==> 安装桌面依赖"
+cd desktop
+npm ci || npm install
 
-mkdir -p artifacts
-hdiutil create \
-  -volname "美美大王工作台" \
-  -srcfolder "dist/MeimeiWorkbench.app" \
-  -ov \
-  -format UDZO \
-  "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
-
-if [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
-  : "${APPLE_ID:?发布版本必须配置 APPLE_ID}"
-  : "${APPLE_TEAM_ID:?发布版本必须配置 APPLE_TEAM_ID}"
-  : "${APPLE_APP_PASSWORD:?发布版本必须配置 APPLE_APP_PASSWORD}"
-  xcrun notarytool submit "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg" \
-    --apple-id "$APPLE_ID" \
-    --team-id "$APPLE_TEAM_ID" \
-    --password "$APPLE_APP_PASSWORD" \
-    --wait
-  xcrun stapler staple "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
-  xcrun stapler validate "artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+echo "==> Electron Builder 打包（${ARCH}）"
+if [ -n "${APPLE_CERTIFICATE_P12_BASE64:-}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  CERT_FILE="$RUNNER_TEMP/meimei-workbench-macos.p12"
+  echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_FILE"
+  export CSC_LINK="$CERT_FILE"
+  export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
+  export CSC_NAME="$APPLE_SIGNING_IDENTITY"
+  echo "macOS 代码签名已启用。"
+else
+  export CSC_IDENTITY_AUTO_DISCOVERY=false
+  echo "::warning::未配置完整 macOS 签名证书，将生成未签名安装包。"
 fi
+if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ]; then
+  export APPLE_ID
+  export APPLE_TEAM_ID
+  export APPLE_APP_PASSWORD
+  echo "macOS 公证已启用。"
+else
+  echo "::warning::未配置完整 macOS 公证凭证，将跳过公证。"
+fi
+npx electron-builder --config electron-builder.yml --mac --"${ARCH//x86_64/x64}" --publish never
+cd ..
+
+if [ ! -f "desktop/dist/MeimeiWorkbench-macOS-${ARCH}.dmg" ]; then
+  echo "未生成 DMG 安装包"
+  exit 1
+fi
+cp "desktop/dist/MeimeiWorkbench-macOS-${ARCH}.dmg" "artifacts/"
 
 echo "macOS 安装包已生成：$PROJECT_ROOT/artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"

@@ -15,6 +15,10 @@ const dialog = ref(null)
 const closeButton = ref(null)
 let previousActiveEl = null
 
+const isDesktop = typeof window !== 'undefined' && Boolean(window.workbenchDesktop?.isDesktop)
+const installing = ref(false)
+const installMessage = ref('')
+
 const showTokenInput = ref(false)
 const tokenValue = ref('')
 const tokenSaving = ref(false)
@@ -85,12 +89,24 @@ async function pollInstallStatus() {
 
 async function installUpdate() {
   errorMessage.value = ''
+  installMessage.value = ''
   updateStatus.value = { status: 'starting', message: '准备更新…' }
   try {
     await post('/api/system/update/install', {})
     pollInstallStatus()
   } catch (error) {
     errorMessage.value = error.message
+  }
+}
+
+async function launchInstaller() {
+  if (installing.value || !window.workbenchDesktop?.installUpdate) return
+  installing.value = true
+  installMessage.value = ''
+  const resultInfo = await window.workbenchDesktop.installUpdate().catch(error => ({ ok: false, error: error.message || String(error) }))
+  if (!resultInfo?.ok) {
+    installing.value = false
+    installMessage.value = resultInfo?.error || '启动安装程序失败，请稍后重试。'
   }
 }
 
@@ -179,24 +195,31 @@ onUnmounted(clearPoll)
           <span>最新版本 {{ result.latest_version || '暂不可用' }}</span>
         </div>
         <div v-if="updateStatus" class="update-progress">
-          <LoaderCircle v-if="!['error', 'up_to_date'].includes(updateStatus.status)" class="spin" :size="18" />
-          <CheckCircle v-else-if="updateStatus.status === 'up_to_date'" :size="18" />
+          <LoaderCircle v-if="['starting', 'checking', 'backing_up', 'downloading', 'verifying'].includes(updateStatus.status)" class="spin" :size="18" />
+          <CheckCircle v-else-if="['ready_to_install', 'up_to_date'].includes(updateStatus.status)" :size="18" />
           <span>{{ updateStatus.message || updateStatus.error }}</span>
         </div>
         <div v-else-if="result.update_available" class="update-available">
           <div class="update-available-title">发现新版本 {{ result.latest_version }}</div>
-          <div class="update-available-copy">更新将先下载并校验安装包，再启动系统安装程序。你的数据不会被覆盖。</div>
+          <div class="update-available-copy">更新将先下载并校验安装包，再在桌面客户端中确认安装。你的数据不会被覆盖。</div>
         </div>
         <div v-else class="update-state update-state-success">
           <CheckCircle :size="22" />
           <span>当前已经是最新版本</span>
         </div>
         <div v-if="result.release_notes" class="update-notes">{{ result.release_notes }}</div>
+        <div v-if="installMessage" class="update-token-msg">{{ installMessage }}</div>
         <div class="update-actions">
           <a v-if="result.release_url" class="btn btn-outline" :href="result.release_url" target="_blank" rel="noreferrer">
             <ExternalLink :size="15" /> 查看发布说明
           </a>
-          <button v-if="result.update_available && result.downloadable && !updateStatus" class="btn btn-primary" type="button" @click="installUpdate">
+          <template v-if="updateStatus?.status === 'ready_to_install'">
+            <button v-if="isDesktop" class="btn btn-primary" type="button" :disabled="installing" @click="launchInstaller">
+              <Download :size="15" /> 安装并重启工作台
+            </button>
+            <span v-else class="update-warning">安装包已就绪，请在运行工作台的桌面客户端中点击安装。</span>
+          </template>
+          <button v-else-if="result.update_available && result.downloadable && !updateStatus" class="btn btn-primary" type="button" @click="installUpdate">
             <Download :size="15" /> 下载并安装
           </button>
           <button v-else-if="updateStatus?.status === 'error'" class="btn btn-primary" type="button" @click="installUpdate">

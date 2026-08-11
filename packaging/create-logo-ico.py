@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import math
 import struct
+import zlib
 from pathlib import Path
 
 
@@ -120,7 +121,37 @@ def write_ico(path: Path):
     path.write_bytes(header + entry + dib)
 
 
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    checksum = zlib.crc32(tag + payload) & 0xFFFFFFFF
+    return struct.pack('>I', len(payload)) + tag + payload + struct.pack('>I', checksum)
+
+
+def write_png(path: Path, scale: int = 4):
+    """写出 scale*256 尺寸的 PNG（Electron 托盘、icns 转换素材）。"""
+    size = SIZE * scale
+    pixels = render()
+    rows = bytearray()
+    for y in range(size):
+        rows.append(0)  # filter: none
+        for x in range(size):
+            r, g, b, a = pixels[y * size + x]
+            rows.extend((r, g, b, a))
+    header = struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b'\x89PNG\r\n\x1a\n'
+        + _png_chunk(b'IHDR', header)
+        + _png_chunk(b'IDAT', zlib.compress(bytes(rows), 9))
+        + _png_chunk(b'IEND', b'')
+    )
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    write_ico(parser.parse_args().out)
+    parser.add_argument('--png', action='store_true', help='输出 PNG 而不是 ICO')
+    args = parser.parse_args()
+    if args.png:
+        write_png(args.out)
+    else:
+        write_ico(args.out)

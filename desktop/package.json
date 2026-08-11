@@ -1,0 +1,18 @@
+{
+  "name": "meimei-workbench-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron 桌面壳：美美大王工作台（启动 FastAPI sidecar 并加载本地页面）",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "test": "node tests/smoke.mjs",
+    "build": "electron-builder --config electron-builder.yml",
+    "build:dir": "electron-builder --config electron-builder.yml --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}

@@ -6,10 +6,8 @@ import hashlib
 import json
 import os
 import platform
-from pathlib import Path
 import re
 import sqlite3
-import subprocess
 import sys
 import threading
 import time
@@ -22,7 +20,7 @@ from pydantic import BaseModel
 
 from .. import db
 from .. import clock
-from ..config import APP_VERSION, IS_FROZEN, RESOURCE_ROOT, UPDATE_API_URL, UPDATE_MANIFEST_URL
+from ..config import APP_NAME, APP_VERSION, IS_FROZEN, UPDATE_API_URL, UPDATE_MANIFEST_URL
 from ..services import devices, migration
 
 router = APIRouter(prefix='/api/system')
@@ -34,6 +32,21 @@ _update_state = {
     'error': '',
     'asset_name': '',
 }
+
+
+@router.get('/health')
+def health():
+    """只读健康检查：Electron 用它判断数据库初始化和 FastAPI 启动完成。
+
+    不返回数据目录、令牌或任何用户隐私信息。
+    """
+    ready = False
+    try:
+        db.get_conn().execute('SELECT 1').fetchone()
+        ready = True
+    except Exception:
+        ready = False
+    return {'app': APP_NAME, 'version': APP_VERSION, 'ready': ready}
 
 
 @router.get('/runtime')
@@ -170,7 +183,7 @@ def _platform_asset(assets):
         marker = 'Setup-Windows-x64.exe'
     elif sys.platform == 'darwin':
         arch = platform.machine().lower()
-        marker = f'macOS-{"arm64" if arch in ("arm64", "aarch64") else "x86_64"}.dmg'
+        marker = f'macOS-{"arm64" if arch in ("arm64", "aarch64") else "x64"}.dmg'
     else:
         return None
     return next((asset for asset in assets if asset.get('name', '').endswith(marker)), None)
@@ -321,31 +334,6 @@ def _download_asset(url: str, destination: str):
             os.remove(temporary)
 
 
-def _launch_installer(path: str):
-    if sys.platform == 'win32':
-        subprocess.Popen([path], cwd=os.path.dirname(path), close_fds=True)
-    elif sys.platform == 'darwin':
-        executable = Path(os.path.realpath(sys.executable))
-        app_path = ''
-        for parent in [executable, *executable.parents]:
-            if parent.name.endswith('.app'):
-                app_path = str(parent)
-                break
-        if not app_path:
-            raise RuntimeError('无法定位当前 macOS 应用目录')
-        helper = os.path.join(RESOURCE_ROOT, 'updater', 'macos-updater.sh')
-        if not os.path.isfile(helper):
-            raise RuntimeError('缺少 macOS 更新助手')
-        update_dir = os.path.join(db.DATA_DIR, 'updates')
-        subprocess.Popen(
-            ['/bin/sh', helper, path, app_path, str(os.environ.get('WORKBENCH_PORT', '5000')), update_dir],
-            close_fds=True,
-            start_new_session=True,
-        )
-    else:
-        raise RuntimeError('当前系统暂不支持桌面安装包自动更新')
-
-
 def _install_update_worker():
     try:
         _set_update_state('checking', '正在检查最新版本…')
@@ -378,10 +366,13 @@ def _install_update_worker():
             os.remove(installer_path)
             raise RuntimeError('安装包 SHA-256 校验失败，已删除下载文件')
 
-        _set_update_state('installing', '校验通过，正在启动安装程序…', asset_name=asset['name'])
-        _launch_installer(installer_path)
-        time.sleep(0.8)
-        os._exit(0)
+        # 安装所有权归 Electron 桌面壳：后端只负责检查、备份、下载和校验，
+        # 由 Electron 通过受限 IPC 取得已校验安装包后关闭应用并启动安装器。
+        _set_update_state(
+            'ready_to_install',
+            '校验通过，请点击“安装并重启工作台”完成更新。',
+            asset_name=asset['name'],
+        )
     except Exception as exc:
         _set_update_state('error', error=str(exc))
 
@@ -391,11 +382,28 @@ def install_update():
     if not IS_FROZEN:
         raise HTTPException(400, '开发模式不执行安装，请使用打包后的桌面程序测试更新')
     with _update_lock:
-        if _update_state['status'] in ('checking', 'downloading', 'verifying', 'installing'):
+        if _update_state['status'] in ('starting', 'checking', 'backing_up', 'downloading', 'verifying'):
             return {'started': False, 'status': _update_state['status']}
         _update_state.update({'status': 'starting', 'message': '准备更新…', 'error': '', 'asset_name': ''})
     threading.Thread(target=_install_update_worker, name='workbench-updater', daemon=True).start()
     return {'started': True, 'status': 'starting'}
+
+
+@router.get('/update/installer-path')
+def update_installer_path(request: Request):
+    """仅供本机 Electron 桌面壳使用：返回已校验安装包的本地路径。"""
+    _require_local(request)
+    with _update_lock:
+        if _update_state.get('status') != 'ready_to_install':
+            raise HTTPException(409, '当前没有待安装的更新')
+        asset_name = _update_state.get('asset_name', '')
+    if not asset_name:
+        raise HTTPException(409, '缺少安装包信息')
+    update_dir = os.path.join(db.DATA_DIR, 'updates')
+    path = os.path.abspath(os.path.join(update_dir, os.path.basename(asset_name)))
+    if os.path.dirname(path) != os.path.abspath(update_dir) or not os.path.isfile(path):
+        raise HTTPException(404, '安装包不存在或已被删除，请重新下载更新')
+    return {'path': path, 'name': asset_name}
 
 
 def _backup_dir() -> str:

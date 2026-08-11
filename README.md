@@ -6,6 +6,8 @@
 
 当前桌面发布版本为 `v1.0.4`，可从 [GitHub Releases](https://github.com/aitia0718/workbench/releases/tag/v1.0.4) 下载 Windows x64、macOS Apple Silicon 和 macOS Intel 安装包。当前版本未配置代码签名证书，首次安装可能出现系统安全提示；仅建议在可信环境中使用。
 
+桌面安装包基于 **Electron 桌面壳**：双击直接打开工作台窗口（不再自动打开浏览器），由 Electron 管理窗口、系统托盘、后端子进程和更新安装；手机和平板仍通过局域网二维码访问。
+
 产品采用“本地桌面主程序 + 局域网移动访问端”方案：电脑保存唯一 SQLite 数据，手机和平板通过同一 Wi-Fi 下的浏览器和二维码访问，不需要安装独立 App。
 
 ---
@@ -111,6 +113,10 @@
 ├── scripts/                        # 开发环境、UI 冒烟测试脚本
 ├── backend/tests/                  # 隔离 SQLite 后端测试与测试数据
 ├── packaging/                      # 桌面打包配置与构建脚本
+├── desktop/                        # Electron 桌面壳（窗口/托盘/后端 sidecar 生命周期/更新安装）
+│   ├── main.js / preload.js        # 主进程与受限 IPC 桥
+│   ├── electron-builder.yml        # Windows/macOS 安装包配置
+│   └── tests/smoke.mjs             # Electron 冒烟测试
 ├── frontend/                       # 前端（Vue 3 + Vite）
 │   ├── package.json
 │   ├── vite.config.js              # 构建到 ../backend/static
@@ -141,7 +147,10 @@
 ### 4.1 总体架构
 
 ```
-浏览器 (Vue 3 SPA, Vite build)
+Electron 桌面壳（窗口/托盘/单实例/更新安装协调）
+      │  启动 FastAPI sidecar 子进程，健康检查后加载 127.0.0.1
+      ▼
+浏览器 (Vue 3 SPA, Vite build) ←── 手机/平板经局域网二维码访问同一 SPA
       │  fetch /api/*
       ▼
 Uvicorn :: FastAPI
@@ -284,7 +293,13 @@ npm run build
 bash scripts/smoke-ui.sh
 ```
 
-当前基线包含 122 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建和浏览器冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
+Electron 桌面壳冒烟测试（需要 Node.js，使用临时数据目录）：
+
+```bash
+cd desktop && npm install && npm test
+```
+
+当前基线包含 145 项隔离 SQLite 后端测试。CI 会自动执行后端测试、前端构建、浏览器冒烟和 Electron 冒烟测试；完整发布检查见 [`docs/发布检查清单.md`](docs/发布检查清单.md)。
 
 ### 文档分工
 
@@ -340,6 +355,14 @@ python run.py
 # 浏览器打开 http://localhost:5000
 ```
 
+桌面壳开发模式（使用源码后端，打开 Electron 窗口）：
+
+```bash
+cd desktop
+npm install
+npm run dev
+```
+
 ### 日常使用
 ```bat
 双击 启动工作台.bat
@@ -351,7 +374,7 @@ macOS 使用：
 双击 启动工作台.command
 ```
 
-如果使用 GitHub Release 安装包，则不需要安装 Python 或 Node.js，直接运行安装后的桌面程序即可。
+如果使用 GitHub Release 安装包，则不需要安装 Python 或 Node.js，直接运行安装后的桌面程序即可。安装包是 Electron 桌面客户端：双击打开工作台窗口，关闭窗口会隐藏到系统托盘，托盘“退出工作台”才停止服务。
 
 安装包启动后默认允许同一局域网中的手机和平板访问。进入工作台后点击右上角“手机访问”，使用手机或平板扫描二维码即可打开。
 

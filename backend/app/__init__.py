@@ -141,6 +141,12 @@ async def startup():
 async def shutdown():
     await wechat_service.stop()
     db.close()
+    marker = os.path.join(db.DATA_DIR, '.workbench-ready')
+    try:
+        if os.path.exists(marker):
+            os.remove(marker)
+    except OSError:
+        pass
 
 
 # 前端静态资源
