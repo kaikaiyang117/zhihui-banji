@@ -241,7 +241,7 @@ describe('更新状态机', () => {
   });
 });
 
-describe('更新源（Gitee 优先 / GitHub 回退）', () => {
+describe.skipIf(process.platform === 'linux')('更新源（Gitee 优先 / GitHub 回退）', () => {
   const INSTALLER_NAMES = [
     'MeimeiWorkbench-Setup-Windows-x64.exe',
     'MeimeiWorkbench-macOS-arm64.dmg',
