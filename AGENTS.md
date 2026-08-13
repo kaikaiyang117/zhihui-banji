@@ -44,11 +44,15 @@ cd frontend
 npm install
 npm approve-scripts esbuild          # 首次安装且 npm 支持该命令时执行
 npm run build                         # 输出到 ../backend/static/
+npm run watch                         # 监听源码变动，自动重建到 ../backend/static/（手机等局域网设备场景）
+npm run dev                           # Vite dev server（127.0.0.1:5173，HMR 热更新，自动探测后端端口）
 
 # 2. Node 后端与桌面依赖
 cd ../server && npm install && npm run build:server
 cd ../desktop && npm install && npm run dev
 ```
+
+桌面开发（推荐）：先启动 `desktop`（后端就绪），再另开终端执行 `frontend` 的 `npm run dev`；非打包模式的 Electron 窗口会自动探测 5173 并加载 Vite dev server，获得毫秒级 HMR，`/api` 请求经 Vite 代理自动转发到实际后端端口。未启动 Vite 时回退到后端托管的静态页面。`npm run watch` 仍是局域网手机访问场景的更新方式（手机不会自动刷新，以最新一次构建为准）。
 
 也可以双击 `启动工作台.bat` 或 `启动工作台.command` 启动桌面工作台。Windows/macOS 打包版本通过系统托盘管理后台服务：桌面快捷方式启动时不显示终端，托盘菜单提供“打开工作台”和“退出工作台”；`启动工作台.bat` 仍是开发/调试入口，保留可见终端和 `Ctrl+C` 停止方式。
 

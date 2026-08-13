@@ -39,6 +39,7 @@ echo "========================================"
 echo "  美美大王工作台 v2.3"
 echo ""
 echo "  由 Electron 启动 Node.js 后端"
+echo "  自动启动前端 Vite dev server（HMR 热更新）"
 echo "  按 Ctrl+C 停止"
 echo "========================================"
 
@@ -46,5 +47,47 @@ export MEIMEI_WECHAT_ENABLED="${MEIMEI_WECHAT_ENABLED:-true}"
 if [ -z "${WORKBENCH_BUSINESS_DATE+x}" ]; then
   export WORKBENCH_BUSINESS_DATE="2026-04-15"
 fi
+
+# ---------- 前端 Vite dev server（HMR）----------
+# 未安装前端依赖时跳过（桌面仍可用静态页面），由 setup-dev.sh 完成安装。
+VITE_PID=""
+VITE_LOG="${TMPDIR:-/tmp}/workbench-vite-dev.log"
+port_in_use() {
+  /usr/sbin/lsof -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1
+}
+if port_in_use; then
+  echo "检测到 Vite dev server 已在运行（127.0.0.1:5173），直接使用。"
+else
+  if [ -x "$SCRIPT_DIR/frontend/node_modules/.bin/vite" ]; then
+    echo "启动前端 Vite dev server（日志：$VITE_LOG）…"
+    (
+      cd "$SCRIPT_DIR/frontend"
+      exec ./node_modules/.bin/vite > "$VITE_LOG" 2>&1
+    ) &
+    VITE_PID=$!
+    # 等待 dev server 就绪（最多 15 秒），确保 Electron 窗口能探测到 5173。
+    ready=0
+    for _ in $(seq 1 30); do
+      if port_in_use; then
+        ready=1
+        break
+      fi
+      sleep 0.5
+    done
+    if [ "$ready" -ne 1 ]; then
+      echo "警告：Vite dev server 启动超时，Electron 将加载静态页面。详见 $VITE_LOG"
+    fi
+  else
+    echo "警告：未找到前端依赖（frontend/node_modules），Vite 热更新不可用。"
+    echo "      请先执行 ./scripts/setup-dev.sh 安装依赖，桌面仍会正常启动。"
+  fi
+fi
+
+cleanup() {
+  if [ -n "$VITE_PID" ] && kill -0 "$VITE_PID" 2>/dev/null; then
+    kill "$VITE_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 "$NPM_BIN" run dev -- "$@"

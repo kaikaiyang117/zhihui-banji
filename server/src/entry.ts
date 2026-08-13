@@ -58,7 +58,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   // MIG-03：数据库初始化作为启动任务，health.ready 仅在打开成功后为 true。
-  const db = new WorkbenchDb({ dataDir: config.dataDir });
+  const db = new WorkbenchDb({ dataDir: config.dataDir, kbDir: config.kbDir });
   const app = buildApp({ config, ready: () => db.isOpen });
   const result = await startServer(app, config, {
     init: async () => {

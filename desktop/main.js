@@ -266,10 +266,41 @@ function failBackend(message) {
 
 function onBackendReady() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.loadURL(backendBaseUrl);
+    loadAppPage();
     return;
   }
   createMainWindow();
+}
+
+/* 开发模式：后端就绪后优先加载 Vite dev server（HMR 热更新），
+ * 探测失败（未启动 npm run dev）时回退到后端托管的静态页面。 */
+function loadAppPage() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (app.isPackaged || isSmoke) {
+    mainWindow.loadURL(backendBaseUrl);
+    return;
+  }
+  const viteUrl = 'http://127.0.0.1:5173';
+  let settled = false;
+  const done = (viteUp) => {
+    if (settled || !mainWindow || mainWindow.isDestroyed()) return;
+    settled = true;
+    if (viteUp) {
+      logLine('检测到 Vite dev server（5173），加载开发页面（HMR）…');
+      mainWindow.loadURL(viteUrl);
+    } else {
+      mainWindow.loadURL(backendBaseUrl);
+    }
+  };
+  const probe = http.get(viteUrl, (res) => {
+    res.resume();
+    done(true);
+  });
+  probe.setTimeout(1200, () => {
+    probe.destroy();
+    done(false);
+  });
+  probe.on('error', () => done(false));
 }
 
 /* ---------------------------------------------------------------- 窗口 */
@@ -322,7 +353,7 @@ function createMainWindow() {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logLine(`渲染进程异常：${details.reason}`);
   });
-  mainWindow.loadURL(backendBaseUrl);
+  loadAppPage();
 }
 
 function showMainWindow() {
@@ -338,13 +369,15 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
-/* 只允许加载当前后端回环地址；其余导航一律拦截。 */
+/* 只允许加载后端回环地址（开发模式下额外放行 Vite dev server 同源）；其余导航一律拦截。 */
 function isAllowedAppUrl(url) {
   try {
     const target = new URL(url);
-    const base = new URL(backendBaseUrl);
-    if (target.origin !== base.origin) return false;
-    return target.protocol === 'http:' || target.protocol === 'https:';
+    const candidates = [new URL(backendBaseUrl)];
+    if (!app.isPackaged) candidates.push(new URL('http://127.0.0.1:5173'));
+    return candidates.some(base =>
+      target.origin === base.origin
+      && (target.protocol === 'http:' || target.protocol === 'https:'));
   } catch (_err) {
     return false;
   }
@@ -367,18 +400,58 @@ function handleExternalUrl(url) {
 /* ---------------------------------------------------------------- 下载 */
 function setupDownloads() {
   session.defaultSession.on('will-download', (_event, item) => {
-    const defaults = path.join(app.getPath('downloads'), item.getFilename());
-    dialog.showSaveDialog(mainWindow || undefined, {
-      title: '保存文件',
-      defaultPath: defaults,
-    }).then(result => {
-      if (result.canceled || !result.filePath) {
+    let target = '';
+    try {
+      /* 必须同步设置保存路径：本机后端毫秒级返回，异步 showSaveDialog 未及
+       * setSavePath 时下载已经完成，文件不会写入所选位置。 */
+      const defaults = path.join(app.getPath('downloads'), item.getFilename());
+      const chosen = dialog.showSaveDialogSync(mainWindow || undefined, {
+        title: '保存文件',
+        defaultPath: defaults,
+      });
+      if (!chosen) {
         item.cancel();
         return;
       }
-      item.setSavePath(result.filePath);
-    }).catch(() => item.cancel());
+      target = chosen;
+      item.setSavePath(chosen);
+    } catch (error) {
+      logLine(`文件保存失败：${error instanceof Error ? error.message : String(error)}`);
+      item.cancel();
+      return;
+    }
+    item.once('done', (_event, state) => {
+      if (state === 'completed') {
+        logLine(`文件已保存：${target}`);
+      } else {
+        logLine(`下载未完成（${state}）：${target || item.getFilename() || '未知文件'}`);
+      }
+    });
   });
+}
+
+/* 开发模式：监听前端构建产物（backend/static），变化后自动刷新窗口。 */
+function setupStaticWatcher() {
+  if (app.isPackaged) return;
+  const staticDir = path.join(__dirname, '..', 'backend', 'static');
+  if (!fs.existsSync(staticDir)) {
+    logLine('未找到前端构建目录，跳过自动刷新监听');
+    return;
+  }
+  let timer = null;
+  try {
+    fs.watch(staticDir, { recursive: true }, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          logLine('检测到前端构建更新，自动刷新窗口…');
+          mainWindow.webContents.reload();
+        }
+      }, 400);
+    });
+  } catch (_error) {
+    logLine('前端构建目录监听失败，已跳过自动刷新');
+  }
 }
 
 /* ---------------------------------------------------------------- 托盘 */
@@ -598,6 +671,7 @@ app.whenReady().then(() => {
     if (fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
   }
   setupDownloads();
+  setupStaticWatcher();
   ipcMain.handle('workbench:get-info', () => ({
     isDesktop: true,
     platform: process.platform,
