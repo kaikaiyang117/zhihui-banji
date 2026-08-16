@@ -39,7 +39,7 @@ describe('schema 与启动迁移', () => {
   it('新库完成全部迁移并创建默认上下文', () => {
     const db = makeDb();
     db.open();
-    expect(db.schemaVersion()).toBe(26);
+    expect(db.schemaVersion()).toBe(28);
     const counts = rowCounts(db.connInstance);
     expect(counts.classes).toBe(1);
     expect(counts.terms).toBe(1);
@@ -54,7 +54,7 @@ describe('schema 与启动迁移', () => {
     const first = rowCounts(db.connInstance);
     db.close();
     db.open();
-    expect(db.schemaVersion()).toBe(26);
+    expect(db.schemaVersion()).toBe(28);
     expect(rowCounts(db.connInstance)).toEqual(first);
     expect(db.connInstance.pragma('integrity_check', { simple: true })).toBe('ok');
   });
@@ -64,7 +64,7 @@ describe('schema 与启动迁移', () => {
     fs.mkdirSync(path.dirname(db.paths.dbPath), { recursive: true });
     const raw = new Database(db.paths.dbPath);
     raw.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)');
-    raw.prepare('INSERT INTO schema_migrations(version) VALUES(?)').run(27);
+    raw.prepare('INSERT INTO schema_migrations(version) VALUES(?)').run(29);
     raw.close();
     expect(() => db.open()).toThrow(/高于当前程序支持的版本/);
   });
@@ -126,15 +126,15 @@ describe('备份与恢复', () => {
 
 describe('迁移中断恢复', () => {
   it('迁移失败后版本停留在失败前，修复后重启成功', () => {
-    const original26 = schemaModule.MIGRATIONS[26];
+    const original28 = schemaModule.MIGRATIONS[28];
     try {
-      delete schemaModule.MIGRATIONS[26];
+      delete schemaModule.MIGRATIONS[28];
       const partial = makeDb();
       partial.open();
-      expect(partial.schemaVersion()).toBe(25);
+      expect(partial.schemaVersion()).toBe(27);
       partial.close();
 
-      schemaModule.MIGRATIONS[26] = (conn) => {
+      schemaModule.MIGRATIONS[28] = (conn) => {
         conn.exec('CREATE TABLE failed_marker (x INTEGER)');
         throw new Error('注入的迁移失败');
       };
@@ -142,15 +142,15 @@ describe('迁移中断恢复', () => {
       expect(() => broken.open()).toThrow(/注入的迁移失败/);
 
       const probe = new Database(broken.paths.dbPath, { readonly: true });
-      expect((probe.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number }).v).toBe(25);
+      expect((probe.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number }).v).toBe(27);
       probe.close();
 
-      schemaModule.MIGRATIONS[26] = original26;
+      schemaModule.MIGRATIONS[28] = original28;
       const fixed = makeDb();
       fixed.open();
-      expect(fixed.schemaVersion()).toBe(26);
+      expect(fixed.schemaVersion()).toBe(28);
     } finally {
-      schemaModule.MIGRATIONS[26] = original26;
+      schemaModule.MIGRATIONS[28] = original28;
     }
   });
 });

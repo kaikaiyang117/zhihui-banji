@@ -622,6 +622,16 @@ body {
 .seating-card-title { align-items: center; }
 .seating-card-title > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .seating-card-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.seating-unassigned { margin: 0 14px 12px; padding: 12px; border: 1px solid rgba(91,106,191,.22); border-radius: 12px; background: var(--primary-bg); }
+.seating-unassigned-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.seating-unassigned-head > div { display: grid; gap: 4px; }
+.seating-unassigned-head span, .seating-unassigned-tip { color: var(--text-secondary); font-size: 11px; }
+.seating-unassigned-tip { white-space: nowrap; }
+.seating-unassigned-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.unassigned-student { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); }
+.unassigned-student > span { display: grid; gap: 2px; min-width: 72px; }
+.unassigned-student small { color: var(--text-secondary); font-size: 10px; }
+.seating-all-assigned { margin: 0 14px 12px; padding: 9px 12px; border-radius: 9px; background: var(--primary-bg); color: var(--primary); font-size: 12px; }
 .seating-board { display: grid; gap: 10px; min-width: 720px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: linear-gradient(180deg, rgba(91,106,191,.05), rgba(255,255,255,.55)); }
 .seating-direction { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; color: var(--text-tertiary); font-size: 11px; }
 .seating-direction strong { color: var(--primary); font-size: 13px; font-weight: 650; }
@@ -676,7 +686,7 @@ body {
 
 @media print {
   html, body, .app { min-height: 0 !important; height: auto !important; background: #fff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  .top-tabs, .sidebar, .agent-float, .page-title-bar > .btn, .seating-card-actions, .seating-direction, .seating-legend, .seating-back, .hint { display: none !important; }
+  .top-tabs, .sidebar, .agent-float, .page-title-bar > .btn, .seating-card-actions, .seating-direction, .seating-legend, .seating-back, .hint, .seating-unassigned, .seating-all-assigned { display: none !important; }
   .app-body, .main { display: block !important; width: auto !important; max-width: none !important; min-height: 0 !important; height: auto !important; overflow: visible !important; }
   .main { padding: 0 !important; }
   .page-title-bar { margin-bottom: 8px !important; }

@@ -185,6 +185,8 @@ export const NAV = [
         { page: 'class-tasks', icon: 'FolderCheck', label: '班级任务' },
         { page: 'school-calendar', icon: 'CalendarDays', label: '校历管理' },
         { page: 'seating', icon: 'LayoutGrid', label: '座位表' },
+        { page: 'groups', icon: 'Users', label: '小组管理' },
+        { page: 'dormitories', icon: 'LayoutGrid', label: '宿舍管理' },
         { page: 'duty', icon: 'CheckCircle', label: '值日安排' },
         { page: 'meetings', icon: 'Presentation', label: '班会记录' },
         { page: 'activities', icon: 'CalendarDays', label: '班级活动' },

@@ -20,6 +20,9 @@ const studentRows = computed(() => {
     .filter(({ row }) => !(row.some(value => specialValues.has(value)) && !row.some(value => value && !specialValues.has(value))))
 })
 const assignedCount = computed(() => studentRows.value.flatMap(item => item.row).filter(value => value && !specialValues.has(value)).length)
+const assignedNames = computed(() => new Set(studentRows.value.flatMap(item => item.row).filter(value => value && !specialValues.has(value))))
+const unassignedStudents = computed(() => students.value.filter(student => !assignedNames.value.has(student.姓名)))
+const emptySeats = computed(() => studentRows.value.flatMap(item => item.row.map((value, col) => ({ row: item.sourceRow, col, value }))).filter(seat => !seat.value))
 const studentIdByName = computed(() => Object.fromEntries(
   students.value.map(student => [student.姓名, student.id]),
 ))
@@ -97,6 +100,32 @@ async function saveCell(row, col) {
   }
 }
 
+async function addSeatRow() {
+  const width = Math.max(columnCount.value, 1)
+  const row = grid.value.length
+  grid.value.push(Array.from({ length: width }, () => ''))
+  saving.value = true
+  try {
+    await Promise.all(Array.from({ length: width }, (_, col) => post('/api/seating/update', { row, col, value: '' })))
+    return row
+  } finally {
+    saving.value = false
+  }
+}
+
+async function placeStudent(student) {
+  if (assignedNames.value.has(student.姓名)) return
+  let target = emptySeats.value[0]
+  if (!target) target = { row: await addSeatRow(), col: 0 }
+  grid.value[target.row][target.col] = student.姓名
+  saving.value = true
+  try {
+    await post('/api/seating/update', { row: target.row, col: target.col, value: student.姓名 })
+  } finally {
+    saving.value = false
+  }
+}
+
 async function autoFill() {
   if (!editing.value || !students.value.length || !window.confirm('按学号重新排列全部学生座位？当前座位顺序会被替换。')) return
   const ordered = [...students.value].sort((left, right) => String(left.学号).localeCompare(String(right.学号), 'zh-CN', { numeric: true }))
@@ -154,9 +183,15 @@ onMounted(load)
         <div class="seating-card-actions">
           <button class="btn btn-outline seating-print-button" @click="printSeating"><Printer :size="14" /> 打印 / 保存 PDF</button>
           <button v-if="editing" class="btn btn-outline" @click="autoFill">按学号自动排座</button>
+          <button v-if="editing" class="btn btn-outline" @click="addSeatRow">新增一排</button>
           <button class="btn btn-outline seat-edit-btn" @click="editing = !editing; editingCell = null; dragSource = null"><Pencil :size="14" /> {{ editing ? '完成编辑' : '编辑座位' }}</button>
         </div>
       </div>
+      <div v-if="!loading && grid.length && unassignedStudents.length" class="seating-unassigned">
+        <div class="seating-unassigned-head"><div><strong>尚未分配座位（{{ unassignedStudents.length }}人）</strong><span>当前空位 {{ emptySeats.length }} 个；安排后仍可拖动调整</span></div><span class="seating-unassigned-tip">不会改变已有学生座位</span></div>
+        <div class="seating-unassigned-list"><div v-for="student in unassignedStudents" :key="student.id" class="unassigned-student"><span><strong>{{ student.姓名 }}</strong><small>{{ student.学号 }} · {{ student.性别 }}</small></span><button class="btn btn-sm btn-primary" @click="placeStudent(student)">{{ emptySeats.length ? '安排到空位' : '增加一排并安排' }}</button></div></div>
+      </div>
+      <div v-else-if="!loading && grid.length" class="seating-all-assigned">全部在读学生都已有座位。</div>
       <div v-if="loading" class="loading">加载中...</div>
       <div v-else-if="!grid.length" class="empty-state">座位表还是空的</div>
       <div v-else>

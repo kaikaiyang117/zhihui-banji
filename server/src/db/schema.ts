@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v25）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v28）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。
@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 26;
+export const CURRENT_SCHEMA_VERSION = 28;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -21,7 +21,7 @@ export function addColumn(conn: Database, table: string, column: string, definit
   }
 }
 
-// ---------- 迁移 2-25 ----------
+// ---------- 迁移 2-28 ----------
 
 function migration2(conn: Database): void {
   conn.exec(`
@@ -1605,6 +1605,143 @@ function migration26(conn: Database): void {
   `);
 }
 
+function migration27(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS student_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        group_type TEXT NOT NULL DEFAULT '学习小组',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT '使用中',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(class_id, term_id, group_type, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS student_group_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL REFERENCES student_groups(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        role TEXT NOT NULL DEFAULT '成员',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT '在组',
+        joined_at TEXT DEFAULT (datetime('now','localtime')),
+        left_at TEXT NOT NULL DEFAULT '',
+        UNIQUE(group_id, student_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_student_groups_scope
+        ON student_groups(class_id, term_id, status, sort_order, id);
+    CREATE INDEX IF NOT EXISTS idx_student_group_members_student
+        ON student_group_members(student_id, status);
+
+    CREATE TABLE IF NOT EXISTS dorm_rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        building TEXT NOT NULL DEFAULT '',
+        floor TEXT NOT NULL DEFAULT '',
+        room_no TEXT NOT NULL,
+        gender_limit TEXT NOT NULL DEFAULT '不限',
+        capacity INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT '使用中',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(building, floor, room_no)
+    );
+
+    CREATE TABLE IF NOT EXISTS dorm_beds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id INTEGER NOT NULL REFERENCES dorm_rooms(id) ON DELETE CASCADE,
+        bed_no TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT '可用',
+        UNIQUE(room_id, bed_no)
+    );
+
+    CREATE TABLE IF NOT EXISTS dorm_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        bed_id INTEGER NOT NULL REFERENCES dorm_beds(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL DEFAULT '在住',
+        move_in_at TEXT NOT NULL DEFAULT '',
+        move_out_at TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dorm_active_student
+        ON dorm_assignments(student_id, term_id)
+        WHERE status='在住';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dorm_active_bed
+        ON dorm_assignments(bed_id, term_id)
+        WHERE status='在住';
+    CREATE INDEX IF NOT EXISTS idx_dorm_assignments_scope
+        ON dorm_assignments(class_id, term_id, status, student_id);
+  `);
+}
+
+function migration28(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS dorm_room_leaders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        room_id INTEGER NOT NULL REFERENCES dorm_rooms(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT '在任',
+        assigned_at TEXT NOT NULL DEFAULT '',
+        ended_at TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dorm_active_room_leader
+        ON dorm_room_leaders(class_id, term_id, room_id)
+        WHERE status='在任';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dorm_active_student_leader
+        ON dorm_room_leaders(class_id, term_id, student_id)
+        WHERE status='在任';
+    CREATE INDEX IF NOT EXISTS idx_dorm_room_leaders_scope
+        ON dorm_room_leaders(class_id, term_id, room_id, status);
+
+    CREATE TABLE IF NOT EXISTS dorm_inspections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        inspection_date TEXT NOT NULL,
+        inspection_time TEXT NOT NULL DEFAULT '',
+        inspector TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '已完成',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS dorm_inspection_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inspection_id INTEGER NOT NULL REFERENCES dorm_inspections(id) ON DELETE CASCADE,
+        room_id INTEGER NOT NULL REFERENCES dorm_rooms(id) ON DELETE RESTRICT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL DEFAULT '在寝',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(inspection_id, student_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dorm_inspections_scope
+        ON dorm_inspections(class_id, term_id, inspection_date, id);
+    CREATE INDEX IF NOT EXISTS idx_dorm_inspection_records_inspection
+        ON dorm_inspection_records(inspection_id, room_id, status);
+  `);
+}
+
 export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   2: migration2,
   3: migration3,
@@ -1631,6 +1768,8 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   24: migration24,
   25: migration25,
   26: migration26,
+  27: migration27,
+  28: migration28,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */
