@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import {
-  AlertTriangle, Archive, ArrowRight, CalendarDays, CheckCircle, ClipboardList,
+  AlertTriangle, Archive, ArrowRight, CalendarDays, CheckCircle, ClipboardList, Clock3,
   FileText, Phone, Plus, ShieldCheck, Tag, TrendingUp, Upload, UserRound, Users
 } from 'lucide-vue-next'
 import FullCalendar from '@fullcalendar/vue3'
@@ -18,6 +18,7 @@ const fileInput = ref(null)
 const migrationInput = ref(null)
 const backupMessage = ref('')
 const selectedDate = ref('')
+const todaySchedule = ref(null)
 
 const actionSections = computed(() => {
   if (!stats.value) return []
@@ -73,6 +74,11 @@ async function load() {
   try {
     stats.value = await get('/api/stats/dashboard')
     selectedDate.value = stats.value.date
+    try {
+      todaySchedule.value = await get(`/api/timetable/day?date=${encodeURIComponent(stats.value.date)}`)
+    } catch {
+      todaySchedule.value = null
+    }
   } catch (error) {
     errorMsg.value = error.message
   }
@@ -193,6 +199,21 @@ onMounted(load)
     </section>
 
     <div v-if="backupMessage" class="notice-bar"><ShieldCheck :size="16" /> {{ backupMessage }}</div>
+
+    <section v-if="todaySchedule" class="card ds-card today-schedule-card" aria-labelledby="today-schedule-title">
+      <div class="section-heading ds-section-heading">
+        <div><h2 id="today-schedule-title"><Clock3 :size="17" /> 今日课程</h2><p>{{ todaySchedule.weekday_label }} · 第 {{ todaySchedule.week_no }} 教学周</p></div>
+        <router-link to="/timetable">打开完整课程表 <ArrowRight :size="13" /></router-link>
+      </div>
+      <div v-if="todaySchedule.entries.some(item => item.entry)" class="today-schedule-list">
+        <router-link v-for="item in todaySchedule.entries.filter(slot => slot.entry).slice(0, 8)" :key="item.period_no" :to="`/timetable?date=${todaySchedule.date}`" class="today-schedule-row">
+          <span class="today-schedule-time"><strong>{{ item.label }}</strong><small>{{ item.start_time || '--:--' }}–{{ item.end_time || '--:--' }}</small></span>
+          <span class="today-schedule-copy"><strong>{{ item.entry.subject }}</strong><small>{{ item.entry.teacher_name || '未填写教师' }}<template v-if="item.entry.room"> · {{ item.entry.room }}</template><template v-if="item.entry.is_change"> · 临时调整</template></small></span>
+          <ArrowRight :size="13" />
+        </router-link>
+      </div>
+      <div v-else class="empty-state compact-empty">今天还没有配置课程安排</div>
+    </section>
 
     <section class="action-board" aria-labelledby="action-board-title">
       <div class="section-heading ds-section-heading">
@@ -342,6 +363,17 @@ onMounted(load)
 .action-summary-card.primary { border-color: var(--ds-color-primary-border); background: var(--ds-color-primary-soft); }
 .attendance-summary-card { border-color: var(--ds-color-success-border); background: var(--ds-color-success-soft); }
 .attendance-summary-card > svg, .attendance-summary-card strong { color: var(--ds-color-success); }
+.today-schedule-card { background: var(--ds-color-surface); }
+.today-schedule-card .section-heading { margin-bottom: var(--ds-space-3); }
+.today-schedule-card .section-heading h2 { display: flex; align-items: center; gap: 7px; }
+.today-schedule-card .section-heading > a { display: inline-flex; align-items: center; gap: var(--ds-space-1); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.today-schedule-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ds-space-2); }
+.today-schedule-row { display: grid; grid-template-columns: minmax(72px, .35fr) minmax(0, 1fr) auto; align-items: center; gap: var(--ds-space-3); padding: var(--ds-space-3); border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink); text-decoration: none; }
+.today-schedule-row:hover { border-color: var(--ds-color-primary-border); background: var(--ds-color-primary-soft); }
+.today-schedule-time, .today-schedule-copy { display: grid; gap: 3px; min-width: 0; }
+.today-schedule-time strong, .today-schedule-copy strong { overflow: hidden; font: var(--ds-type-title); text-overflow: ellipsis; white-space: nowrap; }
+.today-schedule-time small, .today-schedule-copy small { overflow: hidden; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-overflow: ellipsis; white-space: nowrap; }
+.today-schedule-row > svg { color: var(--ds-color-primary); }
 .action-board { padding: var(--ds-space-6); border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ds-space-4); margin-bottom: var(--ds-space-4); }
 .section-heading h2 { margin: 0; }
@@ -430,6 +462,7 @@ onMounted(load)
 .dashboard-quick-actions { margin-bottom: 0; }
 @media (max-width: 900px) {
   .action-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-schedule-list { grid-template-columns: 1fr; }
   .action-columns, .action-columns-compact { grid-template-columns: 1fr; }
   .dashboard-calendar-layout { grid-template-columns: 1fr; grid-template-rows: auto; }
   .dashboard-day-detail { height: auto; max-height: none; overflow: visible; }

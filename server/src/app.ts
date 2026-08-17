@@ -28,6 +28,7 @@ import { registerRecycleRoutes } from './http/routes/recycle.js';
 import { registerAgentRoutes } from './http/routes/agent.js';
 import { registerWechatRoutes } from './http/routes/wechat.js';
 import { registerMig10Routes } from './http/routes/mig10.js';
+import { registerMig11Routes } from './http/routes/mig11.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
 const REDACT_PATHS = [
@@ -143,6 +144,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // ---------- 小组与宿舍管理（MIG-10） ----------
     registerMig10Routes(app);
+
+    // ---------- 高中课程表与教学日程（MIG-11） ----------
+    registerMig11Routes(app);
 
     // ---------- 统计（MIG-05 补齐） ----------
     registerStatsRoutes(app);

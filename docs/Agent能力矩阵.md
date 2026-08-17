@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-15）：12 个只读工具 + 12 个确认写入工具；数据库 schema v28；模型可见工具按服务端渠道权限过滤，网页会话按操作者隔离，写入工具执行后自动读取业务状态验证；小组与宿舍已接入网页点击，宿舍详情暂不开放网页/微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-18）：12 个只读工具 + 12 个确认写入工具；数据库 schema v29；模型可见工具按服务端渠道权限过滤，网页会话按操作者隔离，写入工具执行后自动读取业务状态验证；小组、宿舍和课程表已接入网页点击，宿舍详情与课程表暂不开放网页/微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -52,6 +52,7 @@
 | 查询统一工作项 | `work_items.list_work_items` → `get_tasks_list` | `tasks_list` | 是 | 是 | 是 | 只读；默认返回未关闭事项 | 已接入 |
 | 查询家校沟通 | `get_communications_list` | `communications_list` | 是 | 是 | 是 | 只读，隐藏家长电话 | 已接入 |
 | 查询校历 | `get_school_calendar` → `school_calendar.query_calendar` | `school_calendar_query` | 是 | 是 | 是 | 只读；按当前班级/学期返回日期安排 | 已接入 |
+| 查询课程表与指定日期课程 | `timetable.listTimetable`、`timetable.daySchedule` | 无 | 是 | 否 | 否 | 只读；按当前班级/学期返回课程、教师、教室和临时变更 | 已接入 |
 | 创建待办 | `work_items.create_work_item` | `create_task` | 是 | 是 | 是 | 低风险写入；预览后必须确认；单条、幂等 | 已接入 |
 | 记录家校沟通 | `communications.create_record` | `record_communication` | 是 | 是 | 是 | 写入；预览后必须确认；隐藏敏感联系人字段 | 已接入 |
 | 保存单条考勤 | `attendance.save_daily` | `save_attendance` | 是 | 是 | 是 | 低风险写入；预览后必须确认；禁止批量 | 已接入 |

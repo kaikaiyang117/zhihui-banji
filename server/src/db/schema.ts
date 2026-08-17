@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 28;
+export const CURRENT_SCHEMA_VERSION = 29;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -1742,6 +1742,87 @@ function migration28(conn: Database): void {
   `);
 }
 
+function migration29(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS timetable_periods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        period_no INTEGER NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        start_time TEXT NOT NULL DEFAULT '',
+        end_time TEXT NOT NULL DEFAULT '',
+        session_type TEXT NOT NULL DEFAULT '普通课',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(class_id, term_id, period_no)
+    );
+
+    CREATE TABLE IF NOT EXISTS timetable_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        weekday INTEGER NOT NULL,
+        period_no INTEGER NOT NULL,
+        subject TEXT NOT NULL DEFAULT '',
+        teacher_name TEXT NOT NULL DEFAULT '',
+        room TEXT NOT NULL DEFAULT '',
+        session_type TEXT NOT NULL DEFAULT '普通课',
+        week_pattern TEXT NOT NULL DEFAULT '全周',
+        week_start INTEGER NOT NULL DEFAULT 1,
+        week_end INTEGER NOT NULL DEFAULT 99,
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '启用',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(class_id, term_id, weekday, period_no, week_pattern, week_start, week_end)
+    );
+
+    CREATE TABLE IF NOT EXISTS timetable_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        change_date TEXT NOT NULL,
+        period_no INTEGER NOT NULL,
+        action TEXT NOT NULL DEFAULT '调课',
+        subject TEXT NOT NULL DEFAULT '',
+        teacher_name TEXT NOT NULL DEFAULT '',
+        room TEXT NOT NULL DEFAULT '',
+        session_type TEXT NOT NULL DEFAULT '普通课',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '生效',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(class_id, term_id, change_date, period_no)
+    );
+
+    CREATE TABLE IF NOT EXISTS timetable_import_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        term_id INTEGER NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL DEFAULT '',
+        filename TEXT NOT NULL DEFAULT '',
+        imported_periods INTEGER NOT NULL DEFAULT 0,
+        imported_entries INTEGER NOT NULL DEFAULT 0,
+        updated_entries INTEGER NOT NULL DEFAULT 0,
+        skipped INTEGER NOT NULL DEFAULT 0,
+        error_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(class_id, term_id, request_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timetable_periods_scope
+        ON timetable_periods(class_id, term_id, period_no, enabled);
+    CREATE INDEX IF NOT EXISTS idx_timetable_entries_scope
+        ON timetable_entries(class_id, term_id, weekday, period_no, status);
+    CREATE INDEX IF NOT EXISTS idx_timetable_changes_scope
+        ON timetable_changes(class_id, term_id, change_date, period_no, status);
+    CREATE INDEX IF NOT EXISTS idx_timetable_import_scope
+        ON timetable_import_runs(class_id, term_id, created_at);
+  `);
+}
+
 export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   2: migration2,
   3: migration3,
@@ -1770,6 +1851,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   26: migration26,
   27: migration27,
   28: migration28,
+  29: migration29,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */

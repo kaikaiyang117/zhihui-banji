@@ -21,6 +21,7 @@
 | 功能 | 说明 |
 |------|------|
 | 今日工作台 | 逾期/今日/未来行动、本月日历、未来 7 天安排、考勤规则命中、材料进度、待复查学生和完成/延期直达 |
+| 高中课程表 | 当前班级/学期周课表、单双周、节次时间、临时调课/代课/停课/考试/活动、Excel 导入与首页今日课程 |
 | 学生信息 | 学生总表 + 搜索 + **Excel 批量导入（按学号合并去重）** + 导出 |
 | 特殊学生档案 | 重点关注学生档案管理 |
 | 评语管理 | AI/模板生成草稿、事实依据提示、缺失值预览、人工保护、审核完成、版本历史与 Excel 导出 |
@@ -212,6 +213,10 @@ Planner → Runner → 工具注册与权限/审计 → 业务 Services → SQLi
 | GET | `/api/school-calendar/term` | 返回当前班级/学期的完整周次校历视图 |
 | POST | `/api/school-calendar/import/preview` | 预览学校行事历矩阵或日期明细 Excel，不写入数据库 |
 | POST | `/api/school-calendar/import/commit` | 再次校验并原子提交校历预览中的有效日期 |
+| GET | `/api/timetable`、`/api/timetable/day`、`/api/timetable/changes` | 查询周课表、指定日期课程和临时调课 |
+| GET/POST/PUT | `/api/timetable/periods`、`/api/timetable/entries`、`/api/timetable/changes` | 维护节次、固定课程和临时课程变更 |
+| POST | `/api/timetable/import/preview`、`/api/timetable/import/commit` | 预览并原子提交课程表 Excel 导入 |
+| GET | `/api/timetable/template` | 下载课程表导入模板 xlsx |
 | GET | `/api/stats/calendar` | 返回个人工作台当前月份和未来 7 天的校历/待办聚合 |
 | GET/POST/PUT | `/api/comments/*` | 评语模板、AI/批量预览生成、人工草稿、审核流转、版本历史 |
 | GET | `/api/comments/print` | 旧版评语打印接口（页面不再提供入口） |

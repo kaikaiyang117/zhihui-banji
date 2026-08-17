@@ -85,6 +85,7 @@ Agent 核心层：planner / runner / tools / session / audit
 - 业务服务不依赖 Agent、微信或前端；依赖方向只能是“渠道 → Agent → 工具 → 业务服务 → 数据库”。
 - 新功能必须先完成业务服务，再实现系统 API 和页面，然后明确评估是否封装为 Agent 工具，最后接入网页和微信渠道。
 - 开始新增或重构系统业务功能前，必须先读取 [docs/系统功能开发计划.md](docs/系统功能开发计划.md)，按依赖顺序选择工作包，并在全部验收条件满足后更新其状态。
+- 开始实现补充功能（微信现场操作、对话式 Excel、考试提醒、多班级视角、工作入口、家校模板/会谈、图片证据或桌面宠物）前，必须读取 [docs/补充功能讨论清单.md](docs/补充功能讨论清单.md)；涉及网页、手机、微信交互或桌面宠物时，同时读取 [docs/补充功能界面设计规范.md](docs/补充功能界面设计规范.md)。
 - 详细的系统能力、工具、渠道、权限和测试登记见 [docs/Agent能力矩阵.md](docs/Agent能力矩阵.md)。新增或修改能力时必须同步更新该矩阵。
 
 ### Agent 设计参考规范
@@ -292,6 +293,8 @@ npm test
 | Electron 桌面壳 | `desktop/main.js`、`desktop/preload.js`、`desktop/electron-builder.yml` |
 | Electron 冒烟测试 | `desktop/tests/smoke.mjs` |
 | 系统功能开发计划 | `docs/系统功能开发计划.md` |
+| 补充功能开发执行清单 | `docs/补充功能讨论清单.md` |
+| 补充功能界面设计规范 | `docs/补充功能界面设计规范.md` |
 | Agent 能力矩阵 | `docs/Agent能力矩阵.md` |
 | 后端测试 | `server/tests/` |
 | 前端 API 封装 | `frontend/src/api.js` |

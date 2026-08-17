@@ -177,6 +177,7 @@ export const NAV = [
         { page: 'parent-comm', icon: 'Phone', label: '家校沟通' }
       ] },
       { title: '教学管理', items: [
+        { page: 'timetable', icon: 'CalendarDays', label: '课程表' },
         { page: 'attendance', icon: 'ClipboardCheck', label: '考勤管理' },
         { page: 'scores', icon: 'TrendingUp', label: '成绩跟踪' },
         { page: 'points', icon: 'Star', label: '行为积分' }

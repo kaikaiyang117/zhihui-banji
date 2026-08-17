@@ -14,6 +14,7 @@ const routes = [
   { path: '/special', component: () => import('./views/Special.vue') },
   { path: '/comments', component: () => import('./views/Comments.vue') },
   { path: '/attendance', component: () => import('./views/Attendance.vue') },
+  { path: '/timetable', component: () => import('./views/Timetable.vue') },
   { path: '/scores', component: () => import('./views/Scores.vue') },
   { path: '/class-tasks', component: () => import('./views/ClassTasks.vue') },
   { path: '/school-calendar', component: () => import('./views/SchoolCalendar.vue') },
