@@ -8,6 +8,7 @@ NODE_BIN="${WORKBENCH_NODE:-node}"
 PORT="${WORKBENCH_SMOKE_PORT:-5123}"
 DATA_DIR="$(mktemp -d)"
 SERVER_LOG="$DATA_DIR/server.log"
+SEED_LOG="$DATA_DIR/seed.log"
 SERVER_PID=''
 
 cleanup() {
@@ -27,6 +28,15 @@ if [ ! -f "$PROJECT_ROOT/server/dist/entry.js" ]; then
 fi
 
 cd "$PROJECT_ROOT"
+# 使用隔离的最小场景数据，避免空数据库导致课程表/考试功能被误判为异常。
+"$NODE_BIN" scripts/seed-demo-data.mjs \
+  --profile=minimal \
+  --data-dir="$DATA_DIR/data" \
+  --no-backup >"$SEED_LOG"
+"$NODE_BIN" scripts/verify-test-data.mjs \
+  --profile=minimal \
+  --data-dir="$DATA_DIR/data" >/dev/null
+
 WORKBENCH_DATA_DIR="$DATA_DIR/data" \
 WORKBENCH_KB_DIR="$DATA_DIR/kb" \
 WORKBENCH_BUSINESS_DATE="${WORKBENCH_BUSINESS_DATE-2026-04-15}" \
@@ -50,6 +60,8 @@ printf '%s\n' "$SNAPSHOT"
 grep -q '手机访问' <<< "$SNAPSHOT"
 grep -q '更新' <<< "$SNAPSHOT"
 grep -q '开发日期 2026-04-15' <<< "$SNAPSHOT"
+grep -q '高二政治月考' <<< "$SNAPSHOT"
+grep -q '语文早读' <<< "$SNAPSHOT"
 "${PWCLI[@]}" close >/dev/null 2>&1 || true
 
 echo 'UI smoke test passed.'

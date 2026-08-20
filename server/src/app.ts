@@ -29,6 +29,12 @@ import { registerAgentRoutes } from './http/routes/agent.js';
 import { registerWechatRoutes } from './http/routes/wechat.js';
 import { registerMig10Routes } from './http/routes/mig10.js';
 import { registerMig11Routes } from './http/routes/mig11.js';
+import { registerEvidenceRoutes } from './http/routes/evidence.js';
+import { registerTeacherClassesRoutes } from './http/routes/teacherClasses.js';
+import { registerMeetingPrepRoutes } from './http/routes/meetingPrep.js';
+import { registerNotificationTemplateRoutes } from './http/routes/notificationTemplates.js';
+import { registerToolLinkRoutes } from './http/routes/toolLinks.js';
+import { registerExcelImportRoutes } from './http/routes/excelImport.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
 const REDACT_PATHS = [
@@ -147,6 +153,21 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // ---------- 高中课程表与教学日程（MIG-11） ----------
     registerMig11Routes(app);
+
+    // ---------- 图片证据留痕（SUP-08） ----------
+    registerEvidenceRoutes(app);
+
+    registerTeacherClassesRoutes(app);
+
+    registerMeetingPrepRoutes(app);
+
+    // ---------- 家校通知模板（SUP-06） ----------
+    registerNotificationTemplateRoutes(app);
+
+    registerToolLinkRoutes(app);
+
+    // ---------- 对话式 Excel 导入（SUP-02） ----------
+    registerExcelImportRoutes(app);
 
     // ---------- 统计（MIG-05 补齐） ----------
     registerStatsRoutes(app);

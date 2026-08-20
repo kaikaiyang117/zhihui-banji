@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { CalendarDays, Clock3, Download, Edit3, FileUp, Plus, RotateCcw, Save, X } from 'lucide-vue-next'
-import { download, get, post, put, upload } from '../api'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { CalendarDays, Clock3, Download, Edit3, FileUp, Plus, RotateCcw, Save, X, Trash2, Users } from 'lucide-vue-next'
+import { download, get, post, put, upload, setStoredScope, getTeacherClasses, addTeacherClass, removeTeacherClass, getTeacherTimetable, getTeacherExams } from '../api'
+
+const activeView = ref('single')
 
 const periods = ref([])
 const entries = ref([])
@@ -32,6 +34,17 @@ const sessionTypes = ['普通课', '早自习', '晚自习', '班会', '自习',
 const weekPatterns = ['全周', '单周', '双周']
 const changeActions = ['调课', '代课', '停课', '考试', '活动']
 
+const myClasses = ref([])
+const allClasses = ref([])
+const teacherEntries = ref([])
+const teacherExamList = ref([])
+const teacherLoading = ref(false)
+const teacherError = ref('')
+const addClassId = ref('')
+const addingClass = ref(false)
+const removingClassId = ref(null)
+const showAddClassDialog = ref(false)
+
 function today() { return new Date().toISOString().slice(0, 10) }
 function resetEntryForm() { Object.assign(entryForm, { weekday: 1, period_no: periods.value[0]?.period_no || 1, subject: '', teacher_name: '', room: '', session_type: '普通课', week_pattern: '全周', week_start: 1, week_end: 99, note: '' }); editingEntryId.value = null }
 function resetPeriodForm() { Object.assign(periodForm, { period_no: periods.value.length + 1, label: '', start_time: '', end_time: '', session_type: '普通课' }) }
@@ -42,10 +55,51 @@ const previewRows = computed(() => importPreview.value?.rows || [])
 const commitRows = computed(() => previewRows.value.filter(item => item.valid))
 const scheduleForDate = computed(() => daySchedule.value?.entries || [])
 
+const myClassIds = computed(() => new Set(myClasses.value.map(c => Number(c.class_id))))
+const availableClasses = computed(() => allClasses.value.filter(c => !myClassIds.value.has(Number(c.id))))
+
+const teacherAgendaGrouped = computed(() => {
+  const changeItems = teacherEntries.value.filter(e => e.source === 'change')
+  const dateMap = new Map()
+  for (const item of teacherEntries.value) {
+    if (item.source === 'change') continue
+    const key = item.weekday ? `weekday-${item.weekday}` : 'other'
+    if (!dateMap.has(key)) dateMap.set(key, { label: weekdays[(item.weekday || 1) - 1] || '未知', items: [] })
+    dateMap.get(key).items.push(item)
+  }
+  for (const item of changeItems) {
+    const key = item.change_date || 'undated'
+    if (!dateMap.has(key)) dateMap.set(key, { label: item.change_date || '未定日期', items: [] })
+    dateMap.get(key).items.push(item)
+  }
+  return Array.from(dateMap.values())
+})
+
 function cellEntries(weekday, periodNo) {
   return filteredEntries.value.filter(item => Number(item.weekday) === weekday && Number(item.period_no) === periodNo)
 }
 function cellLabel(item) { return [item.subject, item.teacher_name, item.room].filter(Boolean).join(' · ') }
+function cellSecondary(item) {
+  if (item.room) return item.room
+  if (item.session_type && item.session_type !== '普通课') return item.session_type
+  return ''
+}
+function entryAccessibleLabel(item) {
+  return [
+    item.subject,
+    item.teacher_name && `任课教师：${item.teacher_name}`,
+    item.room && `教室：${item.room}`,
+    item.week_pattern && item.week_pattern !== '全周' && item.week_pattern,
+  ].filter(Boolean).join('，')
+}
+function cellAriaLabel(weekday, periodNo) {
+  const period = periods.value.find(item => Number(item.period_no) === Number(periodNo))
+  const label = period?.label || `${periodNo}节`
+  const item = cellEntries(weekday, periodNo)[0]
+  return item
+    ? `编辑${weekdays[weekday - 1]}${label}：${entryAccessibleLabel(item)}`
+    : `添加${weekdays[weekday - 1]}${label}课程`
+}
 function openEntry(entry = null, weekday = 1, periodNo = periods.value[0]?.period_no || 1) {
   editingEntryId.value = entry?.id || null
   Object.assign(entryForm, entry ? {
@@ -113,13 +167,65 @@ async function commitImport() {
 }
 function changeForPeriod(periodNo) { return changes.value.find(item => item.change_date === selectedDate.value && Number(item.period_no) === Number(periodNo)) }
 
+async function loadTeacherView() {
+  teacherLoading.value = true; teacherError.value = ''
+  try {
+    const [classesData, contextData, timetableData, examsData] = await Promise.all([
+      getTeacherClasses(),
+      get('/api/context'),
+      getTeacherTimetable(),
+      getTeacherExams(),
+    ])
+    myClasses.value = classesData.classes || []
+    allClasses.value = contextData.classes || []
+    teacherEntries.value = timetableData.entries || []
+    teacherExamList.value = examsData.exams || []
+  } catch (e) { teacherError.value = e.message } finally { teacherLoading.value = false }
+}
+
+async function onAddClass() {
+  if (!addClassId.value) return
+  addingClass.value = true; teacherError.value = ''
+  try {
+    await addTeacherClass(Number(addClassId.value))
+    addClassId.value = ''
+    showAddClassDialog.value = false
+    await loadTeacherView()
+  } catch (e) { teacherError.value = e.message } finally { addingClass.value = false }
+}
+
+async function onRemoveClass(tcId, classId) {
+  removingClassId.value = tcId
+  teacherError.value = ''
+  try {
+    await removeTeacherClass(tcId)
+    await loadTeacherView()
+  } catch (e) { teacherError.value = e.message } finally { removingClassId.value = null }
+}
+
+watch(activeView, (val) => {
+  if (val === 'mine' && !myClasses.value.length) loadTeacherView()
+})
+
 onMounted(load)
 </script>
 
 <template>
   <div class="timetable-page">
     <div class="page-title-bar">
-      <div><div class="page-title">课程表</div><div class="page-subtitle">高中班级课表、早晚自习与临时调课 · {{ daySchedule?.date || selectedDate }}</div></div>
+      <div><div class="page-title">课程表</div><div class="page-subtitle">{{ activeView === 'single' ? '高中班级课表、早晚自习与临时调课 · ' + (daySchedule?.date || selectedDate) : '多班级教师视角，汇总所有任课班级的课程与考试' }}</div></div>
+    </div>
+
+    <div class="segmented timetable-segmented">
+      <button :class="{ active: activeView === 'single' }" @click="activeView = 'single'">单班课表</button>
+      <button :class="{ active: activeView === 'mine' }" @click="activeView = 'mine'">我的安排</button>
+    </div>
+
+    <div v-if="notice" class="inline-message success-message">{{ notice }}</div>
+    <div v-if="error" class="inline-message error-message">{{ error }}</div>
+    <div v-if="teacherError" class="inline-message error-message">{{ teacherError }}</div>
+
+    <template v-if="activeView === 'single'">
       <div class="toolbar timetable-toolbar">
         <select v-model="teacherFilter" class="form-select" aria-label="按任课教师筛选" @change="load"><option value="">全部任课教师</option><option v-for="teacher in teachers" :key="teacher" :value="teacher">{{ teacher }}</option></select>
         <input ref="fileInput" type="file" accept=".xlsx,.xlsm" hidden @change="previewFile">
@@ -127,40 +233,128 @@ onMounted(load)
         <button class="btn btn-outline" @click="download('/api/timetable/template', '课程表导入模板.xlsx')"><Download :size="14" /> 下载模板</button>
         <button class="btn btn-primary" @click="openEntry()"><Plus :size="14" /> 添加课程</button>
       </div>
-    </div>
-    <div v-if="notice" class="inline-message success-message">{{ notice }}</div>
-    <div v-if="error" class="inline-message error-message">{{ error }}</div>
 
-    <section class="timetable-actions">
-      <button class="card timetable-action-card" @click="openPeriod()"><Clock3 :size="18" /><span><strong>节次与作息</strong><small>{{ periods.length }} 个节次，维护上课和下课时间</small></span><Edit3 :size="15" /></button>
-      <button class="card timetable-action-card" @click="openChange()"><CalendarDays :size="18" /><span><strong>临时调课</strong><small>{{ changes.length }} 条生效变更，停课/代课/考试均可记录</small></span><Plus :size="15" /></button>
-      <button class="card timetable-action-card" @click="load"><RotateCcw :size="18" /><span><strong>刷新课程表</strong><small>当前班级和学期范围</small></span><RotateCcw :size="15" /></button>
-    </section>
-
-    <section v-if="!loading" class="card timetable-week-card">
-      <div class="section-heading"><div><h2>固定周课表</h2><p>点击单元格编辑；单双周课程会同时显示</p></div><span class="hint">{{ entries.length }} 项课程</span></div>
-      <div v-if="!periods.length" class="empty-state">还没有配置节次。先点击“节次与作息”，再录入课程或导入Excel课表。</div>
-      <div v-else class="timetable-grid">
-        <div class="timetable-grid-head timetable-period-head">节次</div><div v-for="day in weekdays" :key="day" class="timetable-grid-head">{{ day }}</div>
-        <template v-for="period in periods" :key="period.id">
-          <div class="timetable-period-cell"><strong>{{ period.label || `${period.period_no}节` }}</strong><small>{{ period.start_time }}<template v-if="period.end_time">–{{ period.end_time }}</template></small><em>{{ period.session_type }}</em></div>
-          <button v-for="weekday in 7" :key="`${period.id}-${weekday}`" class="timetable-cell" @click="openEntry(cellEntries(weekday, period.period_no)[0], weekday, period.period_no)">
-            <template v-if="cellEntries(weekday, period.period_no).length"><span v-for="item in cellEntries(weekday, period.period_no)" :key="item.id" class="timetable-entry"><strong>{{ item.subject }}</strong><small>{{ [item.teacher_name, item.room].filter(Boolean).join(' · ') || '未填写教师/教室' }}</small><em v-if="item.week_pattern !== '全周'">{{ item.week_pattern }}</em></span></template>
-            <span v-else class="timetable-empty">添加</span>
-          </button>
-        </template>
-      </div>
-    </section>
-
-    <div class="timetable-lower-grid">
-      <section class="card day-schedule-card">
-        <div class="section-heading"><div><h2>当天课程</h2><p>校历、教学周和临时变更会在这里合并</p></div><input class="form-input date-input" type="date" v-model="selectedDate" @change="loadDay"></div>
-        <div v-if="daySchedule" class="day-meta"><span>第 {{ daySchedule.week_no }} 周 · {{ daySchedule.weekday_label }}</span><span :class="daySchedule.school_day ? 'tag-green' : 'tag-gray'">{{ daySchedule.school_day ? '行课日' : '非行课日' }}</span><span v-if="daySchedule.calendar?.title">{{ daySchedule.calendar.title }}</span></div>
-        <div v-if="!scheduleForDate.length" class="empty-state compact-empty">当前日期没有配置节次。</div>
-        <div v-for="slot in scheduleForDate" :key="slot.id" class="day-course-row" :class="{ changed: slot.entry?.is_change, cancelled: !slot.entry && changeForPeriod(slot.period_no)?.action === '停课' }"><div class="day-course-time"><strong>{{ slot.label }}</strong><small>{{ slot.start_time }}<template v-if="slot.end_time">–{{ slot.end_time }}</template></small></div><div v-if="slot.entry" class="day-course-copy"><strong>{{ slot.entry.subject }} <em v-if="slot.entry.is_change">{{ slot.entry.action }}</em></strong><span>{{ [slot.entry.teacher_name, slot.entry.room, slot.entry.session_type].filter(Boolean).join(' · ') }}</span><small v-if="slot.entry.original_subject">原课程：{{ slot.entry.original_subject }}{{ slot.entry.original_teacher_name ? ` · ${slot.entry.original_teacher_name}` : '' }}</small></div><div v-else class="day-course-copy"><strong>{{ changeForPeriod(slot.period_no)?.action === '停课' ? '停课' : '未安排课程' }}</strong><span>{{ changeForPeriod(slot.period_no)?.note || '—' }}</span></div></div>
+      <section class="timetable-actions">
+        <button class="card timetable-action-card" @click="openPeriod()"><Clock3 :size="18" /><span><strong>节次与作息</strong><small>{{ periods.length }} 个节次，维护上课和下课时间</small></span><Edit3 :size="15" /></button>
+        <button class="card timetable-action-card" @click="openChange()"><CalendarDays :size="18" /><span><strong>临时调课</strong><small>{{ changes.length }} 条生效变更，停课/代课/考试均可记录</small></span><Plus :size="15" /></button>
+        <button class="card timetable-action-card" @click="load"><RotateCcw :size="18" /><span><strong>刷新课程表</strong><small>当前班级和学期范围</small></span><RotateCcw :size="15" /></button>
       </section>
-      <section class="card changes-card"><div class="section-heading"><div><h2>临时变更</h2><p>按当前学期保留变更记录</p></div><button class="btn btn-outline btn-sm" @click="openChange"><Plus :size="13" /> 添加</button></div><div v-if="!changes.length" class="empty-state compact-empty">暂时没有临时调课。</div><div v-for="item in changes.slice(0, 12)" :key="item.id" class="change-row"><div><strong>{{ item.change_date }} · 第{{ item.period_no }}节 · {{ item.action }}</strong><span>{{ [item.subject, item.teacher_name, item.room].filter(Boolean).join(' · ') || '停课' }}</span></div><button class="btn btn-sm btn-outline" @click="cancelChange(item)">取消</button></div></section>
-    </div>
+
+      <section v-if="!loading" class="card timetable-week-card">
+        <div class="section-heading"><div><h2>固定周课表</h2><p>默认显示科目和教室；点击课程查看教师、单双周和备注</p></div><span class="hint">{{ entries.length }} 项课程</span></div>
+        <div v-if="!periods.length" class="empty-state">还没有配置节次。先点击"节次与作息"，再录入课程或导入Excel课表。</div>
+        <div v-else class="timetable-grid-scroll" aria-label="固定周课表，可横向滚动查看">
+          <div class="timetable-grid">
+          <div class="timetable-grid-head timetable-period-head">节次</div><div v-for="day in weekdays" :key="day" class="timetable-grid-head">{{ day }}</div>
+          <template v-for="period in periods" :key="period.id">
+            <div class="timetable-period-cell"><strong>{{ period.label || `${period.period_no}节` }}</strong><small>{{ period.start_time }}<template v-if="period.end_time">–{{ period.end_time }}</template></small><em v-if="period.session_type && period.session_type !== '普通课'">{{ period.session_type }}</em></div>
+            <button v-for="weekday in 7" :key="`${period.id}-${weekday}`" class="timetable-cell" :aria-label="cellAriaLabel(weekday, period.period_no)" @click="openEntry(cellEntries(weekday, period.period_no)[0], weekday, period.period_no)">
+              <template v-if="cellEntries(weekday, period.period_no).length"><span v-for="item in cellEntries(weekday, period.period_no)" :key="item.id" class="timetable-entry" :title="cellLabel(item)"><strong>{{ item.subject }}</strong><small v-if="cellSecondary(item)">{{ cellSecondary(item) }}</small><em v-if="item.week_pattern !== '全周'">{{ item.week_pattern }}</em></span></template>
+              <span v-else class="timetable-empty">添加</span>
+            </button>
+          </template>
+          </div>
+        </div>
+      </section>
+
+      <div class="timetable-lower-grid">
+        <section class="card day-schedule-card">
+          <div class="section-heading"><div><h2>当天课程</h2><p>校历、教学周和临时变更会在这里合并</p></div><input class="form-input date-input" type="date" v-model="selectedDate" @change="loadDay"></div>
+          <div v-if="daySchedule" class="day-meta"><span>第 {{ daySchedule.week_no }} 周 · {{ daySchedule.weekday_label }}</span><span :class="daySchedule.school_day ? 'tag-green' : 'tag-gray'">{{ daySchedule.school_day ? '行课日' : '非行课日' }}</span><span v-if="daySchedule.calendar?.title">{{ daySchedule.calendar.title }}</span></div>
+          <div v-if="!scheduleForDate.length" class="empty-state compact-empty">当前日期没有配置节次。</div>
+          <div v-for="slot in scheduleForDate" :key="slot.id" class="day-course-row" :class="{ changed: slot.entry?.is_change, cancelled: !slot.entry && changeForPeriod(slot.period_no)?.action === '停课' }"><div class="day-course-time"><strong>{{ slot.label }}</strong><small>{{ slot.start_time }}<template v-if="slot.end_time">–{{ slot.end_time }}</template></small></div><div v-if="slot.entry" class="day-course-copy"><strong>{{ slot.entry.subject }} <em v-if="slot.entry.is_change">{{ slot.entry.action }}</em></strong><span>{{ [slot.entry.teacher_name, slot.entry.room, slot.entry.session_type].filter(Boolean).join(' · ') }}</span><small v-if="slot.entry.original_subject">原课程：{{ slot.entry.original_subject }}{{ slot.entry.original_teacher_name ? ` · ${slot.entry.original_teacher_name}` : '' }}</small></div><div v-else class="day-course-copy"><strong>{{ changeForPeriod(slot.period_no)?.action === '停课' ? '停课' : '未安排课程' }}</strong><span>{{ changeForPeriod(slot.period_no)?.note || '—' }}</span></div></div>
+        </section>
+        <section class="card changes-card"><div class="section-heading"><div><h2>临时变更</h2><p>按当前学期保留变更记录</p></div><button class="btn btn-outline btn-sm" @click="openChange"><Plus :size="13" /> 添加</button></div><div v-if="!changes.length" class="empty-state compact-empty">暂时没有临时调课。</div><div v-for="item in changes.slice(0, 12)" :key="item.id" class="change-row"><div><strong>{{ item.change_date }} · 第{{ item.period_no }}节 · {{ item.action }}</strong><span>{{ [item.subject, item.teacher_name, item.room].filter(Boolean).join(' · ') || '停课' }}</span></div><button class="btn btn-sm btn-outline" @click="cancelChange(item)">取消</button></div></section>
+      </div>
+    </template>
+
+    <template v-if="activeView === 'mine'">
+      <div v-if="teacherLoading" class="loading">加载中…</div>
+      <template v-else>
+        <section class="card my-classes-card">
+          <div class="section-heading"><div><h2><Users :size="16" /> 我的班级</h2><p>添加你任课的班级，汇总查看所有班级的课程安排</p></div><button class="btn btn-primary btn-sm" @click="showAddClassDialog = true"><Plus :size="13" /> 添加班级</button></div>
+          <div v-if="!myClasses.length" class="empty-state">还没有添加班级。点击"添加班级"，将你任课的班级加入列表，即可在"我的安排"中查看汇总课表。</div>
+          <div v-else class="my-classes-list">
+            <div v-for="cls in myClasses" :key="cls.id" class="my-class-row">
+              <div class="my-class-info">
+                <span class="my-class-name">{{ cls.class_name }}</span>
+                <span class="tag tag-blue" v-if="cls.grade">{{ cls.grade }}</span>
+                <span class="my-class-role" v-if="cls.role">{{ cls.role }}</span>
+                <span class="my-class-subjects" v-if="cls.subjects">{{ cls.subjects }}</span>
+              </div>
+              <button class="btn btn-sm btn-outline my-class-remove" :disabled="removingClassId === cls.id" @click="onRemoveClass(cls.id, cls.class_id)"><Trash2 :size="13" /></button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="myClasses.length" class="card my-agenda-card">
+          <div class="section-heading"><div><h2>汇总课表</h2><p>所有班级的固定课程与临时变更</p></div><span class="hint">{{ teacherEntries.length }} 项</span></div>
+          <div v-if="!teacherEntries.length" class="empty-state">当前班级暂无课程安排。</div>
+          <div v-else class="my-agenda-grouped">
+            <div v-for="group in teacherAgendaGrouped" :key="group.label" class="my-agenda-date-group">
+              <div class="my-agenda-date-label">{{ group.label }}</div>
+              <div v-for="item in group.items" :key="`${item.class_id}-${item.weekday}-${item.period_no}-${item.subject}-${item.change_date || ''}`" class="my-agenda-item" :class="{ 'my-agenda-change': item.source === 'change' }">
+                <div class="my-agenda-time">
+                  <template v-if="item.source === 'change'">
+                    <strong>{{ item.change_date }}</strong>
+                    <small>第{{ item.period_no }}节</small>
+                  </template>
+                  <template v-else>
+                    <strong>第{{ item.period_no }}节</strong>
+                    <small>{{ weekdays[(item.weekday || 1) - 1] }}</small>
+                  </template>
+                </div>
+                <div class="my-agenda-body">
+                  <div class="my-agenda-subject-row">
+                    <strong>{{ item.subject }}</strong>
+                    <span class="tag tag-blue my-agenda-class-tag">{{ item.class_name }}</span>
+                    <em v-if="item.source === 'change'" class="my-agenda-action">{{ item.action }}</em>
+                    <em v-if="item.week_pattern && item.week_pattern !== '全周'" class="my-agenda-pattern">{{ item.week_pattern }}</em>
+                  </div>
+                  <div class="my-agenda-meta">{{ [item.teacher_name, item.room, item.session_type].filter(Boolean).join(' · ') }}</div>
+                  <div v-if="item.note" class="my-agenda-note">{{ item.note }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="myClasses.length && teacherExamList.length" class="card my-exams-card">
+          <div class="section-heading"><div><h2>近期考试</h2><p>所有班级的考试安排</p></div><span class="hint">{{ teacherExamList.length }} 场</span></div>
+          <div class="my-exam-list">
+            <div v-for="exam in teacherExamList" :key="exam.id" class="my-exam-row">
+              <div class="my-exam-date"><strong>{{ exam.exam_date || '待定' }}</strong></div>
+              <div class="my-exam-body">
+                <strong>{{ exam.name }}</strong>
+                <span class="tag tag-blue my-agenda-class-tag">{{ exam.class_name }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
+
+      <div v-if="showAddClassDialog" class="modal-overlay show" @click.self="showAddClassDialog = false">
+        <div class="modal">
+          <div class="modal-title-row">
+            <div><div class="modal-kicker">多班级教师视角</div><h3>添加任课班级</h3></div>
+            <button class="icon-button" @click="showAddClassDialog = false"><X :size="18" /></button>
+          </div>
+          <div v-if="!availableClasses.length" class="empty-state">所有班级已添加，或系统中没有更多班级。请先在工作台创建班级。</div>
+          <template v-else>
+            <label style="display:grid;gap:5px;color:var(--text-secondary);font-size:12px">选择班级
+              <select class="form-select" v-model="addClassId">
+                <option value="">请选择班级</option>
+                <option v-for="cls in availableClasses" :key="cls.id" :value="cls.id">{{ cls.name }}{{ cls.grade ? ` (${cls.grade})` : '' }}</option>
+              </select>
+            </label>
+          </template>
+          <div class="modal-actions">
+            <button class="btn btn-outline" @click="showAddClassDialog = false">取消</button>
+            <button class="btn btn-primary" :disabled="addingClass || !addClassId" @click="onAddClass">{{ addingClass ? '添加中…' : '添加' }}</button>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <div v-if="showEntryEditor" class="modal-overlay show" @click.self="showEntryEditor = false"><div class="modal timetable-modal"><div class="modal-title-row"><div><div class="modal-kicker">固定周课表</div><h3>{{ editingEntryId ? '编辑课程安排' : '添加课程安排' }}</h3></div><button class="icon-button" @click="showEntryEditor = false"><X :size="18" /></button></div><div class="form-grid"><label>星期<select class="form-select" v-model.number="entryForm.weekday"><option v-for="(day, index) in weekdays" :key="day" :value="index + 1">{{ day }}</option></select></label><label>节次<select class="form-select" v-model.number="entryForm.period_no"><option v-for="period in periods" :key="period.id" :value="period.period_no">{{ period.label || `${period.period_no}节` }}</option></select></label><label>科目<input class="form-input" v-model="entryForm.subject" placeholder="如：数学"></label><label>任课教师<input class="form-input" v-model="entryForm.teacher_name" placeholder="可选"></label><label>教室<input class="form-input" v-model="entryForm.room" placeholder="如：高一（1）班"></label><label>时段类型<select class="form-select" v-model="entryForm.session_type"><option v-for="item in sessionTypes" :key="item">{{ item }}</option></select></label><label>单双周<select class="form-select" v-model="entryForm.week_pattern"><option v-for="item in weekPatterns" :key="item">{{ item }}</option></select></label><label>开始周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_start"></label><label>结束周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_end"></label><label class="form-grid-wide">备注<textarea class="form-textarea" rows="2" v-model="entryForm.note"></textarea></label></div><div class="modal-actions"><button class="btn btn-outline" @click="showEntryEditor = false">取消</button><button class="btn btn-primary" :disabled="saving || !entryForm.subject.trim()" @click="saveEntry"><Save :size="14" /> 保存课程</button></div></div></div>
 
@@ -173,5 +367,92 @@ onMounted(load)
 </template>
 
 <style scoped>
-.timetable-page { max-width: 1400px; margin: 0 auto; }.timetable-toolbar { flex-wrap: wrap; }.timetable-toolbar .form-select { min-width: 150px; width: auto; }.timetable-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }.timetable-action-card { display: flex; align-items: center; gap: 11px; padding: 14px; border: 1px solid var(--border); text-align: left; color: var(--text); cursor: pointer; }.timetable-action-card > span { display: grid; flex: 1; gap: 3px; }.timetable-action-card small { color: var(--text-secondary); font-size: 11px; }.timetable-week-card { overflow: hidden; }.timetable-grid { display: grid; grid-template-columns: 116px repeat(7, minmax(105px, 1fr)); min-width: 860px; border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }.timetable-grid-head { padding: 11px 8px; background: var(--surface-subtle, #f8f8fa); border-right: 1px solid var(--border-light); color: var(--text-secondary); font-size: 12px; font-weight: 600; text-align: center; }.timetable-period-head { text-align: left; }.timetable-period-cell { display: grid; align-content: center; gap: 4px; min-height: 94px; padding: 8px; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface-subtle, #f8f8fa); }.timetable-period-cell strong { font-size: 12px; }.timetable-period-cell small,.timetable-period-cell em { color: var(--text-tertiary); font-size: 10px; font-style: normal; }.timetable-cell { display: grid; align-content: start; gap: 5px; min-height: 94px; padding: 7px; border: 0; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }.timetable-cell:hover { background: var(--primary-bg); }.timetable-entry { display: grid; gap: 2px; padding: 7px; border-radius: 8px; background: var(--primary-bg); }.timetable-entry strong { font-size: 13px; }.timetable-entry small { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.timetable-entry em { color: var(--primary); font-size: 10px; font-style: normal; }.timetable-empty { align-self: center; color: var(--text-tertiary); font-size: 11px; text-align: center; }.timetable-lower-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; margin-top: 16px; }.day-schedule-card,.changes-card { min-width: 0; }.date-input { width: 145px; }.day-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 12px; color: var(--text-secondary); font-size: 12px; }.day-meta > span { padding: 4px 8px; border-radius: 6px; background: var(--surface-subtle, #f8f8fa); }.day-meta .tag-green,.day-meta .tag-gray { background: transparent; }.day-course-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 13px; padding: 11px 0; border-top: 1px solid var(--border-light); }.day-course-row.changed { margin-inline: -8px; padding-inline: 8px; border-radius: 8px; background: rgba(91,106,191,.06); }.day-course-row.cancelled { color: var(--text-tertiary); }.day-course-time { display: grid; gap: 3px; align-content: center; }.day-course-time small,.day-course-copy span,.day-course-copy small { color: var(--text-secondary); font-size: 11px; }.day-course-copy { display: grid; gap: 3px; align-content: center; }.day-course-copy strong em { margin-left: 6px; color: var(--primary); font-size: 10px; font-style: normal; }.change-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 0; border-top: 1px solid var(--border-light); }.change-row > div { display: grid; gap: 3px; min-width: 0; }.change-row span { overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.timetable-modal { max-width: 700px; }.period-list { display: grid; gap: 6px; max-height: 250px; overflow-y: auto; margin-bottom: 16px; }.period-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid var(--border-light); border-radius: 8px; }.period-row span { display: grid; gap: 3px; }.period-row small { color: var(--text-secondary); font-size: 11px; }.timetable-preview-table { max-height: 52vh; overflow: auto; }.preview-counts { display: flex; gap: 12px; margin: 8px 0 12px; color: var(--text-secondary); font-size: 12px; }.preview-counts .success { color: var(--success); }.preview-counts .danger { color: var(--danger); }.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }.icon-button:hover { background: var(--surface-subtle); color: var(--text); }@media (max-width: 900px) { .timetable-actions { grid-template-columns: 1fr; }.timetable-lower-grid { grid-template-columns: 1fr; }.timetable-grid { overflow-x: auto; }.timetable-toolbar .form-select { width: 100%; }.timetable-toolbar { width: 100%; } }@media (max-width: 600px) { .timetable-grid { min-width: 860px; }.timetable-week-card { overflow-x: auto; }.day-course-row { grid-template-columns: 88px minmax(0,1fr); }.date-input { width: 132px; } }
+.timetable-page { max-width: 1400px; margin: 0 auto; }
+.timetable-segmented { margin-bottom: 16px; }
+.timetable-toolbar { flex-wrap: wrap; }
+.timetable-toolbar .form-select { min-width: 150px; width: auto; }
+.timetable-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.timetable-action-card { display: flex; align-items: center; gap: 11px; padding: 14px; border: 1px solid var(--border); text-align: left; color: var(--text); cursor: pointer; }
+.timetable-action-card > span { display: grid; flex: 1; gap: 3px; }
+.timetable-action-card small { color: var(--text-secondary); font-size: 11px; }
+.timetable-week-card { overflow: hidden; }
+.timetable-grid-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 2px; }
+.timetable-grid { display: grid; grid-template-columns: 100px repeat(7, minmax(96px, 1fr)); min-width: 772px; border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
+.timetable-grid-head { padding: 11px 8px; background: var(--surface-subtle, #f8f8fa); border-right: 1px solid var(--border-light); color: var(--text-secondary); font-size: 12px; font-weight: 600; text-align: center; }
+.timetable-period-head { text-align: left; }
+.timetable-period-cell { display: grid; align-content: center; gap: 3px; min-height: 76px; padding: 8px; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface-subtle, #f8f8fa); }
+.timetable-period-cell strong { font-size: 12px; }
+.timetable-period-cell small,.timetable-period-cell em { color: var(--text-tertiary); font-size: 10px; font-style: normal; }
+.timetable-cell { display: grid; align-content: start; gap: 4px; min-height: 76px; padding: 6px; border: 0; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.timetable-cell:hover { background: var(--primary-bg); }
+.timetable-entry { display: grid; gap: 2px; min-width: 0; padding: 6px 7px; border-radius: 8px; background: var(--primary-bg); }
+.timetable-entry strong { overflow: hidden; font-size: 13px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.timetable-entry small { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.timetable-entry em { width: max-content; max-width: 100%; padding: 1px 5px; border-radius: 5px; background: rgba(86,99,182,.1); color: var(--primary); font-size: 10px; font-style: normal; font-weight: 500; }
+.timetable-empty { color: var(--text-tertiary); font-size: 11px; }
+.timetable-lower-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 16px; margin-top: 16px; }
+.day-meta { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
+.day-course-row { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+.day-course-row.changed { background: var(--warning-bg, #fff8e1); margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.day-course-row.cancelled { background: var(--bg); opacity: .5; }
+.day-course-time { min-width: 60px; display: grid; gap: 3px; }
+.day-course-time small { color: var(--text-tertiary); font-size: 10px; }
+.day-course-copy { display: grid; gap: 3px; }
+.day-course-copy em { color: var(--warning, #f59e0b); font-style: normal; font-size: 12px; }
+.day-course-copy small { color: var(--text-tertiary); font-size: 11px; }
+.change-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-light); }
+.change-row > div { display: grid; gap: 3px; }
+.change-row strong { font-size: 13px; }
+.change-row span { color: var(--text-secondary); font-size: 12px; }
+.period-list { margin-bottom: 14px; max-height: 260px; overflow: auto; }
+.period-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border-light); }
+.period-row span { display: grid; gap: 3px; }
+.period-row small { color: var(--text-secondary); font-size: 12px; }
+.timetable-preview-table { max-height: 320px; overflow: auto; }
+.preview-counts { display: flex; gap: 12px; margin-bottom: 10px; font-size: 13px; }
+.preview-error-row { background: var(--danger-bg, #fef2f2); }
+.tag-green { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--success-bg, #ecfdf5); color: var(--success, #10b981); font-size: 11px; }
+.tag-gray { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--bg); color: var(--text-tertiary); font-size: 11px; }
+.tag-blue { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--primary-bg); color: var(--primary); font-size: 11px; }
+
+.my-classes-card { margin-bottom: 16px; }
+.my-classes-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.my-class-row { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.my-class-info { display: flex; align-items: center; gap: 6px; }
+.my-class-name { font-size: 13px; font-weight: 500; }
+.my-class-role { color: var(--text-secondary); font-size: 11px; }
+.my-class-subjects { color: var(--text-tertiary); font-size: 11px; }
+.my-class-remove { padding: 4px 6px; }
+
+.my-agenda-card { margin-bottom: 16px; }
+.my-agenda-grouped { display: grid; gap: 16px; }
+.my-agenda-date-group { border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
+.my-agenda-date-label { padding: 8px 12px; background: var(--surface-subtle, #f8f8fa); font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.my-agenda-item { display: flex; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border-light); }
+.my-agenda-item.my-agenda-change { background: var(--warning-bg, #fff8e1); }
+.my-agenda-time { min-width: 60px; display: grid; gap: 2px; }
+.my-agenda-time strong { font-size: 13px; }
+.my-agenda-time small { color: var(--text-tertiary); font-size: 11px; }
+.my-agenda-body { display: grid; gap: 3px; }
+.my-agenda-subject-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.my-agenda-subject-row strong { font-size: 13px; }
+.my-agenda-class-tag { font-size: 10px; }
+.my-agenda-action { color: var(--warning, #f59e0b); font-size: 11px; font-style: normal; font-weight: 500; }
+.my-agenda-pattern { color: var(--primary); font-size: 11px; font-style: normal; font-weight: 500; }
+.my-agenda-meta { color: var(--text-secondary); font-size: 12px; }
+.my-agenda-note { color: var(--text-tertiary); font-size: 11px; }
+
+.my-exams-card { margin-bottom: 16px; }
+.my-exam-list { display: grid; gap: 8px; }
+.my-exam-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+.my-exam-date { min-width: 80px; font-size: 13px; }
+.my-exam-body { display: flex; align-items: center; gap: 6px; }
+.my-exam-body strong { font-size: 13px; }
+
+@media (max-width: 800px) {
+  .timetable-actions { grid-template-columns: 1fr; }
+  .timetable-lower-grid { grid-template-columns: 1fr; }
+  .my-classes-list { flex-direction: column; }
+  .my-class-row { width: 100%; justify-content: space-between; }
+}
 </style>

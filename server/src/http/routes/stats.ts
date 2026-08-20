@@ -53,4 +53,9 @@ export function registerStatsRoutes(app: FastifyInstance): void {
   app.get('/api/stats/points', async () => points.classSummary());
 
   app.get('/api/stats/fund', async () => funds.classSummary());
+
+  app.get('/api/stats/upcoming-exams', async (request) => {
+    const { limit } = request.query as { limit?: string };
+    return { exams: scores.listUpcomingExams({ limit: limit ? Number(limit) : undefined }) };
+  });
 }

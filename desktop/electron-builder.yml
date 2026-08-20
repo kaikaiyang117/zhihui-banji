@@ -18,6 +18,12 @@ extraResources:
       - '**/*'
   - from: ../packaging/macos-updater.sh
     to: backend/updater/macos-updater.sh
+  - from: pet/
+    to: pet/
+    filter:
+      - '**/*'
+  - from: pet-preload.js
+    to: pet-preload.js
 win:
   target:
     - target: nsis

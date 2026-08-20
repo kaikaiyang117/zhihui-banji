@@ -1,13 +1,23 @@
 <script setup>
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageCircle, RefreshCw, Send, Settings } from 'lucide-vue-next'
+import { FileSpreadsheet, MessageCircle, Paperclip, RefreshCw, Send, Settings } from 'lucide-vue-next'
 import { useChat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import QRCode from 'qrcode'
 import { NAV } from './sheets'
 import { getIcon } from './icons'
-import { clearDeviceCredential, del, fetchWithAccess, get, post } from './api'
+import {
+  analyzeExcelImport,
+  clearDeviceCredential,
+  del,
+  discardExcelImport,
+  executeExcelImport,
+  fetchWithAccess,
+  get,
+  post,
+  previewExcelImport,
+} from './api'
 import { renderAgentMarkdown } from './markdown'
 import UpdateDialog from './components/UpdateDialog.vue'
 import ContextSwitcher from './components/ContextSwitcher.vue'
@@ -41,6 +51,19 @@ const agentInputEl = ref(null)
 const agentFabEl = ref(null)
 const agentActionStates = ref({})
 const agentTraceOpenStates = ref({})
+const agentExcelInput = ref(null)
+const agentExcel = ref({
+  step: 'idle',
+  busy: false,
+  error: '',
+  fileId: '',
+  analysis: null,
+  module: '',
+  sheetIndex: 0,
+  duplicateStrategy: 'update',
+  preview: null,
+  result: null,
+})
 const accessDialogEl = ref(null)
 const accessCloseEl = ref(null)
 const accessTriggerEl = ref(null)
@@ -79,6 +102,14 @@ const agentChat = useChat({
         body: {
           session_id: agentSessionId.value,
           message,
+          attachment: agentExcel.value.fileId
+            ? {
+                file_id: agentExcel.value.fileId,
+                filename: agentExcel.value.analysis?.filename || '',
+                sheets: agentExcel.value.analysis?.sheets || [],
+                candidate_modules: agentExcel.value.analysis?.candidate_modules || [],
+              }
+            : undefined,
         },
       }
     },
@@ -498,8 +529,99 @@ function handleAgentDialogKeydown(event) {
   closeAgentChat()
 }
 
+function agentExcelModuleName(module) {
+  return ({ students: '学生信息', scores: '成绩', calendar: '校历', timetable: '课程表' })[module] || module
+}
+
+function formatAgentFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function resetAgentExcelState() {
+  agentExcel.value = {
+    step: 'idle', busy: false, error: '', fileId: '', analysis: null,
+    module: '', sheetIndex: 0, duplicateStrategy: 'update', preview: null, result: null,
+  }
+}
+
+function triggerAgentExcelUpload() {
+  if (agentExcel.value.busy || agentSending.value) return
+  agentExcelInput.value?.click()
+}
+
+async function handleAgentExcelFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  if (!/\.xlsx$/i.test(file.name)) {
+    agentExcel.value.error = '目前仅支持 .xlsx 文件，请先另存为 Excel 工作簿。'
+    return
+  }
+  if (agentExcel.value.fileId) {
+    try { await discardExcelImport(agentExcel.value.fileId, agentSessionId.value) } catch { /* 上传新文件时忽略旧文件清理失败 */ }
+  }
+  if (!agentSessionId.value) await createAgentSession()
+  agentExcel.value = { ...agentExcel.value, step: 'uploading', busy: true, error: '', analysis: null, preview: null, result: null, fileId: '' }
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const analysis = await analyzeExcelImport(formData, agentSessionId.value)
+    agentExcel.value = {
+      ...agentExcel.value,
+      step: 'analyzed',
+      busy: false,
+      fileId: analysis.file_id,
+      analysis,
+      module: analysis.candidate_modules?.length === 1 ? analysis.candidate_modules[0].module : '',
+      sheetIndex: 0,
+      duplicateStrategy: 'update',
+    }
+    scrollAgentToBottom({ instant: true })
+  } catch (error) {
+    agentExcel.value = { ...agentExcel.value, step: 'idle', busy: false, error: error.detail?.message || error.message || '文件分析失败' }
+  }
+}
+
+async function previewAgentExcel() {
+  const current = agentExcel.value
+  if (!current.fileId || !current.module || current.busy) return
+  agentExcel.value = { ...current, busy: true, error: '' }
+  try {
+    const preview = await previewExcelImport(current.fileId, current.module, current.sheetIndex, current.duplicateStrategy, agentSessionId.value)
+    agentExcel.value = { ...agentExcel.value, step: 'preview', busy: false, preview }
+  } catch (error) {
+    agentExcel.value = { ...agentExcel.value, busy: false, error: error.detail?.message || error.message || '预览生成失败' }
+  }
+}
+
+async function executeAgentExcel() {
+  const current = agentExcel.value
+  if (!current.preview || current.busy) return
+  agentExcel.value = { ...current, busy: true, error: '' }
+  try {
+    const result = await executeExcelImport(current.fileId, current.module, current.preview.preview_hash, `agent-web-${Date.now()}`, agentSessionId.value)
+    agentExcel.value = { ...agentExcel.value, step: 'result', busy: false, result }
+  } catch (error) {
+    agentExcel.value = { ...agentExcel.value, busy: false, error: error.detail?.message || error.message || '导入执行失败' }
+  }
+}
+
+function backToAgentExcelAnalysis() {
+  agentExcel.value = { ...agentExcel.value, step: 'analyzed', preview: null, result: null, error: '' }
+}
+
+async function discardAgentExcel() {
+  const fileId = agentExcel.value.fileId
+  if (fileId) {
+    try { await discardExcelImport(fileId, agentSessionId.value) } catch { /* 文件过期时也允许清理界面 */ }
+  }
+  resetAgentExcelState()
+}
+
 async function sendAgentMessage() {
-  const message = agentInput.value.trim()
+  const message = agentInput.value.trim() || (agentExcel.value.fileId ? '请分析我刚上传的 Excel 文件，并告诉我下一步。' : '')
   if (!message || agentSending.value) return
   agentInput.value = ''
   agentError.value = ''
@@ -522,6 +644,7 @@ function handleAgentKeydown(event) {
 async function resetAgentSession() {
   if (agentSending.value) return
   try {
+    await discardAgentExcel()
     if (agentSessionId.value) {
       await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
     }
@@ -561,6 +684,7 @@ async function loadAgentHistory() {
 async function switchAgentSession(event) {
   const sessionId = String(event.detail?.sessionId || '')
   if (!sessionId.startsWith('web:') || sessionId === agentSessionId.value || agentSending.value) return
+  await discardAgentExcel()
   window.localStorage.setItem('meimei_agent_web_session_id', sessionId)
   agentSessionId.value = sessionId
   agentMessages.value = []
@@ -752,10 +876,54 @@ onBeforeUnmount(() => {
         </div>
         <footer class="agent-chat-foot">
           <div class="agent-composer">
+            <input ref="agentExcelInput" class="agent-excel-input" type="file" accept=".xlsx" @change="handleAgentExcelFile" />
+            <div v-if="agentExcel.step !== 'idle'" class="agent-excel-card">
+              <div class="agent-excel-card-head">
+                <div class="agent-excel-file"><FileSpreadsheet :size="16" /><strong>{{ agentExcel.analysis?.filename || 'Excel 文件' }}</strong></div>
+                <button class="agent-excel-remove" type="button" aria-label="移除 Excel 文件" :disabled="agentExcel.busy" @click="discardAgentExcel">×</button>
+              </div>
+              <div v-if="agentExcel.step === 'uploading'" class="agent-excel-loading">正在读取工作表和字段…</div>
+              <template v-else-if="agentExcel.analysis && agentExcel.step === 'analyzed'">
+                <div class="agent-excel-summary">{{ formatAgentFileSize(agentExcel.analysis.size_bytes) }} · {{ agentExcel.analysis.sheets?.join('、') || '未识别工作表' }}</div>
+                <div v-if="agentExcel.analysis.candidate_modules?.length" class="agent-excel-options">
+                  <label v-for="candidate in agentExcel.analysis.candidate_modules" :key="candidate.module" class="agent-excel-option" :class="{ selected: agentExcel.module === candidate.module }">
+                    <input v-model="agentExcel.module" type="radio" :value="candidate.module" :disabled="agentExcel.busy" />
+                    <span><strong>{{ agentExcelModuleName(candidate.module) }}</strong><small>{{ candidate.reason }}</small></span>
+                  </label>
+                </div>
+                <div v-else class="agent-excel-empty">未自动识别模块，请确认文件首行是否为字段名。</div>
+                <div class="agent-excel-controls">
+                  <select v-if="agentExcel.analysis.sheets?.length > 1" v-model="agentExcel.sheetIndex" :disabled="agentExcel.busy" aria-label="工作表">
+                    <option v-for="(sheet, index) in agentExcel.analysis.sheets" :key="index" :value="index">{{ sheet }}</option>
+                  </select>
+                  <select v-model="agentExcel.duplicateStrategy" :disabled="agentExcel.busy" aria-label="重复记录策略">
+                    <option value="update">重复记录：更新</option>
+                    <option value="skip">重复记录：跳过</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" type="button" :disabled="!agentExcel.module || agentExcel.busy" @click="previewAgentExcel">{{ agentExcel.busy ? '处理中…' : '预览' }}</button>
+                </div>
+              </template>
+              <template v-else-if="agentExcel.preview && agentExcel.step === 'preview'">
+                <div class="agent-excel-summary">{{ agentExcelModuleName(agentExcel.module) }} · 预览结果</div>
+                <div class="agent-excel-counts">
+                  <span>总行 {{ agentExcel.preview.total_rows }}</span><span>有效 {{ agentExcel.preview.valid_rows }}</span><span>新增 {{ agentExcel.preview.new_count }}</span><span>更新 {{ agentExcel.preview.update_count }}</span><span>错误 {{ agentExcel.preview.error_rows }}</span>
+                </div>
+                <div v-if="agentExcel.preview.error_rows > 0" class="agent-excel-warning">存在错误行，请先检查预览结果再确认。</div>
+                <div class="agent-excel-controls">
+                  <button class="btn btn-primary btn-sm" type="button" :disabled="agentExcel.busy" @click="executeAgentExcel">{{ agentExcel.busy ? '导入中…' : '确认导入' }}</button>
+                  <button class="btn btn-outline btn-sm" type="button" :disabled="agentExcel.busy" @click="backToAgentExcelAnalysis">返回修改</button>
+                </div>
+              </template>
+              <template v-else-if="agentExcel.result && agentExcel.step === 'result'">
+                <div class="agent-excel-success">导入完成：新增 {{ agentExcel.result.imported }}，更新 {{ agentExcel.result.updated }}，跳过 {{ agentExcel.result.skipped }}，错误 {{ agentExcel.result.error_count }}。</div>
+                <div class="agent-excel-controls"><button class="btn btn-outline btn-sm" type="button" @click="resetAgentExcelState">继续上传</button></div>
+              </template>
+              <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
+            </div>
             <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给凯凯小兵发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
             <div class="agent-composer-bottom">
-              <div class="agent-composer-meta"><span class="agent-status-dot"></span>工作台数据已连接</div>
-              <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="!agentInput.trim() || agentSending" @click="sendAgentMessage">
+              <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>工作台数据已连接</div>
+              <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="(!agentInput.trim() && !agentExcel.fileId) || agentSending" @click="sendAgentMessage">
                 <Send :size="16" :stroke-width="2.2" />
               </button>
             </div>
@@ -1119,6 +1287,28 @@ onBeforeUnmount(() => {
 .agent-chat-error { margin: 12px 2px 0; padding: 8px 10px; border-radius: var(--ds-radius-control); background: var(--ds-color-danger-soft); color: var(--ds-color-danger); font: var(--ds-type-meta); }
 .agent-chat-foot { padding: 10px 14px 13px; border-top: 1px solid var(--border); background: rgba(255,255,255,.9); }
 .agent-composer { padding: 7px 9px 8px 12px; border: 1px solid rgba(126,137,194,.35); border-radius: 16px; background: #fff; box-shadow: 0 3px 12px rgba(40, 48, 85, .06); }
+.agent-excel-input { display: none; }
+.agent-excel-card { margin: 0 0 8px; padding: 9px 10px; border: 1px solid rgba(91,106,191,.18); border-radius: 11px; background: rgba(248,249,253,.9); font-size: 12px; }
+.agent-excel-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-excel-file { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--primary); }
+.agent-excel-file strong { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.agent-excel-remove { flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: 7px; background: transparent; color: var(--text-tertiary); font-size: 17px; line-height: 1; cursor: pointer; }
+.agent-excel-remove:hover { background: var(--primary-bg); color: var(--primary); }
+.agent-excel-summary, .agent-excel-loading, .agent-excel-empty { margin-top: 6px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.agent-excel-options { display: grid; gap: 5px; margin-top: 8px; }
+.agent-excel-option { display: flex; align-items: flex-start; gap: 7px; padding: 6px 7px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.agent-excel-option.selected { border-color: rgba(91,106,191,.4); background: var(--primary-bg); }
+.agent-excel-option input { margin-top: 2px; accent-color: var(--primary); }
+.agent-excel-option span { display: grid; gap: 2px; min-width: 0; }
+.agent-excel-option small { color: var(--ds-color-ink-secondary); overflow-wrap: anywhere; }
+.agent-excel-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.agent-excel-controls select { min-width: 0; max-width: 142px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text-secondary); font: inherit; font-size: 11px; }
+.agent-excel-counts { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-secondary); font-size: 11px; }
+.agent-excel-warning, .agent-excel-error { margin-top: 7px; color: var(--danger, #c83b32); font-size: 11px; line-height: 1.4; }
+.agent-excel-success { margin-top: 7px; color: var(--success); font-size: 12px; line-height: 1.45; }
+.agent-attach-button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.agent-attach-button:hover { background: var(--primary-bg); color: var(--primary); }
+.agent-attach-button:disabled { opacity: .5; cursor: default; }
 .agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; resize: none; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
 .agent-chat-foot textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.12); }
 .agent-chat-foot textarea:focus-visible { outline: none !important; outline-offset: 0; }

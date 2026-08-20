@@ -1,0 +1,17 @@
+{
+  "name": "meimei-workbench",
+  "private": true,
+  "scripts": {
+    "data:seed": "node scripts/seed-demo-data.mjs",
+    "data:seed:minimal": "node scripts/seed-demo-data.mjs --profile=minimal --data-dir=tmp/workbench-minimal --no-backup",
+    "data:seed:edge": "node scripts/seed-demo-data.mjs --profile=edge --data-dir=tmp/workbench-edge --no-backup",
+    "data:verify": "node scripts/verify-test-data.mjs",
+    "data:verify:minimal": "node scripts/verify-test-data.mjs --profile=minimal --data-dir=tmp/workbench-minimal",
+    "typecheck:server": "npm --prefix server run typecheck:server",
+    "test:server": "npm --prefix server run test:server",
+    "build:server": "npm --prefix server run build:server",
+    "build:frontend": "npm --prefix frontend run build",
+    "test:ui": "bash scripts/smoke-ui.sh",
+    "test:all": "npm run typecheck:server && npm run test:server && npm run build:server && npm run build:frontend && npm run test:ui"
+  }
+}

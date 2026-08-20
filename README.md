@@ -255,6 +255,36 @@ Planner → Runner → 工具注册与权限/审计 → 业务 Services → SQLi
 
 开发启动脚本默认将业务日期设为 `2026-04-15`（春季学期内的正常上课日），用于验证今日工作台、待办、考勤和 Agent 日期判断。它不修改电脑系统时间或数据库真实时间；设置 `WORKBENCH_BUSINESS_DATE=` 可恢复使用系统日期。
 
+补充开发/演示数据（只新增、可重复执行；默认 `demo` 写入当前数据库前会自动备份）：
+
+```bash
+node scripts/seed-demo-data.mjs --dry-run
+node scripts/seed-demo-data.mjs --profile=demo
+```
+
+脚本支持三种可重复生成的数据配置：
+
+```bash
+# 隔离的最小数据：1 个班级、8 名学生、课程表、考试、考勤、待办、沟通和证据
+node scripts/seed-demo-data.mjs --profile=minimal --data-dir=/path/to/test-data --no-backup
+
+# 边界数据：在 minimal 基础上增加一个没有学生和课表的空班级
+node scripts/seed-demo-data.mjs --profile=edge --data-dir=/path/to/test-data --no-backup
+
+# 检查数据是否完整
+node scripts/verify-test-data.mjs --profile=minimal --data-dir=/path/to/test-data
+```
+
+`demo` 会补齐课程表、临时调课、多班级教师关联、考试、工作入口、家校通知模板和一条明确标注的演示证据占位图片；不会删除已有数据，也不会伪造真实家长材料。`minimal` 和 `edge` 在指定目录不存在数据库时会自动初始化 schema，适合 UI 冒烟和本地回归，不会污染 `data/workbench.db`。
+
+推荐使用根目录快捷命令：
+
+```bash
+npm run data:seed:minimal
+npm run data:verify:minimal
+npm run test:all
+```
+
 Node 后端使用隔离 SQLite 测试数据，不会修改 `data/workbench.db`：
 
 ```bash
@@ -271,7 +301,7 @@ cd frontend
 npm run build
 ```
 
-浏览器冒烟测试（需要 Node.js、Chromium 和正在运行的后端依赖）：
+浏览器冒烟测试（脚本会自动创建隔离的 minimal 数据，不使用当前开发数据库）：
 
 ```bash
 bash scripts/smoke-ui.sh

@@ -74,7 +74,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
             const module = await import(`./services/${evaluate}.js`);
             if (typeof module.evaluateStartup === 'function') {
               const results = module.evaluateStartup();
-              print(`${evaluate} 启动评估完成：${results.length} 个班级`);
+              const count = Array.isArray(results) ? results.length : 0;
+              print(`${evaluate} 启动评估完成：${count} 个班级`);
             }
           } catch (error) {
             print(`${evaluate} 启动评估失败（不阻断）：${(error as Error).message}`);

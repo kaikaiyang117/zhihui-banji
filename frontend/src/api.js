@@ -140,3 +140,177 @@ export async function upload(url, file) {
   fd.append('file', file)
   return fetch(url, { method: 'POST', headers: accessHeaders(), body: fd }).then(parse)
 }
+
+export async function uploadEvidence(formData) {
+  return request('/evidence/upload', { method: 'POST', body: formData })
+}
+
+export async function listEvidence(ownerType, ownerId) {
+  return request(`/evidence/${ownerType}/${ownerId}`)
+}
+
+export async function getEvidenceDetail(evidenceId) {
+  return request(`/evidence/detail/${evidenceId}`)
+}
+
+export async function deleteEvidence(evidenceId, deleteReason) {
+  return request(`/evidence/${evidenceId}`, { method: 'DELETE', body: JSON.stringify({ delete_reason: deleteReason }) })
+}
+
+export async function restoreEvidence(evidenceId) {
+  return request(`/evidence/${evidenceId}/restore`, { method: 'POST' })
+}
+
+export async function getEvidenceCounts(ownerType, ownerIds) {
+  return request(`/evidence/counts?owner_type=${ownerType}&owner_ids=${ownerIds.join(',')}`)
+}
+
+export async function getUpcomingExams() {
+  const result = await request('/stats/upcoming-exams')
+  return Array.isArray(result) ? result : (Array.isArray(result?.exams) ? result.exams : [])
+}
+
+export async function listToolLinks(search, category) {
+  const params = new URLSearchParams()
+  if (search) params.set('search', search)
+  if (category) params.set('category', category)
+  const qs = params.toString()
+  return request(`/tool-links${qs ? `?${qs}` : ''}`)
+}
+
+export async function createToolLink(data) {
+  return request('/tool-links', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function updateToolLink(id, data) {
+  return request(`/tool-links/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export async function deleteToolLink(id) {
+  return request(`/tool-links/${id}`, { method: 'DELETE' })
+}
+
+export async function recordToolLinkUsage(id) {
+  return request(`/tool-links/${id}/use`, { method: 'POST' })
+}
+
+export async function listNotificationTemplates(scene) {
+  const query = scene ? `?scene=${encodeURIComponent(scene)}` : ''
+  return request(`/notification-templates${query}`)
+}
+
+export async function ensureNotificationTemplates() {
+  return request('/notification-templates/ensure', { method: 'POST' })
+}
+
+export async function getNotificationTemplate(id) {
+  return request(`/notification-templates/${id}`)
+}
+
+export async function generateNotificationContent(templateId, variableValues) {
+  return request('/notification-templates/generate', {
+    method: 'POST',
+    body: JSON.stringify({ template_id: templateId, variable_values: variableValues })
+  })
+}
+
+export async function savePersonalTemplate(baseTemplateId, name, content) {
+  return request('/notification-templates', {
+    method: 'POST',
+    body: JSON.stringify({ base_template_id: baseTemplateId, name, content })
+  })
+}
+
+export async function updateNotificationTemplate(id, data) {
+  return request(`/notification-templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+}
+
+export async function deleteNotificationTemplate(id) {
+  return request(`/notification-templates/${id}`, { method: 'DELETE' })
+}
+
+export async function restoreNotificationTemplate(id) {
+  return request(`/notification-templates/${id}/restore`, { method: 'POST' })
+}
+
+export async function generateMeetingSummary(params) {
+  return request('/meeting-prep/summary', {
+    method: 'POST',
+    body: JSON.stringify(params)
+  })
+}
+
+export async function generateMeetingOutline(params) {
+  return request('/meeting-prep/outline', {
+    method: 'POST',
+    body: JSON.stringify(params)
+  })
+}
+
+function sessionHeaders(sessionId) {
+  return sessionId ? { 'X-Workbench-Session': sessionId } : {}
+}
+
+export async function analyzeExcelImport(formData, sessionId = '') {
+  return request('/excel-import/upload', { method: 'POST', body: formData, headers: sessionHeaders(sessionId) })
+}
+
+export async function previewExcelImport(fileId, module, sheetIndex, duplicateStrategy, sessionId = '') {
+  return request('/excel-import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ file_id: fileId, module, sheet_index: sheetIndex, duplicate_strategy: duplicateStrategy || 'update' }),
+    headers: sessionHeaders(sessionId),
+  })
+}
+
+export async function executeExcelImport(fileId, module, previewHash, requestId, sessionId = '') {
+  return request('/excel-import/execute', {
+    method: 'POST',
+    body: JSON.stringify({ file_id: fileId, module, preview_hash: previewHash, request_id: requestId }),
+    headers: sessionHeaders(sessionId),
+  })
+}
+
+export async function discardExcelImport(fileId, sessionId = '') {
+  return request('/excel-import/discard', {
+    method: 'POST',
+    body: JSON.stringify({ file_id: fileId }),
+    headers: sessionHeaders(sessionId),
+  })
+}
+
+export function getExcelImportErrorsUrl(fileId) {
+  return `/api/excel-import/errors/${fileId}`
+}
+
+export async function getTeacherClasses() {
+  return request('/teacher/classes')
+}
+export async function addTeacherClass(classId) {
+  return request('/teacher/classes', { method: 'POST', body: JSON.stringify({ class_id: classId }) })
+}
+export async function removeTeacherClass(id) {
+  return request(`/teacher/classes/${id}`, { method: 'DELETE' })
+}
+export async function getTeacherTimetable(dateFrom, dateTo) {
+  const params = new URLSearchParams()
+  if (dateFrom) params.set('start_date', dateFrom)
+  if (dateTo) params.set('end_date', dateTo)
+  const qs = params.toString()
+  return request(`/teacher/timetable${qs ? `?${qs}` : ''}`)
+}
+export async function getTeacherExams() {
+  return request('/teacher/exams')
+}
+
+async function request(path, init = {}) {
+  await ensureDevicePairing()
+  const headers = { ...accessHeaders() }
+  if (init.body && !(init.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json'
+  }
+  return fetch(`/api${path}`, { ...init, headers: { ...headers, ...(init.headers || {}) } }).then(parse)
+}

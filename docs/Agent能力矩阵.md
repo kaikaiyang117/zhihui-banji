@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-18）：12 个只读工具 + 12 个确认写入工具；数据库 schema v29；模型可见工具按服务端渠道权限过滤，网页会话按操作者隔离，写入工具执行后自动读取业务状态验证；小组、宿舍和课程表已接入网页点击，宿舍详情与课程表暂不开放网页/微信 Agent。真实学生数据、微信 iLink 断线恢复和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-20）：注册表共 33 个工具，工具契约按 `read_only`/`write_action` 和渠道过滤；数据库 schema v33；网页会话按操作者隔离，确认写入后自动读取业务状态验证。网页 Agent 对话入口已支持 `.xlsx` 上传、识别、预览和确认导入；Agent Excel 工具仍仅提供兼容提示，不直接执行导入。微信 iLink 文件消息、证据缩略图和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -53,6 +53,15 @@
 | 查询家校沟通 | `get_communications_list` | `communications_list` | 是 | 是 | 是 | 只读，隐藏家长电话 | 已接入 |
 | 查询校历 | `get_school_calendar` → `school_calendar.query_calendar` | `school_calendar_query` | 是 | 是 | 是 | 只读；按当前班级/学期返回日期安排 | 已接入 |
 | 查询课程表与指定日期课程 | `timetable.listTimetable`、`timetable.daySchedule` | 无 | 是 | 否 | 否 | 只读；按当前班级/学期返回课程、教师、教室和临时变更 | 已接入 |
+| 现场课堂点名预览 | `fieldOperations.startRollCall` | `start_roll_call` | 是 | 是 | 是 | 只读；自动绑定单一教师班级，日期/场景需校验 | 开发中 |
+| 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
+| 首页近期考试 | `scores.listUpcomingExams` | `query_field_info(upcoming_exams)` | 是 | 是 | 是 | 只读；排除已结束考试并按日期排序 | 开发中 |
+| 多班级教师课程/考试汇总 | `teacherClasses.getTeacherTimetable/getTeacherExams` | 无 | 是 | 否 | 否 | 只读；按教师关联班级汇总，网页专用 | 开发中 |
+| Excel 上传、预览与确认导入 | `excelImportAssistant` | Agent 工具仅兼容提示 | 是 | 否 | 否 | 网页 Agent 对话入口支持 `.xlsx` 上传并绑定当前会话；识别/预览/确认复用 HTTP 服务，确认后提交；iLink 文件未接入 | 已接入 |
+| 图片/截图证据 | `evidence` | `evidence_list` | 是 | 是 | 是 | 只读元数据；文件写入走网页/业务服务，所有者、学生范围、哈希和软删除校验 | 开发中 |
+| 家校通知模板与内容生成 | `notificationTemplates` | 无 | 是 | 否 | 否 | 网页写入/复制；模板按班级/学期隔离并记录审计 | 开发中 |
+| 家长会/个别谈话准备 | `meetingPrep` | 无 | 是 | 否 | 否 | 敏感只读；学生必须在当前班级/学期范围内 | 开发中 |
+| 教师常用工具入口 | `toolLinks` | `tool_link_search` | 是 | 是 | 是 | URL 仅允许 http(s)，名称唯一，写入需网页确认 | 开发中 |
 | 创建待办 | `work_items.create_work_item` | `create_task` | 是 | 是 | 是 | 低风险写入；预览后必须确认；单条、幂等 | 已接入 |
 | 记录家校沟通 | `communications.create_record` | `record_communication` | 是 | 是 | 是 | 写入；预览后必须确认；隐藏敏感联系人字段 | 已接入 |
 | 保存单条考勤 | `attendance.save_daily` | `save_attendance` | 是 | 是 | 是 | 低风险写入；预览后必须确认；禁止批量 | 已接入 |

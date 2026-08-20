@@ -7,6 +7,7 @@ import {
 } from 'lucide-vue-next'
 import { del, get, post, put } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
+import EvidenceArea from '../components/EvidenceArea.vue'
 
 const SCENES = ['常规到校', '早自习', '上午', '下午', '晚自习']
 const STATUS_OPTIONS = ['出勤', '迟到', '请假', '早退', '缺勤']
@@ -38,6 +39,7 @@ const studentEntryMode = ref(false)
 const studentKeyword = ref('')
 const studentSearchInput = ref(null)
 const expandedStudentIds = ref(new Set())
+const expandedRecordIds = ref(new Map())
 const batchNoteExpanded = ref(false)
 const newRule = ref({
   name: '一周迟到提醒', metric: '迟到次数', threshold: 2,
@@ -65,6 +67,7 @@ function defaultRecord(student) {
 function hydrateDayRecords() {
   const byStudent = new Map(dayRecords.value.map(item => [Number(item.student_id), item]))
   const next = {}
+  const nextRecordIds = new Map()
   for (const student of students.value) {
     const old = byStudent.get(Number(student.id))
     next[student.id] = old
@@ -74,8 +77,10 @@ function hydrateDayRecords() {
           leave: old.leave_at || '', note: old.note || ''
         }
       : defaultRecord(student)
+    if (old?.id) nextRecordIds.set(student.id, old.id)
   }
   records.value = next
+  expandedRecordIds.value = nextRecordIds
 }
 
 function recordSnapshot() {
@@ -423,6 +428,7 @@ onMounted(load)
               <input v-if="records[student.id].status === '迟到'" :aria-label="`${student.姓名}到校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].arrive">
               <input v-if="records[student.id].status === '早退'" :aria-label="`${student.姓名}离校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].leave">
               <input :aria-label="`${student.姓名}考勤备注`" class="form-input attendance-note" v-model="records[student.id].note" placeholder="备注（可选）">
+              <EvidenceArea v-if="records[student.id].status === '请假' && expandedRecordIds.get(student.id)" owner-type="attendance" :owner-id="expandedRecordIds.get(student.id)" :student-id="student.id" />
             </div>
           </div>
         </div>

@@ -6,7 +6,8 @@ import {
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,
   Moon, FileEdit, FileDown, ChevronRight, Search, Trash2, Edit3,
   ListTodo, ShieldCheck, CircleAlert,
-  MoreHorizontal, Wifi, QrCode, X, Copy, Check
+  MoreHorizontal, Wifi, QrCode, X, Copy, Check,
+  Link, Pin, PinOff
 } from 'lucide-vue-next'
 
 export const ICONS = {
@@ -17,7 +18,8 @@ export const ICONS = {
   BarChart3, CheckCircle, Clock, XCircle, ExternalLink, Dumbbell,
   Moon, FileEdit, FileDown, ChevronRight, Search, Trash2, Edit3,
   ListTodo, ShieldCheck, CircleAlert,
-  MoreHorizontal, Wifi, QrCode, X, Copy, Check
+  MoreHorizontal, Wifi, QrCode, X, Copy, Check,
+  Link, Pin, PinOff
 }
 
 export function getIcon(name) {

@@ -17,6 +17,7 @@ import {
   createCommunication, createEvent, createFocus, getAttendanceRecord, getCommunication,
   getEvent, getFocus, saveDailyAttendance,
 } from '../services/p0Service.js';
+import { buildRollCallRecords, getSession, deleteSession } from './tools/fieldOperations.js';
 
 export { ActionError };
 
@@ -227,6 +228,26 @@ function executeOperation(
     });
     return { class_task_id: result.id, title: result.title, student_count: result.total };
   }
+  if (toolName === 'submit_roll_call_exceptions') {
+    const session = getSession(String(args.session_id ?? ''));
+    if (!session) throw new ActionError('点名会话不存在或已过期');
+    const records = buildRollCallRecords(args);
+    const result = saveDailyAttendance(session.date, session.scene, records, { conn });
+    deleteSession(String(args.session_id));
+    const exceptionRecords = records.filter((record) => String(record.status ?? '出勤') !== '出勤');
+    return {
+      ok: true,
+      date: session.date,
+      scene: session.scene,
+      saved: result.saved,
+      normal_count: session.students.length - exceptionRecords.length,
+      exceptions: exceptionRecords.map((record) => ({
+        student_id: Number(record.student_id),
+        status: String(record.status ?? '出勤'),
+        reason: String(record.reason ?? ''),
+      })),
+    };
+  }
   throw new ActionError('写入工具不存在');
 }
 
@@ -315,6 +336,24 @@ function verifyOperation(
     check('class_task_persisted', String(row.title) === String(args.title)
       && Number(row.total) === (args.student_ids as unknown[]).length, {
       class_task_id: row.id, title: row.title, student_count: row.total,
+    });
+  } else if (toolName === 'submit_roll_call_exceptions') {
+    const exceptions = Array.isArray(outcome.exceptions)
+      ? outcome.exceptions as Array<Record<string, unknown>>
+      : [];
+    const date = String(outcome.date ?? '');
+    const scene = String(outcome.scene ?? '常规到校');
+    let verifiedCount = 0;
+    for (const ex of exceptions) {
+      try {
+        const row = getAttendanceRecord({
+          studentId: Number(ex.student_id), attendanceDate: date, scene, conn,
+        });
+        if (String(row.status) === String(ex.status)) verifiedCount += 1;
+      } catch { /* record not found */ }
+    }
+    check('roll_call_exceptions_persisted', verifiedCount === exceptions.length, {
+      date, scene, verified_count: verifiedCount, exception_count: exceptions.length,
     });
   } else {
     throw new ActionError('写入工具没有配置结果验证器');
@@ -416,6 +455,7 @@ function successMessage(toolName: string, result: Record<string, unknown>): stri
     update_task: '待办已修改',
     create_event: '学生事件已记录',
     create_focus: '重点关注已创建',
+    submit_roll_call_exceptions: '点名异常已保存',
   };
   const nested = result.result as Record<string, unknown> | undefined;
   const operationId = nested?.task_id ?? nested?.event_id ?? nested?.focus_id ?? nested?.meeting_id

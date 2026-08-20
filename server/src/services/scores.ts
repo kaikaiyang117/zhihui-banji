@@ -1413,4 +1413,38 @@ export function scoreSummary(options: {
   };
 }
 
+export function listUpcomingExams(options?: { limit?: number; conn?: Database }): Array<Record<string, unknown>> {
+  const conn = options?.conn ?? getDb().connInstance;
+  const [classId, termId] = scopeIds({ conn });
+  const businessDate = process.env.WORKBENCH_BUSINESS_DATE || new Date().toISOString().slice(0, 10);
+  const limit = Math.min(Math.max(options?.limit ?? 5, 1), 20);
+  const rows = conn.prepare(
+    `SELECT e.id, e.name, e.exam_date, GROUP_CONCAT(DISTINCT es.name) AS subjects
+     FROM score_exams e
+     LEFT JOIN score_exam_subjects ses ON ses.exam_id = e.id
+     LEFT JOIN score_subjects es ON es.id = ses.subject_id
+     WHERE e.class_id=? AND e.term_id=? AND e.enabled=1
+       AND (e.exam_date='' OR e.exam_date>=?)
+     GROUP BY e.id
+     ORDER BY CASE WHEN e.exam_date='' THEN 1 ELSE 0 END, e.exam_date ASC, e.sort_order ASC
+     LIMIT ?`,
+  ).all(classId, termId, businessDate, limit) as Array<Record<string, unknown>>;
+  return rows.map((row) => {
+    const examDate = String(row.exam_date ?? '');
+    let daysUntil: number | null = null;
+    let label = '';
+    if (examDate && /^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
+      const exam = new Date(`${examDate}T00:00:00Z`);
+      const today = new Date(`${businessDate}T00:00:00Z`);
+      daysUntil = Math.round((exam.getTime() - today.getTime()) / 86400000);
+      if (daysUntil === 0) label = '今天';
+      else if (daysUntil > 0) label = `${daysUntil}天后`;
+      else label = '已结束';
+    } else {
+      label = '待补日期';
+    }
+    return { ...row, days_until: daysUntil, countdown_label: label };
+  });
+}
+
 import * as rulesModule from './scoresRules.js';

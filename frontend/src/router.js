@@ -31,7 +31,8 @@ const routes = [
   { path: '/p', redirect: '/p/health' },
   { path: '/p/health', component: () => import('./views/Health.vue') },
   { path: '/p/kaoyan', component: () => import('./views/Kaoyan.vue') },
-  { path: '/p/knowledge', component: () => import('./views/Knowledge.vue') }
+  { path: '/p/knowledge', component: () => import('./views/Knowledge.vue') },
+  { path: '/tools', component: () => import('./views/Tools.vue') }
 ]
 
 export default createRouter({

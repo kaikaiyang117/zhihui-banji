@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('workbenchDesktop', {
   platform: process.platform,
   getInfo: () => ipcRenderer.invoke('workbench:get-info'),
   installUpdate: () => ipcRenderer.invoke('workbench:update:install'),
+  sendPetState: (state) => ipcRenderer.invoke('pet:state-change', state),
+  sendPetBubble: (text) => ipcRenderer.invoke('pet:bubble-text', text),
 });

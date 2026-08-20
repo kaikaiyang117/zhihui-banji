@@ -28,6 +28,13 @@ desktop/assets/icon.icns
 # 运行与缓存
 *.log
 *.err
+tmp/
+node_modules/
+.audit/
+.deveco/
+.playwright-cli/
+output/
+release-artifacts-v2.3.3/
 .workbuddy/
 .vscode/
 .idea/

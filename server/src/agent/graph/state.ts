@@ -19,6 +19,7 @@ export interface GraphState {
   channel: string;
   actorId: string;
   text: string;
+  attachment: Record<string, unknown> | null;
   messages: Array<Record<string, unknown>>;
   directTool: [string, string, string] | null;
   plan: AgentPlan | null;
@@ -39,6 +40,7 @@ export const StateAnnotation = Annotation.Root({
   channel: Annotation<string>({ reducer: (_a, b) => b, default: () => 'local' }),
   actorId: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
   text: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+  attachment: Annotation<Record<string, unknown> | null>({ reducer: (_a, b) => b ?? null, default: () => null }),
   messages: Annotation<Array<Record<string, unknown>>>({
     reducer: (a, b) => b ?? a ?? [],
     default: () => [],

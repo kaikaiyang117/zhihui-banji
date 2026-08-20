@@ -7,7 +7,7 @@
  * 仅通过 preload 暴露白名单 IPC。
  */
 const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, session, utilityProcess, nativeImage } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
@@ -25,6 +25,9 @@ let backendLog = [];
 let healthStartedAt = 0;
 let quitting = false;
 let smokeFailures = [];
+let petWindow = null;
+let petSettings = null;
+let petStateController = null;
 
 /* ---------------------------------------------------------------- 单实例 */
 const gotLock = app.requestSingleInstanceLock();
@@ -109,6 +112,62 @@ function resolveNodeCommand() {
   return found || 'node';
 }
 
+function resolveNpmCommand(nodeCommand) {
+  if (path.isAbsolute(nodeCommand)) {
+    const sibling = path.join(path.dirname(nodeCommand), process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    if (fs.existsSync(sibling)) return sibling;
+  }
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+function checkBetterSqlite3(nodeCommand, serverRoot) {
+  const modulePath = path.join(serverRoot, 'node_modules', 'better-sqlite3');
+  if (!fs.existsSync(modulePath)) {
+    return { ok: false, detail: 'server/node_modules/better-sqlite3 不存在' };
+  }
+  const script = [
+    `const Database = require(${JSON.stringify(modulePath)});`,
+    "const db = new Database(':memory:');",
+    'db.close();',
+  ].join('');
+  const result = spawnSync(nodeCommand, ['-e', script], {
+    cwd: serverRoot,
+    env: process.env,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  if (result.status === 0) return { ok: true, detail: '' };
+  return {
+    ok: false,
+    detail: String(result.stderr || result.error?.message || '无法加载 better-sqlite3').trim().split(/\r?\n/).slice(-3).join(' '),
+  };
+}
+
+function ensureDevNativeModules(nodeCommand, serverRoot) {
+  const before = checkBetterSqlite3(nodeCommand, serverRoot);
+  if (before.ok) return;
+
+  logLine(`检测到 better-sqlite3 与当前 Node 不兼容，正在自动重建（${before.detail}）`);
+  const rebuildEnv = { ...process.env, npm_config_build_from_source: 'true' };
+  if (path.isAbsolute(nodeCommand)) {
+    const nodeBinDir = path.dirname(nodeCommand);
+    rebuildEnv.PATH = `${nodeBinDir}${path.delimiter}${process.env.PATH || ''}`;
+  }
+  const rebuild = spawnSync(resolveNpmCommand(nodeCommand), ['rebuild', 'better-sqlite3', '--prefix', serverRoot], {
+    cwd: serverRoot,
+    env: rebuildEnv,
+    encoding: 'utf8',
+    timeout: 180_000,
+  });
+  if (rebuild.status !== 0) {
+    const detail = String(rebuild.stderr || rebuild.error?.message || 'npm rebuild 执行失败').trim().split(/\r?\n/).slice(-5).join(' ');
+    throw new Error(`better-sqlite3 自动重建失败：${detail}`);
+  }
+  const after = checkBetterSqlite3(nodeCommand, serverRoot);
+  if (!after.ok) throw new Error(`better-sqlite3 重建后仍无法加载：${after.detail}`);
+  logLine('better-sqlite3 已按当前 Node ABI 重建。');
+}
+
 function startBackend() {
   const entry = resolveBackendEntry();
   if (!fs.existsSync(entry)) {
@@ -120,6 +179,15 @@ function startBackend() {
   const backendArgs = ['--desktop-child', '--lan'];
   logLine(`启动 Node 后端：${entry} ${backendArgs.join(' ')}`);
   const useUtility = usingServerBundle();
+  const nodeCommand = resolveNodeCommand();
+  if (!useUtility) {
+    try {
+      ensureDevNativeModules(nodeCommand, backendDir);
+    } catch (err) {
+      failBackend(`后端原生依赖初始化失败：${err.message}`);
+      return;
+    }
+  }
   try {
     if (useUtility) {
       backendProcess = utilityProcess.fork(entry, backendArgs, {
@@ -128,7 +196,7 @@ function startBackend() {
         stdio: 'pipe',
       });
     } else {
-      backendProcess = spawn(resolveNodeCommand(), [entry, ...backendArgs], {
+      backendProcess = spawn(nodeCommand, [entry, ...backendArgs], {
         cwd: backendDir,
         env: backendProcessEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -464,8 +532,14 @@ function createTray() {
   if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
   tray = new Tray(trayIcon);
   tray.setToolTip(APP_NAME);
+  const petVisible = petWindow && !petWindow.isDestroyed();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开工作台', click: showMainWindow },
+    { type: 'separator' },
+    {
+      label: petVisible ? '隐藏桌面宠物' : '显示桌面宠物',
+      click: togglePetWindow,
+    },
     { type: 'separator' },
     { label: '退出工作台', click: quitApp },
   ]));
@@ -492,6 +566,446 @@ function trayIconPath() {
   return undefined;
 }
 
+/* ---------------------------------------------------------------- 桌面宠物（SUP-09） */
+const PET_VALID_STATES = new Set([
+  'idle', 'running', 'waving', 'jumping',
+  'failed', 'waiting', 'review', 'success', 'sleep', 'reminder',
+]);
+
+const PET_STATE_PRIORITY = [
+  'failed', 'waiting', 'review', 'running', 'success', 'reminder', 'idle', 'sleep',
+];
+
+const PET_TRANSIENT_STATES = new Set(['success', 'waving', 'jumping']);
+const PET_TRANSIENT_MIN_MS = { success: 2500, waving: 3000, jumping: 2000 };
+
+const PET_SIZE_MAP = { small: 72, medium: 96, large: 128 };
+
+const DEFAULT_PET_SETTINGS = {
+  enabled: true,
+  showOnStartup: true,
+  size: 'medium',
+  alwaysOnTop: true,
+  showBubble: true,
+  reducedMotion: false,
+  lastPosition: null,
+};
+
+class PetStateController {
+  constructor() {
+    this._state = 'idle';
+    this._stateSetAt = 0;
+    this._pendingState = null;
+    this._pendingTimer = null;
+  }
+
+  get state() { return this._state; }
+
+  requestState(newState) {
+    if (!PET_VALID_STATES.has(newState)) return false;
+    if (this._state === newState) return true;
+    const newIdx = PET_STATE_PRIORITY.indexOf(newState);
+    const curIdx = PET_STATE_PRIORITY.indexOf(this._state);
+    const isTransient = PET_TRANSIENT_STATES.has(newState);
+    const isIdleOrSleep = this._state === 'idle' || this._state === 'sleep';
+    if (isTransient && !isIdleOrSleep && newIdx >= curIdx) {
+      if (PET_TRANSIENT_STATES.has(this._state)) {
+        const elapsed = Date.now() - this._stateSetAt;
+        const minMs = PET_TRANSIENT_MIN_MS[this._state] || 2000;
+        if (elapsed < minMs) {
+          this._pendingState = newState;
+          clearTimeout(this._pendingTimer);
+          this._pendingTimer = setTimeout(() => {
+            const pending = this._pendingState;
+            this._pendingState = null;
+            if (pending) this.requestState(pending);
+          }, minMs - elapsed);
+          return true;
+        }
+      } else {
+        this._pendingState = newState;
+        return true;
+      }
+    }
+    this._applyState(newState);
+    return true;
+  }
+
+    _applyState(newState) {
+    const oldState = this._state;
+    this._state = newState;
+    this._stateSetAt = Date.now();
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send('pet:state-change', newState);
+    }
+    if (PET_TRANSIENT_STATES.has(newState)) {
+      const minMs = PET_TRANSIENT_MIN_MS[newState] || 2000;
+      clearTimeout(this._pendingTimer);
+      this._pendingTimer = setTimeout(() => {
+        const pending = this._pendingState;
+        this._pendingState = null;
+        if (pending) {
+          this.requestState(pending);
+        } else if (this._state === newState) {
+          this._applyState('idle');
+        }
+      }, minMs);
+    }
+    if (oldState !== newState && PET_TRANSIENT_STATES.has(oldState) && this._pendingState && !PET_TRANSIENT_STATES.has(newState)) {
+      const pending = this._pendingState;
+      this._pendingState = null;
+      clearTimeout(this._pendingTimer);
+      this.requestState(pending);
+    }
+  }
+
+  reset() {
+    clearTimeout(this._pendingTimer);
+    this._pendingState = null;
+    this._applyState('idle');
+  }
+}
+
+function loadPetSettings() {
+  const settingsPath = path.join(app.getPath('userData'), 'pet-settings.json');
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf-8');
+      const saved = JSON.parse(raw);
+      return { ...DEFAULT_PET_SETTINGS, ...saved };
+    }
+  } catch (_err) { /* use defaults */ }
+  return { ...DEFAULT_PET_SETTINGS };
+}
+
+function savePetSettings() {
+  if (!petSettings) return;
+  const settingsPath = path.join(app.getPath('userData'), 'pet-settings.json');
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(petSettings, null, 2), 'utf-8');
+  } catch (_err) { /* non-critical */ }
+}
+
+function petSizePixels() {
+  const s = (petSettings && petSettings.size) || 'medium';
+  const w = PET_SIZE_MAP[s] || 96;
+  return { width: w, height: Math.round(w * 1.08) };
+}
+
+function defaultPetPosition() {
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  const { workArea } = display;
+  const { width, height } = petSizePixels();
+  return {
+    x: workArea.x + workArea.width - width - 20,
+    y: workArea.y + workArea.height - height - 20,
+  };
+}
+
+function clampPetPosition(pos) {
+  const { screen } = require('electron');
+  const displays = screen.getAllDisplays();
+  const { width, height } = petSizePixels();
+  for (const display of displays) {
+    const wa = display.workArea;
+    if (pos.x >= wa.x && pos.x < wa.x + wa.width &&
+        pos.y >= wa.y && pos.y < wa.y + wa.height) {
+      return pos;
+    }
+  }
+  return defaultPetPosition();
+}
+
+function createPetWindow() {
+  if (petWindow && !petWindow.isDestroyed()) return;
+  const { width, height } = petSizePixels();
+  const pos = (petSettings && petSettings.lastPosition) || defaultPetPosition();
+  const clamped = clampPetPosition(pos);
+
+  petWindow = new BrowserWindow({
+    width,
+    height,
+    x: clamped.x,
+    y: clamped.y,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: (petSettings && petSettings.alwaysOnTop) !== false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'pet-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      spellcheck: false,
+    },
+  });
+
+  const petHtmlPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'pet', 'index.html')
+    : path.join(__dirname, 'pet', 'index.html');
+
+  petWindow.loadFile(petHtmlPath).catch(err => {
+    logLine(`宠物页面加载失败：${err.message}`);
+  });
+
+  petWindow.once('ready-to-show', () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.show();
+      if (petStateController) {
+        petWindow.webContents.send('pet:state-change', petStateController.state);
+      }
+    }
+  });
+
+  petWindow.on('closed', () => { petWindow = null; });
+  petWindow.webContents.on('will-navigate', (event) => { event.preventDefault(); });
+  petWindow.webContents.setWindowOpenHandler(() => { return { action: 'deny' }; });
+  petWindow.webContents.on('render-process-gone', (_event, details) => {
+    logLine(`宠物渲染进程异常：${details.reason}`);
+    petWindow = null;
+  });
+
+  petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setupPetIgnoreMouseEvents();
+}
+
+function setupPetIgnoreMouseEvents() {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  petWindow.setIgnoreMouseEvents(true, { forward: true });
+}
+
+function closePetWindow() {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const bounds = petWindow.getBounds();
+  if (petSettings) {
+    petSettings.lastPosition = { x: bounds.x, y: bounds.y };
+    savePetSettings();
+  }
+  petWindow.destroy();
+  petWindow = null;
+}
+
+function showPetWindow() {
+  if (!petSettings || !petSettings.enabled) return;
+  createPetWindow();
+}
+
+function hidePetWindow() {
+  closePetWindow();
+}
+
+function togglePetWindow() {
+  if (petWindow && !petWindow.isDestroyed()) {
+    hidePetWindow();
+    if (petSettings) petSettings.enabled = false;
+  } else {
+    if (petSettings) petSettings.enabled = true;
+    showPetWindow();
+  }
+  savePetSettings();
+  updateTrayMenu();
+}
+
+function rebuildPetWindow() {
+  if (!petSettings || !petSettings.enabled) return;
+  if (petWindow && !petWindow.isDestroyed()) {
+    const bounds = petWindow.getBounds();
+    if (petSettings) petSettings.lastPosition = { x: bounds.x, y: bounds.y };
+    savePetSettings();
+  }
+  closePetWindow();
+  createPetWindow();
+}
+
+function setupPetIPC() {
+  ipcMain.handle('pet:state-change', (_event, state) => {
+    if (typeof state !== 'string' || !PET_VALID_STATES.has(state)) {
+      return { ok: false, error: 'Invalid state' };
+    }
+    if (!petStateController) return { ok: false, error: 'Pet not initialized' };
+    petStateController.requestState(state);
+    return { ok: true };
+  });
+
+  ipcMain.handle('pet:bubble-text', (_event, text) => {
+    if (typeof text !== 'string') return { ok: false, error: 'Invalid text' };
+    const sanitized = text.slice(0, 100).replace(/[\n\r]/g, ' ');
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send('pet:bubble-text', petSettings && petSettings.showBubble ? sanitized : '');
+    }
+    return { ok: true };
+  });
+
+  ipcMain.on('pet:click', () => {
+    showMainWindow();
+  });
+
+  ipcMain.on('pet:mouse-move', (_event, onPet) => {
+    if (!petWindow || petWindow.isDestroyed()) return;
+    petWindow.setIgnoreMouseEvents(!onPet, { forward: true });
+  });
+
+  ipcMain.on('pet:double-click', () => {
+    showMainWindow();
+  });
+
+  ipcMain.on('pet:right-click', (_event, x, y) => {
+    if (!petWindow || petWindow.isDestroyed()) return;
+    const menu = Menu.buildFromTemplate([
+      { label: '打开工作台', click: showMainWindow },
+      { type: 'separator' },
+      {
+        label: petWindow && !petWindow.isDestroyed() ? '隐藏桌面宠物' : '显示桌面宠物',
+        click: togglePetWindow,
+      },
+      {
+        label: (petSettings && petSettings.alwaysOnTop) ? '取消置顶' : '始终置顶',
+        click: () => {
+          if (petSettings) petSettings.alwaysOnTop = !petSettings.alwaysOnTop;
+          if (petWindow && !petWindow.isDestroyed()) {
+            petWindow.setAlwaysOnTop(petSettings.alwaysOnTop);
+          }
+          savePetSettings();
+          updateTrayMenu();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '小', type: 'radio', checked: (petSettings && petSettings.size) === 'small',
+        click: () => { if (petSettings) { petSettings.size = 'small'; savePetSettings(); rebuildPetWindow(); } },
+      },
+      {
+        label: '中', type: 'radio', checked: !petSettings || petSettings.size === 'medium',
+        click: () => { if (petSettings) { petSettings.size = 'medium'; savePetSettings(); rebuildPetWindow(); } },
+      },
+      {
+        label: '大', type: 'radio', checked: (petSettings && petSettings.size) === 'large',
+        click: () => { if (petSettings) { petSettings.size = 'large'; savePetSettings(); rebuildPetWindow(); } },
+      },
+      { type: 'separator' },
+      {
+        label: (petSettings && petSettings.reducedMotion) ? '开启动画' : '减少动画',
+        click: () => {
+          if (petSettings) petSettings.reducedMotion = !petSettings.reducedMotion;
+          if (petWindow && !petWindow.isDestroyed()) {
+            petWindow.webContents.send('pet:state-change', petStateController ? petStateController.state : 'idle');
+          }
+          savePetSettings();
+        },
+      },
+      {
+        label: '重置位置',
+        click: () => {
+          if (petSettings) petSettings.lastPosition = null;
+          if (petWindow && !petWindow.isDestroyed()) {
+            const pos = defaultPetPosition();
+            petWindow.setPosition(pos.x, pos.y);
+          }
+          savePetSettings();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '关闭桌面宠物',
+        click: () => {
+          if (petSettings) petSettings.enabled = false;
+          hidePetWindow();
+          savePetSettings();
+          updateTrayMenu();
+        },
+      },
+    ]);
+    menu.popup({ window: petWindow, x: Math.round(x), y: Math.round(y) });
+  });
+
+  let dragging = false;
+  let dragOffset = { x: 0, y: 0 };
+
+  ipcMain.on('pet:drag-start', () => {
+    if (!petWindow || petWindow.isDestroyed()) return;
+    dragging = true;
+    const winPos = petWindow.getPosition();
+    const { screen } = require('electron');
+    const cursorPos = screen.getCursorScreenPoint();
+    dragOffset = { x: cursorPos.x - winPos[0], y: cursorPos.y - winPos[1] };
+  });
+
+  ipcMain.on('pet:drag-end', () => { dragging = false; });
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    /* handled below in screen watcher */
+  }
+
+  function handleDragMove() {
+    if (!dragging || !petWindow || petWindow.isDestroyed()) return;
+    const { screen } = require('electron');
+    const cursorPos = screen.getCursorScreenPoint();
+    const newX = cursorPos.x - dragOffset.x;
+    const newY = cursorPos.y - dragOffset.y;
+    petWindow.setPosition(newX, newY);
+  }
+
+  const { screen } = require('electron');
+  screen.on('screen-changed', () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      const bounds = petWindow.getBounds();
+      const clamped = clampPetPosition({ x: bounds.x, y: bounds.y });
+      if (clamped.x !== bounds.x || clamped.y !== bounds.y) {
+        petWindow.setPosition(clamped.x, clamped.y);
+      }
+    }
+  });
+
+  setInterval(() => {
+    if (dragging) handleDragMove();
+  }, 16);
+
+  ipcMain.handle('pet:get-settings', () => {
+    return {
+      size: (petSettings && petSettings.size) || 'medium',
+      reducedMotion: !!(petSettings && petSettings.reducedMotion),
+      showBubble: !!(petSettings && petSettings.showBubble),
+    };
+  });
+
+  ipcMain.handle('pet:update-settings', (_event, updates) => {
+    if (!updates || typeof updates !== 'object') return { ok: false };
+    const allowed = ['size', 'alwaysOnTop', 'showBubble', 'reducedMotion', 'enabled', 'showOnStartup'];
+    for (const key of Object.keys(updates)) {
+      if (allowed.includes(key)) {
+        petSettings[key] = updates[key];
+      }
+    }
+    savePetSettings();
+    if (petWindow && !petWindow.isDestroyed()) {
+      if (updates.size) rebuildPetWindow();
+      if (updates.alwaysOnTop !== undefined) petWindow.setAlwaysOnTop(petSettings.alwaysOnTop);
+    }
+    return { ok: true };
+  });
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const petVisible = petWindow && !petWindow.isDestroyed();
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开工作台', click: showMainWindow },
+    { type: 'separator' },
+    {
+      label: petVisible ? '隐藏桌面宠物' : '显示桌面宠物',
+      click: togglePetWindow,
+    },
+    { type: 'separator' },
+    { label: '退出工作台', click: quitApp },
+  ]));
+}
+
 /* ---------------------------------------------------------------- 退出 */
 function stopBackend() {
   return new Promise(resolve => {
@@ -514,6 +1028,7 @@ function quitApp() {
   if (quitting) return;
   quitting = true;
   logLine('退出工作台：正在停止后端服务…');
+  closePetWindow();
   stopBackend().then(() => {
     app.quit();
   });
@@ -682,5 +1197,21 @@ app.whenReady().then(() => {
     },
   }));
   startBackend();
+
+  petSettings = loadPetSettings();
+  petStateController = new PetStateController();
+  setupPetIPC();
+
+  if (petSettings.enabled && petSettings.showOnStartup && !isSmoke) {
+    app.on('browser-window-created', () => {
+      setTimeout(() => {
+        if (petSettings.enabled && (!petWindow || petWindow.isDestroyed())) {
+          createPetWindow();
+          if (petStateController) petStateController.requestState('waving');
+        }
+      }, 1500);
+    });
+  }
+
   if (!process.env.WORKBENCH_NO_TRAY) createTray();
 });

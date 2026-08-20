@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 29;
+export const CURRENT_SCHEMA_VERSION = 33;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -1823,6 +1823,108 @@ function migration29(conn: Database): void {
   `);
 }
 
+function migration30(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS evidence_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        term_id INTEGER NOT NULL REFERENCES terms(id),
+        owner_type TEXT NOT NULL,
+        owner_id INTEGER NOT NULL,
+        student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+        evidence_kind TEXT NOT NULL DEFAULT '请假凭证',
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        mime_type TEXT NOT NULL DEFAULT '',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        sha256 TEXT NOT NULL DEFAULT '',
+        source_channel TEXT NOT NULL DEFAULT 'web',
+        note TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        deleted_at TEXT NOT NULL DEFAULT '',
+        deleted_by TEXT NOT NULL DEFAULT '',
+        delete_reason TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_evidence_scope
+        ON evidence_attachments(class_id, term_id, owner_type, owner_id, deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_evidence_student
+        ON evidence_attachments(class_id, term_id, student_id, deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_evidence_sha256
+        ON evidence_attachments(sha256, deleted_at);
+  `);
+}
+
+function migration31(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS tool_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '教务系统',
+        icon TEXT NOT NULL DEFAULT '',
+        color TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        deleted_at TEXT NOT NULL DEFAULT '',
+        deleted_by TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tool_links_visible
+        ON tool_links(deleted_at, pinned DESC, sort_order, id);
+  `);
+}
+
+function migration33(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS teacher_classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_name TEXT NOT NULL DEFAULT '',
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        role TEXT NOT NULL DEFAULT '任课教师',
+        subjects TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(teacher_name, class_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_teacher_classes_teacher
+        ON teacher_classes(teacher_name, enabled, sort_order);
+  `);
+}
+
+function migration32(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS notification_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        term_id INTEGER NOT NULL REFERENCES terms(id),
+        name TEXT NOT NULL,
+        scene TEXT NOT NULL DEFAULT '放假通知',
+        content TEXT NOT NULL DEFAULT '',
+        variables_json TEXT NOT NULL DEFAULT '[]',
+        is_system INTEGER NOT NULL DEFAULT 0,
+        is_owner_saved INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        deleted_at TEXT NOT NULL DEFAULT '',
+        deleted_by TEXT NOT NULL DEFAULT '',
+        UNIQUE(class_id, term_id, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notification_templates_scope
+        ON notification_templates(class_id, term_id, scene, enabled, deleted_at);
+  `);
+}
+
 export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   2: migration2,
   3: migration3,
@@ -1852,6 +1954,10 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   27: migration27,
   28: migration28,
   29: migration29,
+  30: migration30,
+  31: migration31,
+  32: migration32,
+  33: migration33,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */

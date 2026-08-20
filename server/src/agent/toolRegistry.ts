@@ -7,6 +7,10 @@ import { listEntries as listPointEntries } from '../services/points.js';
 import { listWorkItems } from '../services/workItems.js';
 import { queryCalendar } from '../services/schoolCalendar.js';
 import { todayString } from '../services/clock.js';
+import { listToolLinks } from '../services/toolLinks.js';
+import { startRollCall, submitRollCallExceptions, queryFieldInfo } from './tools/fieldOperations.js';
+import { buildExcelImportTools } from './tools/excelImport.js';
+import { buildEvidenceTools } from './tools/evidence.js';
 
 export type ToolErrorCode =
   | 'invalid_arguments'
@@ -796,6 +800,7 @@ export function buildRegistry(): ToolRegistry {
         additionalProperties: false,
       },
       handler: getScoresSummary,
+      allowChannels: NON_WECHAT_CHANNELS,
     }),
     new ToolDefinition({
       name: 'tasks_list',
@@ -1120,5 +1125,62 @@ export function buildRegistry(): ToolRegistry {
       handler: () => ({}), readOnly: false, writeAction: true, allowChannels: NON_WECHAT_CHANNELS,
     }),
   );
+  tools.push(new ToolDefinition({
+    name: 'start_roll_call',
+    description: '发起课堂点名，返回班级学生列表和默认全到提示。需确认班级、日期和场景。',
+    parameters: {
+      type: 'object', properties: {
+        class_name: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' },
+        scene: { type: 'string', enum: ['早自习', '上午', '下午', '晚自习', '常规到校'] },
+      }, additionalProperties: false,
+    },
+    handler: startRollCall, readOnly: true, writeAction: false, allowChannels: ALL_CHANNELS,
+  }));
+  tools.push(new ToolDefinition({
+    name: 'submit_roll_call_exceptions',
+    description: '提交点名异常学生，返回预览结果供教师确认。',
+    parameters: {
+      type: 'object', properties: {
+        session_id: { type: 'string' },
+        exceptions: { type: 'array', items: { type: 'object', properties: { student_name: { type: 'string' }, status: { type: 'string' }, reason: { type: 'string' } }, required: ['student_name', 'status'] } },
+      }, required: ['session_id', 'exceptions'], additionalProperties: false,
+    },
+    handler: submitRollCallExceptions, readOnly: false, writeAction: true, allowChannels: ALL_CHANNELS,
+  }));
+  tools.push(new ToolDefinition({
+    name: 'query_field_info',
+    description: '查询现场只读信息：今日课程、近期考试、待办摘要或班级学生。',
+    parameters: {
+      type: 'object', properties: {
+        query_type: { type: 'string', enum: ['today_schedule', 'upcoming_exams', 'today_tasks', 'class_students'] },
+        class_name: { type: 'string' },
+      }, required: ['query_type'], additionalProperties: false,
+    },
+    handler: queryFieldInfo, readOnly: true, writeAction: false, allowChannels: ALL_CHANNELS,
+  }));
+  tools.push(...buildExcelImportTools());
+  tools.push(...buildEvidenceTools());
+  tools.push(new ToolDefinition({
+    name: 'tool_link_search',
+    description: '搜索已配置的工作入口/常用工具链接。用户要求打开教务系统、教学平台等外部工具时使用此工具查找匹配的链接。找不到时明确提示，不编造网址。',
+    parameters: {
+      type: 'object', properties: {
+        query: { type: 'string', description: '搜索关键词，匹配名称或URL' },
+      }, required: ['query'], additionalProperties: false,
+    },
+    handler: (args) => {
+      const query = String(args.query ?? '').trim();
+      if (!query) return { results: [], hint: '请提供搜索关键词' };
+      const results = listToolLinks({ search: query });
+      if (results.length === 0) return { results: [], hint: `未找到匹配"${query}"的工作入口，请到工作入口页面配置。` };
+      return {
+        results: results.map((r: Record<string, unknown>) => ({
+          id: r.id, name: r.name, url: r.url, category: r.category, pinned: r.pinned,
+        })),
+        hint: results.length > 1 ? `找到 ${results.length} 个匹配入口，请确认要打开哪一个。` : '找到匹配入口。',
+      };
+    },
+    readOnly: true, writeAction: false, allowChannels: ALL_CHANNELS,
+  }));
   return new ToolRegistry(tools);
 }

@@ -168,7 +168,8 @@ export const NAV = [
     groups: [
       { title: '工作台', items: [
         { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },
-        { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' }
+        { page: 'tasks', icon: 'ClipboardList', label: '待办跟进' },
+        { page: 'tools', icon: 'Link', label: '工作入口' }
       ] },
       { title: '学生跟进', items: [
         { page: 'students', icon: 'Users', label: '学生信息' },

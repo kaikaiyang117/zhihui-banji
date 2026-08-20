@@ -24,6 +24,7 @@ import {
 import { ModelError, ModelNotConfigured } from '../../agent/modelClient.js';
 import { wechatService } from '../../wechat/service.js';
 import { currentActor } from '../../services/audit.js';
+import type { GraphState } from '../../agent/graph/state.js';
 
 function mapAgentError(reply: FastifyReply, error: unknown): FastifyReply | undefined {
   if (error instanceof ModelNotConfigured || error instanceof ModelError || error instanceof ModelConfigError) {
@@ -56,6 +57,27 @@ function sessionNamespaceError(sessionId: string, channel: string): string | nul
     return id.startsWith('web:') ? null : '网页会话 ID 必须使用 web: 前缀';
   }
   return null;
+}
+
+function attachmentFromBody(value: unknown): GraphState['attachment'] {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  const fileId = String(input.file_id ?? '').trim();
+  if (!fileId || fileId.length > 160) return null;
+  const result: Record<string, unknown> = { file_id: fileId };
+  const filename = String(input.filename ?? '').trim();
+  if (filename) result.filename = filename.slice(0, 120);
+  if (Array.isArray(input.sheets)) result.sheets = input.sheets.slice(0, 10).map(item => String(item).slice(0, 80));
+  if (Array.isArray(input.candidate_modules)) {
+    result.candidate_modules = input.candidate_modules.slice(0, 4).flatMap(item => {
+      if (!item || typeof item !== 'object') return [];
+      const candidate = item as Record<string, unknown>;
+      const module = String(candidate.module ?? '').trim();
+      if (!module) return [];
+      return [{ module: module.slice(0, 40), reason: String(candidate.reason ?? '').slice(0, 100) }];
+    });
+  }
+  return result;
 }
 
 function newWebSessionId(actorId: string): string {
@@ -234,7 +256,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/agent/chat', async (request, reply) => {
-    const body = request.body as { session_id: string; message: string };
+    const body = request.body as { session_id: string; message: string; attachment?: unknown };
     if (String(body.message ?? '').length < 1) {
       return reply.status(422).send({
         detail: [{
@@ -255,7 +277,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
       new SessionStore().ensureOwned(body.session_id, actorId, channel);
       const runner = new AgentRunner({ sessionStore: new SessionStore() });
       const answer = await runner.chat(body.session_id, body.message, {
-        channel, actorId,
+        channel, actorId, attachment: attachmentFromBody(body.attachment),
       });
       return { answer, session_id: body.session_id, ok: true };
     } catch (error) {
@@ -266,7 +288,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/agent/chat/stream', async (request, reply) => {
-    const body = request.body as { session_id: string; message: string };
+    const body = request.body as { session_id: string; message: string; attachment?: unknown };
     const { channel, actorId } = boundIdentity();
     const namespaceError = sessionNamespaceError(body.session_id, channel);
     if (namespaceError) {
@@ -297,7 +319,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     writeChunk({ type: 'start', messageId });
     try {
       for await (const event of runner.chatStream(body.session_id, body.message, {
-        channel, actorId,
+        channel, actorId, attachment: attachmentFromBody(body.attachment),
       })) {
         if (event.type === 'delta') {
           if (!textStarted) {

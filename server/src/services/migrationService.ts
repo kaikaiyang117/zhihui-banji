@@ -339,6 +339,50 @@ function validateDatabase(dbPath: string): void {
   }
 }
 
+function validateStagedEvidence(dbPath: string, stage: string): void {
+  let check: Database.Database | null = null;
+  try {
+    check = new Database(dbPath, { readonly: true });
+    const rows = check.prepare(
+      'SELECT relative_path, size_bytes, sha256 FROM evidence_attachments',
+    ).all() as Array<{ relative_path: string; size_bytes: number; sha256: string }>;
+    const expected = new Set<string>();
+    for (const row of rows) {
+      const relativePath = String(row.relative_path ?? '');
+      if (!relativePath.startsWith('evidence/')) throw new MigrationError('证据记录包含不安全路径');
+      const target = path.resolve(stage, 'data', ...relativePath.split('/'));
+      const dataRoot = path.resolve(stage, 'data');
+      if (!target.startsWith(dataRoot + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) {
+        throw new MigrationError(`迁移包缺少证据文件：${relativePath}`);
+      }
+      if (fs.statSync(target).size !== Number(row.size_bytes)
+        || sha256File(target) !== String(row.sha256 ?? '').toLowerCase()) {
+        throw new MigrationError(`迁移包证据完整性校验失败：${relativePath}`);
+      }
+      expected.add(path.resolve(target));
+    }
+    const evidenceRoot = path.join(stage, 'data', 'evidence');
+    if (fs.existsSync(evidenceRoot)) {
+      const walk = (dir: string): void => {
+        for (const name of fs.readdirSync(dir)) {
+          const full = path.join(dir, name);
+          const stat = fs.statSync(full);
+          if (stat.isDirectory()) walk(full);
+          else if (stat.isFile() && !name.endsWith('.thumb.jpg') && !expected.has(path.resolve(full))) {
+            throw new MigrationError(`迁移包包含未登记的证据文件：${path.relative(stage, full)}`);
+          }
+        }
+      };
+      walk(evidenceRoot);
+    }
+  } catch (error) {
+    if (error instanceof MigrationError) throw error;
+    throw new MigrationError(`迁移包证据校验失败：${(error as Error).message}`);
+  } finally {
+    if (check) check.close();
+  }
+}
+
 function extract(
   members: ZipMember[], data: Buffer, stage: string, entries: Array<Record<string, unknown>>,
 ): void {
@@ -518,6 +562,7 @@ export async function restorePackage(data: Buffer): Promise<Record<string, unkno
     extract(members, data, stage, entries);
     const stagedDb = path.join(stage, 'database', 'workbench.db');
     validateDatabase(stagedDb);
+    validateStagedEvidence(stagedDb, stage);
     const preRestore = await db.createBackup('pre-migration');
     db.close();
     fs.mkdirSync(path.dirname(path.resolve(db.paths.dbPath)), { recursive: true });

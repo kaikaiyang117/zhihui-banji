@@ -8,7 +8,7 @@ import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import zhCnLocale from '@fullcalendar/core/locales/zh-cn'
-import { get, post, upload } from '../api'
+import { get, post, upload, getUpcomingExams } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 
 const stats = ref(null)
@@ -19,6 +19,8 @@ const migrationInput = ref(null)
 const backupMessage = ref('')
 const selectedDate = ref('')
 const todaySchedule = ref(null)
+const upcomingExams = ref([])
+const examsLoading = ref(false)
 
 const actionSections = computed(() => {
   if (!stats.value) return []
@@ -78,6 +80,14 @@ async function load() {
       todaySchedule.value = await get(`/api/timetable/day?date=${encodeURIComponent(stats.value.date)}`)
     } catch {
       todaySchedule.value = null
+    }
+    examsLoading.value = true
+    try {
+      upcomingExams.value = (await getUpcomingExams()) || []
+    } catch {
+      upcomingExams.value = []
+    } finally {
+      examsLoading.value = false
     }
   } catch (error) {
     errorMsg.value = error.message
@@ -213,6 +223,29 @@ onMounted(load)
         </router-link>
       </div>
       <div v-else class="empty-state compact-empty">今天还没有配置课程安排</div>
+    </section>
+
+    <section v-if="upcomingExams.length || !examsLoading" class="card ds-card exam-countdown-card" aria-labelledby="exam-countdown-title">
+      <div class="section-heading ds-section-heading">
+        <div><h2 id="exam-countdown-title"><TrendingUp :size="17" /> 近期考试</h2><p>即将到来的考试安排</p></div>
+        <router-link to="/scores">查看成绩 <ArrowRight :size="13" /></router-link>
+      </div>
+      <div v-if="examsLoading" class="empty-state compact-empty">加载中…</div>
+      <div v-else-if="!upcomingExams.length" class="empty-state compact-empty">暂无考试安排 <router-link to="/scores">前往成绩页</router-link></div>
+      <template v-else>
+        <div class="exam-countdown-hero">
+          <div class="exam-countdown-hero-label">{{ upcomingExams[0].name }}</div>
+          <div class="exam-countdown-hero-date">{{ upcomingExams[0].exam_date }}</div>
+          <div class="exam-countdown-hero-delta">{{ upcomingExams[0].countdown_label }}</div>
+        </div>
+        <div v-if="upcomingExams.length > 1" class="exam-countdown-list">
+          <div v-for="exam in upcomingExams.slice(1, 3)" :key="exam.id || exam.exam_date + exam.name" class="exam-countdown-row">
+            <span class="exam-countdown-name">{{ exam.name }}</span>
+            <span class="exam-countdown-date">{{ exam.exam_date }}</span>
+            <span class="exam-countdown-delta">{{ exam.countdown_label }}</span>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section class="action-board" aria-labelledby="action-board-title">
@@ -458,6 +491,19 @@ onMounted(load)
 .snapshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .snapshot-grid a { display: grid; gap: var(--ds-space-1); padding: var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
 .snapshot-grid strong { color: var(--ds-color-ink); font: var(--ds-type-section); font-variant-numeric: tabular-nums; }
+.exam-countdown-card { background: var(--ds-color-surface); }
+.exam-countdown-card .section-heading { margin-bottom: var(--ds-space-3); }
+.exam-countdown-card .section-heading h2 { display: flex; align-items: center; gap: 7px; }
+.exam-countdown-card .section-heading > a { display: inline-flex; align-items: center; gap: var(--ds-space-1); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.exam-countdown-hero { display: grid; gap: var(--ds-space-1); padding: var(--ds-space-4); border-radius: var(--ds-radius-control); background: var(--ds-color-primary-soft); text-align: center; }
+.exam-countdown-hero-label { color: var(--ds-color-primary-hover); font: var(--ds-type-section); }
+.exam-countdown-hero-date { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.exam-countdown-hero-delta { color: var(--ds-color-primary-hover); font: var(--ds-type-metric); font-variant-numeric: tabular-nums; }
+.exam-countdown-list { display: grid; gap: var(--ds-space-2); margin-top: var(--ds-space-3); }
+.exam-countdown-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--ds-space-3); padding: var(--ds-space-2) var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); }
+.exam-countdown-name { overflow: hidden; color: var(--ds-color-ink); font: var(--ds-type-label); text-overflow: ellipsis; white-space: nowrap; }
+.exam-countdown-date { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.exam-countdown-delta { color: var(--ds-color-primary-hover); font: var(--ds-type-label); font-variant-numeric: tabular-nums; }
 .dashboard-quick-actions-card { margin-top: -2px; }
 .dashboard-quick-actions { margin-bottom: 0; }
 @media (max-width: 900px) {

@@ -19,6 +19,7 @@ const WRITE_TOOLS: Record<string, string> = {
   create_diary: '记录班主任日志',
   create_knowledge_note: '创建知识库笔记',
   create_class_task: '创建班级任务',
+  submit_roll_call_exceptions: '提交点名异常',
 };
 const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> = {
   create_task: [
@@ -72,6 +73,10 @@ const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> =
   create_class_task: [
     new Set(['title', 'student_ids']),
     new Set(['title', 'student_ids', 'task_type', 'start_at', 'due_at', 'material_name', 'description', 'template_id']),
+  ],
+  submit_roll_call_exceptions: [
+    new Set(['session_id', 'exceptions']),
+    new Set(['session_id', 'exceptions']),
   ],
 };
 
@@ -216,8 +221,11 @@ export function previewText(toolName: string, args: Record<string, unknown>): st
     detail = `记录 ${String(args['diary_date'] ?? '')} 的班主任日志`;
   } else if (toolName === 'create_knowledge_note') {
     detail = `在知识库创建笔记“${String(args['title'] ?? '')}”`;
+  } else if (toolName === 'submit_roll_call_exceptions') {
+    const count = Array.isArray(args['exceptions']) ? args['exceptions'].length : 0;
+    detail = `提交点名异常 ${count} 人`;
   } else {
-    detail = `为 ${Array.isArray(args['student_ids']) ? args['student_ids'].length : 0} 名学生创建班级任务“${String(args['title'] ?? '')}”`;
+    detail = `为 ${Array.isArray(args['student_ids']) ? args['student_ids'].length : 0} 名学生创建班级任务"${String(args['title'] ?? '')}"`;
   }
   return `将要${detail}。这是一次${label}，回复“确认”执行，回复“取消”放弃。确认有效期 ${ACTION_TTL_MINUTES} 分钟。`;
 }
@@ -269,6 +277,10 @@ export function validateArguments(toolName: string, args: Record<string, unknown
   if (toolName === 'create_class_task'
     && (!Array.isArray(args.student_ids) || args.student_ids.length === 0)) {
     throw new ActionError('班级任务至少需要选择一名学生');
+  }
+  if (toolName === 'submit_roll_call_exceptions'
+    && (!Array.isArray(args.exceptions) || args.exceptions.length === 0)) {
+    throw new ActionError('点名异常名单不能为空');
   }
 }
 

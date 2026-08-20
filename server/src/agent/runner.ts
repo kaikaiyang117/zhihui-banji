@@ -194,6 +194,34 @@ export class AgentRunner {
             student_context_reference: true,
           });
         }
+        const attachment = state.attachment;
+        if (attachment?.file_id) {
+          const candidates = Array.isArray(attachment.candidate_modules)
+            ? attachment.candidate_modules
+              .slice(0, 4)
+              .map((item) => {
+                const candidate = item as Record<string, unknown>;
+                return `${String(candidate.module ?? '')}${candidate.reason ? `（${String(candidate.reason).slice(0, 80)}）` : ''}`;
+              })
+              .filter(Boolean)
+            : [];
+          const sheets = Array.isArray(attachment.sheets)
+            ? attachment.sheets.slice(0, 10).map(String).join('、')
+            : '';
+          messages.push({
+            role: 'system',
+            content: [
+              '当前会话有一个用户刚上传的 Excel 附件。',
+              `文件标识：${String(attachment.file_id)}`,
+              attachment.filename ? `文件名：${String(attachment.filename).slice(0, 120)}` : '',
+              sheets ? `工作表：${sheets}` : '',
+              candidates.length ? `系统识别的可能模块：${candidates.join('、')}` : '',
+              '如需继续处理，请先向用户说明识别结果；预览和写入必须由网页导入卡片完成，不能绕过确认直接写入。',
+            ].filter(Boolean).join('\n'),
+            context_summary: true,
+            excel_attachment_context: true,
+          });
+        }
         messages.push({ role: 'user', content: state.text });
         return {
           messages,
@@ -409,15 +437,15 @@ export class AgentRunner {
     })();
   }
 
-  private initial(sessionId: string, channel: string, actorId: string, text: string): GraphState {
+  private initial(sessionId: string, channel: string, actorId: string, text: string, attachment: GraphState['attachment'] = null): GraphState {
     return {
-      graphVersion: 1, sessionId, channel, actorId, text,
+      graphVersion: 1, sessionId, channel, actorId, text, attachment,
       messages: [], directTool: null, plan: null, executed: [],
       failureCounts: {}, replanCount: 0, finalAnswer: '', halted: false, errorMessage: '',
     };
   }
 
-  async chat(sessionId: string, text: string, options: { channel?: string; actorId?: string } = {}): Promise<string> {
+  async chat(sessionId: string, text: string, options: { channel?: string; actorId?: string; attachment?: GraphState['attachment'] } = {}): Promise<string> {
     const channel = options.channel ?? 'local';
     const actorId = options.actorId ?? '';
     const input = String(text ?? '').trim();
@@ -426,14 +454,14 @@ export class AgentRunner {
     if (handled[0]) return handled[1];
     const graph = await this.buildGraph();
     try {
-      const result = await graph.invoke(this.initial(sessionId, channel, actorId, input), sessionId);
+      const result = await graph.invoke(this.initial(sessionId, channel, actorId, input, options.attachment ?? null), sessionId);
       return result.finalAnswer || '请输入要查询的内容。';
     } finally {
       graph.close();
     }
   }
 
-  async *chatStream(sessionId: string, text: string, options: { channel?: string; actorId?: string } = {}):
+  async *chatStream(sessionId: string, text: string, options: { channel?: string; actorId?: string; attachment?: GraphState['attachment'] } = {}):
     AsyncGenerator<Record<string, unknown>> {
     const channel = options.channel ?? 'local';
     const actorId = options.actorId ?? '';
@@ -449,7 +477,7 @@ export class AgentRunner {
     }
     const graph = await this.buildGraph();
     try {
-      const stream = await graph.stream(this.initial(sessionId, channel, actorId, input), sessionId);
+      const stream = await graph.stream(this.initial(sessionId, channel, actorId, input, options.attachment ?? null), sessionId);
       let finalAnswer = '';
       for await (const event of stream) {
         const payload = (Array.isArray(event) ? event[1] : event) as Record<string, unknown>;
