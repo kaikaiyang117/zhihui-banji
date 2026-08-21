@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { Download, Plus, Dumbbell, Moon, Utensils, Save, Bell, Edit3 } from 'lucide-vue-next'
-import { get, post, put, download } from '../api'
+import { get, post, put, download, scopedUrl } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
@@ -69,7 +69,7 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
 
 <template>
   <div>
-    <div class="page-title-bar"><div class="page-title">健康追踪</div><a class="btn btn-outline btn-export" href="/api/export/sheet/运动记录"><Download :size="14" /> 导出记录</a></div>
+    <div class="page-title-bar"><div class="page-title">健康追踪</div><a class="btn btn-outline btn-export" :href="scopedUrl('/api/export/sheet/运动记录')"><Download :size="14" /> 导出记录</a></div>
     <div v-if="message" class="success-text">{{ message }}</div>
 
     <div class="card">
@@ -81,10 +81,10 @@ onBeforeUnmount(() => { if (chart) chart.dispose() })
     <div class="card"><div class="card-title">体重趋势</div><p class="chart-text-summary">{{ weightSummary }}</p><div v-if="loading" class="loading">加载中...</div><div v-else-if="!weight?.rows?.length" class="empty-state">开始记录体重数据后这里会显示趋势图</div><div v-else ref="chartEl" class="chart-box" role="img" :aria-label="weightSummary"></div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'weight'"><Plus :size="14" /> 添加体重</button></div></div>
 
     <div class="health-grid">
-      <div class="card"><div class="card-title">运动记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'exercise'"><Dumbbell :size="14" /> 添加运动</button><a class="btn btn-outline" href="/api/export/sheet/运动记录"><Download :size="14" /> 导出</a></div><DataTable :headers="exercise?.headers || []" :rows="exercise?.rows || []" :max-height="280" /></div>
-      <div class="card"><div class="card-title">睡眠记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'sleep'"><Moon :size="14" /> 添加睡眠</button><a class="btn btn-outline" href="/api/export/sheet/睡眠记录"><Download :size="14" /> 导出</a></div><DataTable :headers="sleep?.headers || []" :rows="sleep?.rows || []" :max-height="280" /></div>
+      <div class="card"><div class="card-title">运动记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'exercise'"><Dumbbell :size="14" /> 添加运动</button><a class="btn btn-outline" :href="scopedUrl('/api/export/sheet/运动记录')"><Download :size="14" /> 导出</a></div><DataTable :headers="exercise?.headers || []" :rows="exercise?.rows || []" :max-height="280" /></div>
+      <div class="card"><div class="card-title">睡眠记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'sleep'"><Moon :size="14" /> 添加睡眠</button><a class="btn btn-outline" :href="scopedUrl('/api/export/sheet/睡眠记录')"><Download :size="14" /> 导出</a></div><DataTable :headers="sleep?.headers || []" :rows="sleep?.rows || []" :max-height="280" /></div>
     </div>
-    <div class="card"><div class="card-title">饮食记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'diet'"><Utensils :size="14" /> 添加饮食</button><a class="btn btn-outline" href="/api/export/sheet/饮食记录"><Download :size="14" /> 导出</a></div><DataTable :headers="diet?.headers || []" :rows="diet?.rows || []" :max-height="280" /></div>
+    <div class="card"><div class="card-title">饮食记录</div><div class="toolbar"><button class="btn btn-primary" @click="modalKind = 'diet'"><Utensils :size="14" /> 添加饮食</button><a class="btn btn-outline" :href="scopedUrl('/api/export/sheet/饮食记录')"><Download :size="14" /> 导出</a></div><DataTable :headers="diet?.headers || []" :rows="diet?.rows || []" :max-height="280" /></div>
 
     <div class="card"><div class="card-title">周期复盘</div><div class="review-summary" v-if="summary"><span>运动 {{ summary.exercise_days }} 天</span><span>平均睡眠 {{ summary.average_sleep_hours ?? '—' }} 小时</span><span>饮食 {{ summary.diet_days }} 天</span><span>饮水 {{ summary.average_water_ml ?? '—' }} ml</span></div><div v-if="summary?.alerts?.length" class="alert-list"><div v-for="alert in summary.alerts" :key="alert">⚠️ {{ alert }}</div></div><div class="toolbar"><select v-model="reviewForm.period_type"><option value="week">本周</option><option value="month">本月</option></select><button class="btn btn-outline" @click="generateReview">生成复盘草稿</button><button class="btn btn-outline" @click="exportSummary"><Download :size="14" /> 导出周期汇总</button></div><textarea v-model="reviewForm.summary" rows="3" placeholder="复盘总结"></textarea><textarea v-model="reviewForm.next_plan" rows="2" placeholder="下一周期计划"></textarea><button class="btn btn-primary" @click="saveReview"><Save :size="14" /> 保存复盘</button><div class="review-list"><div v-for="review in reviews" :key="review.id"><strong>{{ review.period_start }} 至 {{ review.period_end }}</strong><p>{{ review.summary }}</p><small>{{ review.next_plan }}</small></div></div></div>
 

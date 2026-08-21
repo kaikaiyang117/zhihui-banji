@@ -8,7 +8,7 @@ import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import zhCnLocale from '@fullcalendar/core/locales/zh-cn'
-import { get, post, upload, getUpcomingExams } from '../api'
+import { get, post, upload, download, getUpcomingExams } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 
 const stats = ref(null)
@@ -143,7 +143,7 @@ async function backup() {
   try {
     const result = await post('/api/system/backup', {})
     backupMessage.value = `备份已生成：${result.filename}`
-    window.open(`/api/system/backup/${encodeURIComponent(result.filename)}`, '_blank')
+    await download(`/api/system/backup/${encodeURIComponent(result.filename)}`, result.filename)
   } catch (error) {
     backupMessage.value = `备份失败：${error.message}`
   }
@@ -168,7 +168,7 @@ async function exportMigration() {
   try {
     const result = await post('/api/system/migration/export', {})
     backupMessage.value = `迁移包已生成：${result.filename}`
-    window.open(`/api/system/migration/${encodeURIComponent(result.filename)}`, '_blank')
+    await download(`/api/system/migration/${encodeURIComponent(result.filename)}`, result.filename)
   } catch (error) {
     backupMessage.value = `迁移包生成失败：${error.message}`
   }

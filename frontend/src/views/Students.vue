@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { get, del } from '../api'
+import { get, del, scopedUrl } from '../api'
 import DataTable from '../components/DataTable.vue'
 import AddModal from '../components/AddModal.vue'
 import { Plus, Upload, FileDown, Download } from 'lucide-vue-next'
@@ -91,8 +91,8 @@ onMounted(load)
       <div class="toolbar" style="margin-bottom:0">
         <button class="btn btn-primary" @click="startAdd"><Plus :size="14" :stroke-width="2" /> 添加学生</button>
         <button class="btn btn-primary" @click="showImport = true"><Upload :size="14" :stroke-width="2" /> 导入Excel</button>
-        <a class="btn btn-outline" href="/api/students/template"><FileDown :size="14" :stroke-width="2" /> 模板下载</a>
-        <a class="btn btn-outline btn-export" href="/api/students/export"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
+        <a class="btn btn-outline" :href="scopedUrl('/api/students/template')"><FileDown :size="14" :stroke-width="2" /> 模板下载</a>
+        <a class="btn btn-outline btn-export" :href="scopedUrl('/api/students/export')"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
       </div>
     </div>
 

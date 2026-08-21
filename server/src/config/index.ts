@@ -36,6 +36,15 @@ function env(name: string): string | undefined {
 }
 
 /** 从 app-version.json 或 WORKBENCH_VERSION 读取版本。 */
+export function parseAppVersion(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content.replace(/^\uFEFF/, '')) as { version?: string };
+    return parsed.version ? String(parsed.version).replace(/^v/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadAppVersion(): string {
   const configured = env('WORKBENCH_VERSION');
   if (configured) return configured.replace(/^v/, '');
@@ -44,12 +53,9 @@ export function loadAppVersion(): string {
     path.join(PROJECT_ROOT, 'backend', 'static', 'app-version.json'),
   ];
   for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(candidate, 'utf-8')) as { version?: string };
-      if (parsed.version) return String(parsed.version).replace(/^v/, '');
-    } catch {
-      // 继续尝试下一个候选
-    }
+    if (!fs.existsSync(candidate)) continue;
+    const version = parseAppVersion(fs.readFileSync(candidate, 'utf-8'));
+    if (version) return version;
   }
   return '0.0.0-dev';
 }

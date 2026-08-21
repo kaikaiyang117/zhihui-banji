@@ -244,7 +244,8 @@ export function registerMig05Routes(app: FastifyInstance): void {
         conn,
       });
       removePhoto(oldPath || null);
-      return { ok: true, photo_url: `/api/students/${sid}/photo` };
+      const [classId, termId] = scopeIds();
+      return { ok: true, photo_url: `/api/students/${sid}/photo?class_id=${classId}&term_id=${termId}` };
     } catch (error) {
       const mapped = errorHandler(reply, error);
       if (mapped) return mapped;

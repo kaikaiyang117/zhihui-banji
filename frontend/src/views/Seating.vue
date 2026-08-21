@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { Download, Pencil, Printer } from 'lucide-vue-next'
-import { get, post } from '../api'
+import { get, post, scopedUrl } from '../api'
 
 const grid = ref([])
 const students = ref([])
@@ -174,7 +174,7 @@ onMounted(load)
       <div>
         <div class="page-title">班级座位表</div>
       </div>
-      <a class="btn btn-outline btn-export" href="/api/export/sheet/座位表"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
+      <a class="btn btn-outline btn-export" :href="scopedUrl('/api/export/sheet/座位表')"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
     </div>
     <div class="card seating-card">
       <div class="card-title seating-card-title">

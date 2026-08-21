@@ -13,6 +13,7 @@ import { WorkbenchDb } from './db/connection.js';
 import { setDatabase } from './services/context.js';
 import { setDb as setDbSingleton } from './db/index.js';
 import { migrateStoredSecrets } from './services/secretMigration.js';
+import { pathToFileURL } from 'node:url';
 
 function print(message: string): void {
   process.stdout.write(`${message}\n`);
@@ -101,7 +102,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   };
 
   // 先安装信号处理器，再输出地址，避免启动方读到地址后立即退出时命中默认信号行为。
-  installSignalHandlers(() => result.close(), { log: print });
+  installSignalHandlers(() => result.close(), { log: print, controlChannel: config.desktopChild });
 
   print(`美美大王工作台启动中 -> http://localhost:${result.port}`);
   if (config.lanMode) {
@@ -115,7 +116,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/dist/entry.js')) {
+const invokedEntryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
+if (import.meta.url === invokedEntryUrl) {
   main().catch((error) => {
     print(`启动失败：${(error as Error).message}`);
     process.exit(1);

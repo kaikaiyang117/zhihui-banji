@@ -9,7 +9,7 @@ import { getDb, scopeIds, getCurrentScope } from './context.js';
 import * as audit from './audit.js';
 import { todayString } from './clock.js';
 import { pyRound, formatG } from './scores.js';
-import { safeResolve, atomicWrite, sha256 } from './files.js';
+import { safeResolve, atomicWrite, sha256, sha256File } from './files.js';
 
 export const DIRECTIONS = new Set(['收入', '支出']);
 export const ENTRY_STATUSES = new Set(['有效', '已撤销', '已冲正']);
@@ -225,6 +225,8 @@ function entryRow(entryId: number, options: { write?: boolean; conn?: Database }
 
 function serialize(row: Record<string, unknown>, options: { conn?: Database } = {}): Record<string, unknown> {
   const conn = connOf(options.conn);
+  const [classId, termId] = scope({ conn });
+  const scopeQuery = `?class_id=${classId}&term_id=${termId}`;
   const item = { ...row };
   item.amount = money(item.amount, { allowZero: true }) || 0;
   item.category = item.category || item.category_name || '';
@@ -236,7 +238,7 @@ function serialize(row: Record<string, unknown>, options: { conn?: Database } = 
      FROM fund_attachments WHERE ledger_id=? ORDER BY id`,
   ).all(Number(item.id)) as Array<Record<string, unknown>>;
   for (const attachment of item.attachments as Array<Record<string, unknown>>) {
-    attachment.download_path = `/api/fund/attachments/${attachment.id}`;
+    attachment.download_path = `/api/fund/attachments/${attachment.id}${scopeQuery}`;
   }
   item.attachment_count = (item.attachments as Array<unknown>).length;
   return item;
@@ -829,6 +831,7 @@ export interface SaveAttachmentOptions {
 
 export function saveAttachment(ledgerId: number, options: SaveAttachmentOptions): Record<string, unknown> {
   const conn = connOf(options.conn);
+  const [classId, termId] = scope({ conn });
   const entry = entryRow(ledgerId, { write: true, conn });
   if (String(entry.status) !== '有效') throw new FundError('已撤销或已冲正流水不能上传凭证');
   const data = Buffer.from(options.content ?? Buffer.alloc(0));
@@ -872,7 +875,8 @@ export function saveAttachment(ledgerId: number, options: SaveAttachmentOptions)
   return {
     id: attachmentId, ledger_id: Number(ledgerId), original_name: originalName,
     content_type: text(options.contentType) || 'application/octet-stream',
-    size_bytes: data.length, download_path: `/api/fund/attachments/${attachmentId}`,
+    size_bytes: data.length,
+    download_path: `/api/fund/attachments/${attachmentId}?class_id=${classId}&term_id=${termId}`,
   };
 }
 
@@ -894,6 +898,10 @@ export function attachmentFile(attachmentId: number, options: { conn?: Database 
   }
   if (!fs.existsSync(path) || !fs.statSync(path).isFile()) {
     throw new FundError('班费凭证文件不存在');
+  }
+  const expectedHash = String(row.sha256 ?? '').toLowerCase();
+  if (expectedHash && sha256File(path) !== expectedHash) {
+    throw new FundError('凭证完整性校验失败');
   }
   return { attachment: row, path };
 }

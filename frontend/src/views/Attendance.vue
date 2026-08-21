@@ -5,7 +5,7 @@ import {
   AlertTriangle, BarChart3, CheckCircle, Clock, Download, FileEdit,
   History, MessageSquareText, Save, Trash2, UserRound, XCircle
 } from 'lucide-vue-next'
-import { del, get, post, put } from '../api'
+import { del, get, post, put, scopedUrl } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 import EvidenceArea from '../components/EvidenceArea.vue'
 
@@ -340,7 +340,7 @@ function exportReport() {
   if (dateFrom.value) query.set('date_from', dateFrom.value)
   if (dateTo.value) query.set('date_to', dateTo.value)
   const anchor = document.createElement('a')
-  anchor.href = `/api/export/report/attendance?${query}`
+  anchor.href = scopedUrl(`/api/export/report/attendance?${query}`)
   anchor.click()
 }
 
@@ -359,7 +359,7 @@ onMounted(load)
         <div class="page-subtitle">按场景完成点名，保存后自动识别需要跟进的异常</div>
       </div>
       <div class="toolbar attendance-export-actions">
-        <a class="btn btn-outline btn-export" href="/api/export/sheet/考勤管理"><Download :size="14" /> 导出明细</a>
+        <a class="btn btn-outline btn-export" :href="scopedUrl('/api/export/sheet/考勤管理')"><Download :size="14" /> 导出明细</a>
         <button class="btn btn-outline" @click="exportReport"><Download :size="14" /> 导出汇总</button>
       </div>
     </div>

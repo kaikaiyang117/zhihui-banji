@@ -10,7 +10,7 @@ import * as audit from './audit.js';
 import { todayString } from './clock.js';
 import { ensureSourceWorkItem } from './workItems.js';
 import * as recycle from './recycle.js';
-import { safeResolve, atomicWrite, sha256 } from './files.js';
+import { safeResolve, atomicWrite, sha256, sha256File } from './files.js';
 
 export const MEETING_FORMATS: Set<string> = new Set(['主题班会', '事务通知', '团队活动', '安全教育', '心理健康']);
 export const MEETING_STATUSES: Set<string> = new Set(['已记录', '待复盘']);
@@ -139,15 +139,20 @@ function decorateMeeting(row: Record<string, unknown>, options: { conn?: Databas
 
 function decorateActivity(row: Record<string, unknown>, options: { conn?: Database } = {}): Record<string, unknown> {
   const conn = connOf(options.conn);
+  const [classId, termId] = scope({ conn });
+  const scopeQuery = `?class_id=${classId}&term_id=${termId}`;
   const item: Record<string, unknown> = { ...row };
   item.participants = conn.prepare(
     `SELECT p.*, s.学号, s.姓名 AS student_name
      FROM activity_participants p JOIN students s ON s.id=p.student_id
      WHERE p.activity_id=? AND s.deleted_at='' ORDER BY s.学号, s.id`,
   ).all(Number(item.id));
-  item.attachments = conn.prepare(
+  item.attachments = (conn.prepare(
     'SELECT * FROM activity_attachments WHERE activity_id=? ORDER BY id',
-  ).all(Number(item.id));
+  ).all(Number(item.id)) as Array<Record<string, unknown>>).map((attachment) => ({
+    ...attachment,
+    download_path: `/api/education/activities/attachments/${attachment.id}${scopeQuery}`,
+  }));
   item.legacy = Boolean(item.legacy_row_no);
   return item;
 }
@@ -695,10 +700,17 @@ export function saveActivityAttachment(activityId: number, options: {
     fs.rmSync(fullPath, { force: true });
     throw error;
   }
-  return conn.prepare('SELECT * FROM activity_attachments WHERE id=?').get(attachmentId) as Record<string, unknown>;
+  const attachment = conn.prepare('SELECT * FROM activity_attachments WHERE id=?').get(attachmentId) as Record<string, unknown>;
+  return {
+    ...attachment,
+    download_path: `/api/education/activities/attachments/${attachmentId}`
+      + `?class_id=${activity.class_id}&term_id=${activity.term_id}`,
+  };
 }
 
-export function activityAttachmentPath(attachmentId: number, options: { conn?: Database } = {}): string {
+export function activityAttachmentFile(attachmentId: number, options: { conn?: Database } = {}): {
+  attachment: Record<string, unknown>; path: string;
+} {
   const conn = connOf(options.conn);
   const [classId, termId] = scope({ conn });
   const row = conn.prepare(
@@ -716,7 +728,15 @@ export function activityAttachmentPath(attachmentId: number, options: { conn?: D
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
     throw new EducationError('活动材料文件不存在，可能需要恢复备份');
   }
-  return fullPath;
+  const expectedHash = String(row.sha256 ?? '').toLowerCase();
+  if (expectedHash && sha256File(fullPath) !== expectedHash) {
+    throw new EducationError('活动附件完整性校验失败');
+  }
+  return { attachment: row, path: fullPath };
+}
+
+export function activityAttachmentPath(attachmentId: number, options: { conn?: Database } = {}): string {
+  return activityAttachmentFile(attachmentId, options).path;
 }
 
 export function migrateLegacyRows(options: { conn?: Database } = {}): Record<string, unknown> {

@@ -2,6 +2,7 @@
  * 提供高频教师业务相关 HTTP 入口。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import fs from 'node:fs';
 
 import { getDb, scopeIds, ScopeError, ArchivedScopeError } from '../../services/context.js';
 import * as attendance from '../../services/attendance.js';
@@ -351,7 +352,7 @@ export function registerMig07Routes(app: FastifyInstance): void {
       reply.header('Content-Type', result.attachment.content_type);
       reply.header('Content-Disposition',
         `attachment; filename*=UTF-8''${encodeURIComponent(String(result.attachment.original_name))}`);
-      return reply.send(result.path);
+      return reply.send(fs.createReadStream(result.path));
     } catch (error) {
       const mapped = mapError(reply, error);
       if (mapped) return mapped;

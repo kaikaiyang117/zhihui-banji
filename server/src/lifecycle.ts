@@ -92,7 +92,7 @@ export async function startServer(
 /** 优雅退出：等待超时后强制退出。 */
 export function installSignalHandlers(
   close: () => Promise<void>,
-  options: { timeoutMs?: number; log?: (message: string) => void } = {},
+  options: { timeoutMs?: number; log?: (message: string) => void; controlChannel?: boolean } = {},
 ): void {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const log = options.log ?? ((message: string) => process.stdout.write(`${message}\n`));
@@ -116,4 +116,25 @@ export function installSignalHandlers(
 
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+  if (options.controlChannel) {
+    const parentPort = (process as NodeJS.Process & {
+      parentPort?: { on: (event: 'message', listener: (messageEvent: { data?: unknown }) => void) => void };
+    }).parentPort;
+    parentPort?.on('message', (messageEvent) => {
+      const data = messageEvent?.data;
+      if (data === 'shutdown' || (typeof data === 'object' && data !== null && (data as { type?: unknown }).type === 'shutdown')) {
+        shutdown('桌面进程关闭请求');
+      }
+    });
+
+    if (!process.stdin.destroyed) {
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk: string) => {
+        if (chunk.split(/\r?\n/).some((line) => line.trim() === 'shutdown')) {
+          shutdown('桌面进程关闭请求');
+        }
+      });
+    }
+  }
 }

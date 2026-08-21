@@ -438,7 +438,9 @@ export function studentDetail(studentId: number): Record<string, unknown> {
   const photoPath = String(student.photo_path ?? '');
   const studentOut = { ...student };
   delete studentOut.photo_path;
-  studentOut.photo_url = photoPath ? `/api/students/${studentId}/photo` : '';
+  studentOut.photo_url = photoPath
+    ? `/api/students/${studentId}/photo?class_id=${classId}&term_id=${termId}`
+    : '';
 
   return {
     student: studentOut, events, tasks, focus, communications, attendance,

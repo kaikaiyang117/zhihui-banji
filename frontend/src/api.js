@@ -119,14 +119,18 @@ export const del = async (url, body) => {
 }
 
 // 文件下载（GET 导出）
-export async function download(url, filename) {
-  await ensureDevicePairing()
-  const a = document.createElement('a')
+export function scopedUrl(url) {
   const target = new URL(url, window.location.origin)
   const { classId, termId } = getStoredScope()
   if (classId) target.searchParams.set('class_id', classId)
   if (termId) target.searchParams.set('term_id', termId)
-  a.href = target.toString()
+  return target.toString()
+}
+
+export async function download(url, filename) {
+  await ensureDevicePairing()
+  const a = document.createElement('a')
+  a.href = scopedUrl(url)
   a.download = filename || ''
   document.body.appendChild(a)
   a.click()

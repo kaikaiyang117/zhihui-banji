@@ -446,6 +446,15 @@ describe('HTTP 冒烟', () => {
 
     const migration = await app.inject({ method: 'POST', url: '/api/system/migration/export' });
     expect(migration.statusCode).toBe(200);
+    const migrationName = String(migration.json().filename);
+    const migrationFile = await app.inject({
+      method: 'GET',
+      url: `/api/system/migration/${encodeURIComponent(migrationName)}?class_id=1&term_id=1`,
+    });
+    expect(migrationFile.statusCode).toBe(200);
+    expect(migrationFile.headers['content-type']).toContain('application/zip');
+    expect(migrationFile.headers['content-disposition']).toContain('filename*=UTF-8');
+    expect(migrationFile.rawPayload.length).toBeGreaterThan(0);
 
     const tokenStatus = await app.inject({ method: 'GET', url: '/api/system/update/github-token' });
     expect(tokenStatus.statusCode).toBe(200);

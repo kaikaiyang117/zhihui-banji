@@ -200,7 +200,7 @@ function startBackend() {
       backendProcess = spawn(nodeCommand, [entry, ...backendArgs], {
         cwd: backendDir,
         env: backendProcessEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });
     }
@@ -343,7 +343,7 @@ function onBackendReady() {
   showMainWindow();
 }
 
-/* 只有显式使用 npm run dev 时才探测 Vite；日常源码启动与打包版本均加载本地构建页面。 */
+/* 只有显式使用 --dev-frontend 时才探测 Vite；不带该标志时加载后端托管页面。 */
 function loadAppPage() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (app.isPackaged || !useDevFrontend) {
@@ -1063,7 +1063,15 @@ function stopBackend() {
       resolve();
     }, 8000);
     proc.once('exit', () => { clearTimeout(force); resolve(); });
-    try { proc.kill('SIGTERM'); } catch (_err) { clearTimeout(force); resolve(); }
+    try {
+      if (typeof proc.postMessage === 'function') {
+        proc.postMessage({ type: 'shutdown' });
+      } else if (proc.stdin && !proc.stdin.destroyed) {
+        proc.stdin.write('shutdown\n');
+      } else {
+        proc.kill('SIGTERM');
+      }
+    } catch (_err) { clearTimeout(force); resolve(); }
   });
 }
 

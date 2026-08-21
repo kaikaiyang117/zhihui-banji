@@ -111,6 +111,7 @@ jobs:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          REQUIRE_WINDOWS_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
         run: .\packaging\build-windows.ps1
 
       - name: Smoke test Windows package
@@ -128,6 +129,7 @@ jobs:
           if ($actual -ne $expected) {
             throw "版本号不一致：期望 $expected，实际 $actual"
           }
+          .\packaging\test-windows-installer.ps1 -InstallerPath $installer.FullName
 
       - name: Configure macOS signing and notarization
         if: matrix.platform == 'macos'

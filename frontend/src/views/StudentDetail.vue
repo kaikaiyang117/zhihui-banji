@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Activity, AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, Camera, ChevronLeft, ChevronRight, ClipboardList, FileText, Flag, MessageCircle, Pencil, Plus, Tag, Trash2, UserRound, TrendingUp, X, Star } from 'lucide-vue-next'
-import { del, get, upload } from '../api'
+import { del, get, upload, scopedUrl } from '../api'
 import QuickRecordModal from '../components/QuickRecordModal.vue'
 import AddModal from '../components/AddModal.vue'
 import { useConfirmDialog } from '../composables/confirmDialog'
@@ -210,7 +210,7 @@ onMounted(load)
       <input ref="photoInput" class="photo-input" type="file" accept="image/jpeg,image/png,image/webp" @change="uploadPhoto">
       <div class="student-photo-block">
         <button class="student-avatar" :class="{ 'has-photo': photoUrl }" type="button" :aria-label="photoUrl ? '查看学生照片' : '添加学生照片'" @click="photoUrl ? showPhotoPreview = true : choosePhoto()">
-          <img v-if="photoUrl" :src="photoUrl" :alt="`${data.student.姓名}的照片`" @error="photoBroken = true">
+          <img v-if="photoUrl" :src="scopedUrl(photoUrl)" :alt="`${data.student.姓名}的照片`" @error="photoBroken = true">
           <UserRound v-else :size="24" />
         </button>
         <button class="student-avatar-edit" type="button" :disabled="photoBusy" :aria-label="photoUrl ? '更换学生照片' : '添加学生照片'" :title="photoUrl ? '更换照片' : '添加照片'" @click="choosePhoto"><Camera :size="13" /></button>
@@ -239,7 +239,7 @@ onMounted(load)
     <div v-if="showPhotoPreview && photoUrl" class="photo-preview-overlay" @click.self="showPhotoPreview = false">
       <div class="photo-preview-card" role="dialog" aria-label="学生照片预览">
         <button class="photo-preview-close" type="button" aria-label="关闭照片预览" @click="showPhotoPreview = false"><X :size="18" /></button>
-        <img :src="photoUrl" :alt="`${data.student.姓名}的照片`">
+        <img :src="scopedUrl(photoUrl)" :alt="`${data.student.姓名}的照片`">
         <div><strong>{{ data.student.姓名 }}</strong><span>{{ data.student.学号 || '暂无学号' }}</span></div>
       </div>
     </div>

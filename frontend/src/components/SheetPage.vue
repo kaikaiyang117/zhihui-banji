@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { Download } from 'lucide-vue-next'
-import { get, del } from '../api'
+import { get, del, scopedUrl } from '../api'
 import DataTable from './DataTable.vue'
 import AddModal from './AddModal.vue'
 import { SHEET_FIELDS } from '../sheets'
@@ -55,7 +55,7 @@ onMounted(load)
       <div class="page-title">{{ title }}</div>
       <div class="toolbar" style="margin-bottom:0">
         <button v-if="addButton" class="btn btn-primary" @click="showModal = true">{{ addButton }}</button>
-        <a class="btn btn-outline btn-export" :href="`/api/export/sheet/${sheetName}`"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
+        <a class="btn btn-outline btn-export" :href="scopedUrl(`/api/export/sheet/${sheetName}`)"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
       </div>
     </div>
     <div class="card">

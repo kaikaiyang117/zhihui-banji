@@ -2,6 +2,7 @@
  * AI 草稿端点（AGENT-00 接入）先返回提示。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import fs from 'node:fs';
 
 import { getDb, ScopeError, ArchivedScopeError } from '../../services/context.js';
 import * as points from '../../services/points.js';
@@ -268,7 +269,7 @@ export function registerMig08Routes(app: FastifyInstance): void {
       reply.header('Content-Type', String(result.attachment.content_type));
       reply.header('Content-Disposition',
         `attachment; filename*=UTF-8''${encodeURIComponent(String(result.attachment.original_name))}`);
-      return reply.send(result.path);
+      return reply.send(fs.createReadStream(result.path));
     } catch (error) {
       const mapped = mapError(reply, error);
       if (mapped) return mapped;
@@ -550,8 +551,11 @@ export function registerMig08Routes(app: FastifyInstance): void {
   app.get('/api/education/activities/attachments/:attachmentId', async (request, reply) => {
     const { attachmentId } = request.params as { attachmentId: string };
     try {
-      const filePath = education.activityAttachmentPath(Number(attachmentId));
-      return reply.type('application/octet-stream').send(filePath);
+      const result = education.activityAttachmentFile(Number(attachmentId));
+      reply.header('Content-Type', String(result.attachment.mime_type || 'application/octet-stream'));
+      reply.header('Content-Disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(String(result.attachment.original_name))}`);
+      return reply.send(fs.createReadStream(result.path));
     } catch (error) {
       const mapped = mapError(reply, error);
       if (mapped) return mapped;

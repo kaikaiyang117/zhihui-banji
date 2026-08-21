@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadConfig, validateBusinessDate } from '../../src/config/index.js';
+import { loadConfig, parseAppVersion, validateBusinessDate } from '../../src/config/index.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -40,6 +40,16 @@ describe('config 默认值', () => {
     const config = loadConfig();
     expect(config.dataDir.endsWith(path.join('workbench', 'data'))).toBe(true);
     expect(config.readyMarkerPath.endsWith(path.join('data', '.workbench-ready'))).toBe(true);
+  });
+});
+
+describe('应用版本文件解析', () => {
+  it('兼容 Windows PowerShell UTF-8 BOM', () => {
+    expect(parseAppVersion('\uFEFF{"version":"v2.3.9"}')).toBe('2.3.9');
+  });
+
+  it('无效内容返回 null', () => {
+    expect(parseAppVersion('{invalid')).toBeNull();
   });
 });
 

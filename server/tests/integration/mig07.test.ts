@@ -214,15 +214,28 @@ describe('班级任务：材料收集/缺交例外/附件', () => {
     expect(confirm.closed_with_missing_count).toBe(2);
   });
 
-  it('附件保存到数据目录并可读取', () => {
+  it('附件通过 HTTP 返回文件内容并校验完整性', async () => {
     const task = classTasks.createTask({ title: '带附件任务', studentIds: [1] });
+    const content = Buffer.from('%PDF-1.4 测试');
     const saved = classTasks.saveAttachment(Number(task.id), 1, {
-      filename: '材料.pdf', contentType: 'application/pdf', content: Buffer.from('%PDF-1.4 测试'),
+      filename: '材料.pdf', contentType: 'application/pdf', content,
     });
     expect(saved.original_name).toBe('材料.pdf');
     const result = classTasks.attachmentFile(Number(saved.id));
     expect(result.path).toContain(db.paths.dataDir);
     expect(fs.existsSync(result.path)).toBe(true);
+    expect(saved.download_path).toBe(`/api/class-tasks/attachments/${saved.id}?class_id=1&term_id=1`);
+
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const response = await app.inject({ method: 'GET', url: String(saved.download_path) });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(content.toString());
+    expect(response.headers['content-disposition']).toContain('filename*=UTF-8');
+    await app.close();
+
+    fs.writeFileSync(result.path, Buffer.from('tampered'));
+    expect(() => classTasks.attachmentFile(Number(saved.id))).toThrow(/完整性/);
   });
 });
 

@@ -5,7 +5,7 @@
  * 检查工作台页面渲染、手机访问/更新入口、后端健康检查；
  * 退出后确认后端进程与端口释放。
  */
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -14,10 +14,10 @@ import net from 'net';
 import http from 'http';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const electronBin = path.join(
-  desktopRoot, 'node_modules', '.bin',
-  process.platform === 'win32' ? 'electron.cmd' : 'electron',
-);
+const packagedExecutable = process.env.WORKBENCH_PACKAGED_EXE;
+const electronBin = packagedExecutable || (process.platform === 'win32'
+  ? path.join(desktopRoot, 'node_modules', 'electron', 'dist', 'electron.exe')
+  : path.join(desktopRoot, 'node_modules', '.bin', 'electron'));
 
 function fail(message, output = '') {
   console.error(`\nSMOKE FAIL: ${message}`);
@@ -75,13 +75,19 @@ const env = {
   WORKBENCH_NO_TRAY: '1',
 };
 
-const args = ['.', `--user-data-dir=${electronUserDataDir}`];
+const args = packagedExecutable
+  ? [`--user-data-dir=${electronUserDataDir}`]
+  : ['.', `--user-data-dir=${electronUserDataDir}`];
 if (process.platform === 'linux') args.push('--no-sandbox');
 /* detached 进程组：超时清理时整组 kill，避免 Electron 主进程（.bin/electron 的
  * shim 子进程）孤儿化后持有单实例锁，阻塞后续测试。 */
 const child = spawn(electronBin, args, { cwd: desktopRoot, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 function killTree() {
-  try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  if (process.platform === 'win32' && child.pid) {
+    try { spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch {}
+  } else {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  }
   try { child.kill('SIGKILL'); } catch {}
 }
 

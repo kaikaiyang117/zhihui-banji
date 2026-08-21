@@ -143,26 +143,32 @@ onMounted(load)
       <div>
         <div class="page-title">学期总结与档案</div>
         <p class="page-subtitle">把一学期的班级工作整理成一份可复盘、可交接的教师档案</p>
+        <div class="report-context" aria-label="当前工作范围">
+          <span>当前工作范围</span>
+          <strong>{{ classLabel }}</strong>
+          <i aria-hidden="true"></i>
+          <strong>{{ termLabel }}</strong>
+        </div>
       </div>
       <button class="btn btn-outline" @click="load"><RefreshCw :size="14" /> 刷新</button>
     </div>
 
     <section class="card report-generator">
       <div class="generator-copy">
-        <div class="eyebrow"><FileText :size="15" /> 学期档案</div>
-        <h2>生成本学期总结</h2>
+        <div class="generator-heading"><span class="generator-icon"><FileText :size="18" /></span><h2>生成本学期总结</h2></div>
         <p>系统整理结构化事实，老师补充班风判断、下学期计划和总结寄语，最后保存为只读档案。</p>
       </div>
       <div class="generator-meta">
-        <div><span>统计范围</span><strong>当前班级 · 当前学期</strong></div>
-        <div><span>档案属性</span><strong>数据快照 + 教师总结</strong></div>
+        <div><span>统计范围</span><strong>{{ classLabel }} · {{ termLabel }}</strong></div>
+        <div><span>档案内容</span><strong>数据快照 + 教师总结</strong></div>
       </div>
       <div v-if="error" class="form-error">{{ error }}</div>
       <div class="toolbar">
-        <button class="btn btn-primary" :disabled="loading" @click="generate">{{ loading ? '整理中…' : '生成学期总结' }}</button>
+        <button class="btn btn-primary generate-button" :disabled="loading" @click="generate">{{ loading ? '整理中…' : '生成学期总结' }}</button>
         <button v-if="preview && !selectedArchive" class="btn btn-ai" :disabled="aiBusy || loading" @click="generateAIDraft"><Sparkles :size="14" /> {{ aiBusy ? 'AI整理中…' : 'AI生成三段草稿' }}</button>
         <button class="btn btn-outline" :disabled="!preview || loading" @click="archive"><Save :size="14" /> 保存为只读档案</button>
         <button v-if="preview" class="text-action" @click="printReport">打印 / 保存 PDF</button>
+        <span v-else class="toolbar-hint">先生成一份预览，确认内容后再保存档案</span>
       </div>
     </section>
 
@@ -240,7 +246,21 @@ onMounted(load)
       <ul class="report-notes"><li v-for="note in preview.data_notes" :key="note">{{ note }}</li></ul>
     </section>
 
-    <section class="card report-archives"><div class="section-heading archive-heading"><div><h2>历史学期档案</h2><span>只读快照 · {{ archives.length }} 份</span></div><span class="muted">点击档案名称查看</span></div><div v-if="!archives.length" class="empty-state">生成并保存学期总结后，会在这里保留可回看的快照。</div><div v-else class="archive-list"><div v-for="item in archives" :key="item.id" class="archive-row"><button class="link-button" @click="openArchive(item.id)">{{ item.title }}</button><span>{{ item.period_start }} 至 {{ item.period_end }}</span><span>{{ item.archived_at }}</span><button class="btn btn-sm btn-outline" @click="download(`/api/reports/archives/${item.id}/export`, `${item.title}.xlsx`)"><Download :size="13" /> 导出</button></div></div></section>
+    <section class="card report-archives">
+      <div class="section-heading archive-heading">
+        <div class="archive-title-group"><span class="archive-icon"><Archive :size="16" /></span><div><h2>历史学期档案</h2><span>只读快照 · {{ archives.length }} 份</span></div></div>
+        <span class="archive-hint">点击名称查看详情</span>
+      </div>
+      <div v-if="!archives.length" class="empty-state">生成并保存学期总结后，会在这里保留可回看的快照。</div>
+      <div v-else class="archive-list">
+        <div v-for="item in archives" :key="item.id" class="archive-row">
+          <button class="link-button" @click="openArchive(item.id)"><span class="archive-file-icon"><FileText :size="15" /></span><span class="archive-copy"><strong>{{ item.title }}</strong><small>查看只读档案</small></span></button>
+          <span class="archive-period"><small>覆盖周期</small>{{ item.period_start }} 至 {{ item.period_end }}</span>
+          <span class="archive-date"><small>保存时间</small>{{ item.archived_at }}</span>
+          <button class="btn btn-sm btn-outline archive-export" @click="download(`/api/reports/archives/${item.id}/export`, `${item.title}.xlsx`)" aria-label="导出档案"><Download :size="13" /> 导出</button>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -253,5 +273,135 @@ onMounted(load)
 .private-analysis { width:100%; padding:15px 16px; border:1px solid color-mix(in srgb, var(--primary) 20%, var(--border)); border-radius:14px; background:color-mix(in srgb, var(--primary) 4%, var(--surface)); }.private-heading { display:flex; align-items:center; gap:7px; color:var(--primary); font-size:13px; font-weight:600; }.student-change-columns { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:14px; }.student-change-columns p { display:flex; justify-content:space-between; margin:7px 0; color:var(--text-secondary); font-size:13px; }.student-change-columns strong { color:var(--text); }.run-grid { grid-template-columns:repeat(3,1fr); }.run-card small { display:block; margin-top:7px; color:var(--text-secondary); font-size:12px; }.running-breakdown { width:100%; }.breakdown-row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px; }.breakdown-row:last-child { border-bottom:0; }.breakdown-row span { color:var(--text-secondary); }.followup-details summary { display:flex; justify-content:space-between; align-items:center; cursor:pointer; list-style:none; color:var(--primary); font-size:13px; }.followup-details summary::-webkit-details-marker { display:none; }.followup-details summary > span { display:flex; align-items:center; gap:6px; }.followup-details .focus-table { margin-top:14px; background:var(--surface); }
 .report-sources { margin-top:28px; padding-top:16px; border-top:1px solid var(--border); }.report-sources summary { display:flex; justify-content:space-between; align-items:center; cursor:pointer; color:var(--primary); font-size:13px; list-style:none; }.report-sources summary::-webkit-details-marker { display:none; }.report-sources summary > span:last-child { display:flex; align-items:center; gap:5px; color:var(--text-secondary); }.source-hint { margin:10px 0 0; color:var(--text-secondary); font-size:12px; }.source-group { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; align-items:center; }.source-group strong { min-width:74px; font-size:12px; }.source-group span { background:var(--bg-elevated); padding:4px 7px; border-radius:7px; font-size:12px; }.source-group em { color:var(--text-secondary); font-size:12px; }.report-notes { color:var(--text-secondary); font-size:12px; padding-left:18px; margin-bottom:0; }.archive-heading { align-items:center; }.archive-heading h2 { margin:0 0 4px; }.archive-heading > span { white-space:nowrap; }.archive-list { display:flex; flex-direction:column; gap:0; margin-top:14px; }.archive-row { display:grid; grid-template-columns:minmax(180px,1fr) 180px 170px auto; gap:10px; align-items:center; border-top:1px solid var(--border); padding:12px 0; font-size:13px; }.link-button { border:0; background:none; color:var(--primary); text-align:left; cursor:pointer; font-size:14px; }
 @media (max-width:1000px) { .fact-grid { grid-template-columns:repeat(2,1fr); }.academic-columns,.ai-draft-grid { grid-template-columns:1fr; } } @media (max-width:700px) { .report-generator { grid-template-columns:1fr; }.toolbar { grid-column:auto; flex-wrap:wrap; }.fact-grid,.run-grid { grid-template-columns:repeat(2,1fr); }.exam-row,.focus-table-row { grid-template-columns:1.3fr repeat(3,.7fr); gap:6px; padding-left:10px; padding-right:10px; }.student-change-columns { grid-template-columns:1fr; gap:10px; }.archive-row { grid-template-columns:1fr 1fr; }.archive-row .btn { justify-self:start; } }
+
+/* Reports entry state: make the next action and the archive history easy to scan. */
+.reports-page .page-title-bar { align-items: flex-start; margin-bottom: 22px; }
+.report-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 11px; color: var(--text-secondary); font-size: 12px; }
+.report-context span { color: var(--text-tertiary); }
+.report-context strong { color: var(--text); font-weight: 600; }
+.report-context i { width: 3px; height: 3px; border-radius: 50%; background: var(--border-strong); }
+.report-generator { grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 24px 44px; padding: 28px 30px 24px; border-color: var(--border-strong); }
+.generator-heading { display: flex; align-items: center; gap: 11px; }
+.generator-icon, .archive-icon { display: inline-grid; place-items: center; flex: 0 0 auto; color: var(--primary); background: var(--primary-bg); }
+.generator-icon { width: 36px; height: 36px; border-radius: 11px; }
+.generator-copy h2 { margin: 0; font-size: 21px; letter-spacing: -.02em; }
+.generator-copy p { max-width: 48ch; margin-top: 12px; line-height: 1.7; }
+.generator-meta { align-self: stretch; justify-content: center; gap: 13px; padding: 16px 18px; border: 1px solid var(--border); background: var(--surface-subtle); }
+.generator-meta div { font-size: 13px; }
+.generator-meta strong { max-width: 190px; }
+.toolbar { gap: 10px; padding-top: 20px; }
+.generate-button { min-width: 124px; }
+.toolbar-hint { margin-left: auto; color: var(--text-tertiary); font-size: 12px; }
+.report-archives { margin-top: 18px; padding: 24px 30px 18px; }
+.archive-title-group { display: flex; align-items: center; gap: 11px; }
+.archive-icon { width: 32px; height: 32px; border-radius: 9px; }
+.archive-heading h2 { font-size: 18px; }
+.archive-heading > div > div > span { color: var(--text-secondary); font-size: 12px; }
+.archive-hint { color: var(--text-tertiary); font-size: 12px; }
+.archive-list { margin-top: 18px; }
+.archive-row { grid-template-columns: minmax(240px, 1.45fr) minmax(210px, 1fr) minmax(150px, .8fr) auto; gap: 20px; padding: 15px 8px; border-top: 1px solid var(--border); transition: background-color 140ms ease, border-color 140ms ease; }
+.archive-row:last-child { border-bottom: 1px solid var(--border); }
+.archive-row:hover { background: var(--surface-subtle); border-radius: 10px; }
+.link-button { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 3px 0; color: var(--text); }
+.archive-file-icon { display: inline-grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; color: var(--primary); background: var(--surface); }
+.archive-copy { display: grid; gap: 3px; min-width: 0; }
+.archive-copy strong { overflow: hidden; color: var(--primary); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.archive-copy small, .archive-period small, .archive-date small { color: var(--text-tertiary); font-size: 11px; }
+.archive-period, .archive-date { display: grid; gap: 3px; min-width: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.archive-period small, .archive-date small { color: var(--text-tertiary); }
+.archive-export { justify-self: end; }
+
+/* 生成入口：把范围信息和下一步操作收拢成一个清晰的工作起点。 */
+.report-generator {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+  gap: 22px 52px;
+  padding: 26px 30px 22px;
+  box-shadow: none;
+}
+.generator-copy { min-width: 0; }
+.generator-heading { gap: 12px; }
+.generator-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+.generator-copy h2 { font-size: 20px; }
+.generator-copy p { max-width: 52ch; margin-top: 10px; line-height: 1.65; }
+.generator-meta {
+  align-self: start;
+  justify-self: end;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.generator-meta div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 142px;
+  padding: 4px 18px;
+  font-size: 12px;
+}
+.generator-meta div:first-child { padding-left: 0; }
+.generator-meta div + div { border-top: 0; border-left: 1px solid var(--border); }
+.generator-meta span { color: var(--text-secondary); }
+.generator-meta strong {
+  max-width: none;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar {
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 18px;
+}
+.toolbar-hint {
+  max-width: 260px;
+  margin-left: 4px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.report-generator .btn:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--surface-subtle);
+}
+@media (max-width: 900px) {
+  .report-generator { grid-template-columns: 1fr; gap: 20px; }
+  .generator-meta { justify-self: start; width: 100%; padding: 0; }
+}
+@media (max-width: 700px) {
+  .report-generator, .report-archives { padding: 20px 16px 16px; }
+  .report-context { margin-top: 9px; }
+  .generator-meta { display: grid; grid-template-columns: 1fr 1fr; }
+  .generator-meta div { min-width: 0; padding: 4px 12px; }
+  .generator-meta div:first-child { padding-left: 0; }
+  .toolbar-hint { width: 100%; max-width: none; margin: 2px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+  .archive-heading { align-items: flex-start; }
+  .archive-hint { display: none; }
+  .archive-row { grid-template-columns: 1fr 1fr; gap: 12px 16px; padding: 14px 4px; }
+  .archive-row .link-button { grid-column: 1 / -1; }
+  .archive-period, .archive-date { padding-left: 38px; }
+  .archive-export { justify-self: start; }
+}
+@media (max-width: 480px) {
+  .generator-meta { grid-template-columns: 1fr; }
+  .generator-meta div, .generator-meta div:first-child { padding: 8px 0; }
+  .generator-meta div + div { border-left: 0; border-top: 1px solid var(--border); }
+  .generator-meta strong { white-space: normal; }
+}
 @media print { @page report-page { size:A4 portrait; margin:14mm; } :global(html),:global(body),:global(.app) { min-height:0 !important; height:auto !important; background:#fff !important; } :global(.top-tabs),:global(.sidebar),:global(.agent-float),.report-generator,.report-archives { display:none !important; } :global(.app-body),:global(.main) { display:block !important; width:auto !important; max-width:none !important; min-height:0 !important; height:auto !important; overflow:visible !important; margin:0 !important; padding:0 !important; }.report-document { page:report-page; border:0 !important; box-shadow:none !important; margin:0 !important; }.report-sources { break-inside:avoid; } }
 </style>

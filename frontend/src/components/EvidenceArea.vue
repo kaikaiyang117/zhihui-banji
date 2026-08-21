@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { ImagePlus, Trash2, X, ZoomIn, Paperclip, Upload, Download, RotateCcw } from 'lucide-vue-next'
-import { upload, get, del, post } from '../api'
+import { upload, get, del, post, scopedUrl } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 
 const props = defineProps({
@@ -159,15 +159,15 @@ async function restoreItem(item) {
 }
 
 function thumbnailUrl(item) {
-  return `/api/evidence/thumbnail/${item.id}`
+  return scopedUrl(`/api/evidence/thumbnail/${item.id}`)
 }
 
 function originalUrl(item) {
-  return `/api/evidence/file/${item.id}`
+  return scopedUrl(`/api/evidence/file/${item.id}`)
 }
 
 function downloadUrl(item) {
-  return `/api/evidence/file/${item.id}`
+  return scopedUrl(`/api/evidence/file/${item.id}`)
 }
 
 function kindLabel(kind) {

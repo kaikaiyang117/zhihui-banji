@@ -6,7 +6,7 @@ import { getDb, scopeIds, ensureStudentInScope } from './context.js';
 import * as audit from './audit.js';
 import { todayString } from './clock.js';
 import { ensureSourceWorkItem, updateWorkItem, sourceTransitionHooks } from './workItems.js';
-import { safeResolve, atomicWrite, sha256 } from './files.js';
+import { safeResolve, atomicWrite, sha256, sha256File } from './files.js';
 
 export const TASK_STATUSES = new Set(['进行中', '已完成', '已取消']);
 export const ITEM_STATUSES = new Set(['未提交', '已提交', '免交']);
@@ -64,6 +64,8 @@ function templateRow(templateId: number, options: { write?: boolean; conn?: Data
 
 function itemRows(taskId: number, options: { conn?: Database } = {}): Array<Record<string, unknown>> {
   const conn = connOf(options.conn);
+  const [classId, termId] = scope({ conn });
+  const scopeQuery = `?class_id=${classId}&term_id=${termId}`;
   const rows = conn.prepare(
     `SELECT i.*, s.学号, s.姓名
      FROM class_task_items i JOIN students s ON s.id=i.student_id
@@ -76,7 +78,7 @@ function itemRows(taskId: number, options: { conn?: Database } = {}): Array<Reco
   ).all(Number(taskId)) as Array<Record<string, unknown>>;
   const byItem = new Map<number, Array<Record<string, unknown>>>();
   for (const attachment of attachments) {
-    attachment.download_path = `/api/class-tasks/attachments/${attachment.id}`;
+    attachment.download_path = `/api/class-tasks/attachments/${attachment.id}${scopeQuery}`;
     const itemId = Number(attachment.item_id);
     const list = byItem.get(itemId) ?? [];
     list.push(attachment);
@@ -476,6 +478,7 @@ export function saveAttachment(taskId: number, studentId: number, options: {
   filename: string; contentType: string; content: Buffer; conn?: Database;
 }): Record<string, unknown> {
   const conn = connOf(options.conn);
+  const [classId, termId] = scope({ conn });
   const task = taskRow(taskId, { write: true, conn });
   if (task.status !== '进行中') throw new ClassTaskError('已关闭的班级任务不能上传材料');
   const item = conn.prepare(
@@ -520,7 +523,8 @@ export function saveAttachment(taskId: number, studentId: number, options: {
   return {
     id: attachmentId, item_id: Number(item.id), original_name: originalName,
     content_type: text(options.contentType) || 'application/octet-stream',
-    size_bytes: data.length, download_path: `/api/class-tasks/attachments/${attachmentId}`,
+    size_bytes: data.length,
+    download_path: `/api/class-tasks/attachments/${attachmentId}?class_id=${classId}&term_id=${termId}`,
   };
 }
 
@@ -543,6 +547,10 @@ export function attachmentFile(attachmentId: number, options: { conn?: Database 
   }
   if (!fs.existsSync(path) || !fs.statSync(path).isFile()) {
     throw new ClassTaskError('材料附件文件不存在');
+  }
+  const expectedHash = String(row.sha256 ?? '').toLowerCase();
+  if (expectedHash && sha256File(path) !== expectedHash) {
+    throw new ClassTaskError('附件完整性校验失败');
   }
   return { attachment: row, path };
 }

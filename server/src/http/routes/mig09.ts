@@ -1,5 +1,7 @@
 /* MIG-09 路由：报告、健康、Excel 导出；以及系统运维（备份/恢复/迁移包/更新）。 */
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import * as reports from '../../services/reports.js';
 import * as health from '../../services/health.js';
@@ -359,8 +361,6 @@ function requireLocal(request: { ip: string }, reply: FastifyReply): boolean {
 }
 
 function safeBackupPath(backupsDir: string, filename: string): string {
-  const path = require('node:path');
-  const fs = require('node:fs');
   const clean = path.basename(filename);
   const target = path.resolve(backupsDir, clean);
   if (path.dirname(target) !== path.resolve(backupsDir)) {
@@ -371,7 +371,6 @@ function safeBackupPath(backupsDir: string, filename: string): string {
 }
 
 function requirePath(dir: string, name: string): string {
-  const path = require('node:path');
   return path.join(dir, name);
 }
 

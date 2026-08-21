@@ -27,5 +27,20 @@ npm run build:server
 Set-Location (Join-Path $ProjectRoot 'desktop')
 npm ci
 
+# Electron 的 npm 包可能已安装，但下载/解压二进制的 postinstall 被环境策略跳过。
+# 显式执行一次安装脚本，确保源码启动入口可以找到 electron.exe。
+$ElectronInstallScript = Join-Path (Get-Location) 'node_modules\electron\install.js'
+$ElectronBinary = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+if (-not (Test-Path $ElectronBinary)) {
+  if (-not (Test-Path $ElectronInstallScript)) {
+    throw 'Electron npm 包未正确安装，找不到 node_modules\electron\install.js。'
+  }
+  Write-Host 'Electron 二进制文件不存在，正在执行 Electron 安装脚本...'
+  & node $ElectronInstallScript
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ElectronBinary)) {
+    throw 'Electron 二进制文件安装失败，请检查 Electron 下载缓存或网络设置。'
+  }
+}
+
 Write-Host '开发环境准备完成。'
 Write-Host "启动：$ProjectRoot\启动工作台.bat"

@@ -20,8 +20,18 @@ cd desktop && npm ci && cd ..
 Windows PowerShell：
 
 ```powershell
+.\packaging\build-installer.ps1
+# 指定版本并在构建后执行真实安装、启动、退出和卸载验证
+.\packaging\build-installer.ps1 2.3.9 -RunSmokeTest
+# 正式发布：要求配置 Windows 签名证书
+.\packaging\build-installer.ps1 2.3.9 -RequireSigning
+# 底层构建脚本（需要更细粒度控制时使用）
 .\packaging\build-windows.ps1
+# 可选：对生成的安装包执行安装、启动、退出和卸载验证
+.\packaging\test-windows-installer.ps1 -InstallerPath .\artifacts\MeimeiWorkbench-Setup-Windows-x64.exe
 ```
+
+Windows 打包使用仓库 `.nvmrc` 指定的 Node.js 22.x。打包脚本会自动重建前端和后端资源、安装桌面依赖、生成无 BOM 的版本文件，并在未配置证书时关闭签名证书自动发现。正式标签构建需要提供 `WINDOWS_CERTIFICATE_BASE64` 和 `WINDOWS_CERTIFICATE_PASSWORD`。
 
 macOS（在对应架构的 Mac 上执行）：
 

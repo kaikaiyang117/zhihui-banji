@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { ArrowDown, ArrowUp, CalendarDays, Download, History, Plus, Star, X } from 'lucide-vue-next'
-import { get, post } from '../api'
+import { get, post, scopedUrl } from '../api'
 
 const summary = ref({
   academic_year: '', academic_years: [], students: [], totals: {}, monthly: [], categories: [],
@@ -54,7 +54,7 @@ const leader = computed(() => summary.value.students?.[0])
 const chartSummary = computed(() => leader.value
   ? `${formatAcademicYear(academicYear.value)}积分最高的是${leader.value.name}，共 ${leader.value.total} 分。`
   : `${formatAcademicYear(academicYear.value)}暂无积分趋势数据。`)
-const exportUrl = computed(() => `/api/export/sheet/日常行为积分?academic_year=${encodeURIComponent(academicYear.value)}`)
+const exportUrl = computed(() => scopedUrl(`/api/export/sheet/日常行为积分?academic_year=${encodeURIComponent(academicYear.value)}`))
 
 function queryString() {
   const params = new URLSearchParams({ academic_year: academicYear.value })

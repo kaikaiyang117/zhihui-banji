@@ -188,8 +188,8 @@ export function listEvidence(options: {
   ).all(...params) as Array<Record<string, unknown>>;
   return rows.map((row) => ({
     ...row,
-    download_path: `/api/evidence/file/${row.id}`,
-    thumbnail_path: `/api/evidence/thumbnail/${row.id}`,
+    download_path: `/api/evidence/file/${row.id}?class_id=${classId}&term_id=${termId}`,
+    thumbnail_path: `/api/evidence/thumbnail/${row.id}?class_id=${classId}&term_id=${termId}`,
   }));
 }
 
@@ -202,8 +202,8 @@ export function getEvidence(evidenceId: number, options?: { conn?: Database }): 
   if (!row) throw new EvidenceError('凭证不存在');
   return {
     ...row,
-    download_path: `/api/evidence/file/${row.id}`,
-    thumbnail_path: `/api/evidence/thumbnail/${row.id}`,
+    download_path: `/api/evidence/file/${row.id}?class_id=${classId}&term_id=${termId}`,
+    thumbnail_path: `/api/evidence/thumbnail/${row.id}?class_id=${classId}&term_id=${termId}`,
   };
 }
 

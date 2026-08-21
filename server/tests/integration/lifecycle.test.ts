@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ENTRY = path.join(SERVER_ROOT, 'src', 'entry.ts');
-const TSX = path.join(SERVER_ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
+// 直接调用 tsx 的 ESM 入口，避免 Windows 把 .cmd shim 当成 JavaScript 交给 Node。
+const TSX = path.join(SERVER_ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const FIXTURE_STATIC = path.join(SERVER_ROOT, 'tests', 'fixtures', 'static');
 
 const tempDirs: string[] = [];
@@ -23,7 +24,14 @@ afterEach(async () => {
     }
   }
   children.length = 0;
-  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 100,
+    });
+  }
   tempDirs.length = 0;
 });
 
@@ -100,7 +108,7 @@ async function waitForUrlLine(child: ChildProcess, timeoutMs = 30000): Promise<s
 function spawnServer(env: Record<string, string>): ChildProcess {
   const child = spawn(process.execPath, [TSX, ENTRY, '--desktop-child'], {
     env: { ...process.env, PYTHONUNBUFFERED: '1', ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.push(child);
   return child;
@@ -158,7 +166,8 @@ describe('子进程生命周期', () => {
     expect(fs.existsSync(marker)).toBe(true);
 
     const exitPromise = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
-    child.kill('SIGTERM');
+    if (process.platform === 'win32') child.stdin?.write('shutdown\n');
+    else child.kill('SIGTERM');
     const code = await exitPromise;
     expect(code).toBe(0);
 

@@ -117,6 +117,27 @@ describe('班费', () => {
     expect(() => funds.reverseEntry(entryId, '冲正')).toThrow(/有效流水|撤销|冲正/);
   });
 
+  it('凭证通过 HTTP 返回文件内容并校验完整性', async () => {
+    const entry = funds.createEntry({ direction: '支出', amount: 50, description: '带凭证支出' });
+    const content = Buffer.from('fund receipt');
+    const saved = funds.saveAttachment(Number(entry.id), {
+      filename: '凭证.txt', contentType: 'text/plain', content,
+    });
+    expect(saved.download_path).toBe(`/api/fund/attachments/${saved.id}?class_id=1&term_id=1`);
+
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const response = await app.inject({ method: 'GET', url: String(saved.download_path) });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(content.toString());
+    expect(response.headers['content-disposition']).toContain('filename*=UTF-8');
+    await app.close();
+
+    const attachment = funds.attachmentFile(Number(saved.id));
+    fs.writeFileSync(attachment.path, Buffer.from('tampered'));
+    expect(() => funds.attachmentFile(Number(saved.id))).toThrow(/完整性/);
+  });
+
   it('结算后只能冲正', () => {
     funds.createEntry({ direction: '收入', amount: 200, description: '班费收入', occurredAt: '2026-03-10' });
     funds.createSettlement({ periodStart: '2026-03-01', periodEnd: '2026-03-31' });
@@ -180,16 +201,29 @@ describe('教育记录', () => {
     expect(task).toBeTruthy();
   });
 
-  it('活动附件保存与读取', () => {
+  it('活动附件通过 HTTP 返回文件内容并校验完整性', async () => {
     const activity = education.createActivity({
       occurredOn: '2026-04-15', name: '春游', summary: '安全出行',
     }) as Record<string, unknown>;
+    const content = Buffer.from('%PDF 内容');
     const saved = education.saveActivityAttachment(Number(activity.id), {
-      filename: '方案.pdf', mimeType: 'application/pdf', content: Buffer.from('%PDF 内容'),
+      filename: '方案.pdf', mimeType: 'application/pdf', content,
     });
     expect(saved.original_name).toBe('方案.pdf');
-    const filePath = education.activityAttachmentPath(Number(saved.id));
-    expect(fs.existsSync(filePath)).toBe(true);
+    const result = education.activityAttachmentFile(Number(saved.id));
+    expect(fs.existsSync(result.path)).toBe(true);
+    expect(saved.download_path).toBe(`/api/education/activities/attachments/${saved.id}?class_id=1&term_id=1`);
+
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    const response = await app.inject({ method: 'GET', url: String(saved.download_path) });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(content.toString());
+    expect(response.headers['content-disposition']).toContain('filename*=UTF-8');
+    await app.close();
+
+    fs.writeFileSync(result.path, Buffer.from('tampered'));
+    expect(() => education.activityAttachmentFile(Number(saved.id))).toThrow(/完整性/);
   });
 
   it('日志与关联', () => {
