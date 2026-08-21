@@ -59,3 +59,49 @@ onMounted(load)
     <WorkflowModal v-if="workflowTarget" source-type="focus" :source-id="workflowTarget.item.id" :initial-status="workflowTarget.initialStatus" :action-label="workflowTarget.actionLabel" :title="`${workflowTarget.item.student_name} · ${workflowTarget.item.topic}`" @close="workflowTarget = null" @success="workflowTarget = null; load()" />
   </div>
 </template>
+
+<style scoped>
+.focus-card-head {
+  align-items: baseline;
+  color: var(--ds-color-ink-secondary);
+  font: var(--ds-type-meta);
+}
+
+.focus-card-head > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.focus-topic {
+  color: var(--ds-color-primary);
+  font: var(--ds-type-label);
+}
+
+.focus-student {
+  color: var(--ds-color-ink);
+  font: var(--ds-type-title);
+}
+
+.focus-reason {
+  margin: 12px 0 10px;
+  color: var(--ds-color-ink-secondary);
+  font: var(--ds-type-body);
+}
+
+.focus-meta {
+  flex-wrap: wrap;
+  color: var(--ds-color-ink-muted);
+  font: var(--ds-type-meta);
+}
+
+.focus-card .record-actions {
+  margin-top: 14px;
+}
+
+.focus-card .record-actions .btn {
+  margin-top: 0;
+}
+</style>

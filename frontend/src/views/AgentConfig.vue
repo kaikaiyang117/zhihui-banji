@@ -200,7 +200,6 @@ onMounted(load)
             </select>
           </label>
         </div>
-        <div class="agent-security-note">Key 只保存到本机数据目录，不会通过接口返回，也不会写入 Git。</div>
         <div class="toolbar agent-config-actions">
           <button class="btn btn-primary" type="button" :disabled="saving" @click="save"><Save :size="14" /> {{ saving ? '保存中…' : '保存配置' }}</button>
           <button class="btn btn-outline" type="button" @click="goBack">返回配置列表</button>
@@ -216,7 +215,6 @@ onMounted(load)
 .agent-config-card { max-width:900px; }
 .agent-config-form { max-width:760px; }
 .agent-config-actions { margin-top:18px; }
-.agent-security-note { margin-top:14px; color:var(--text-secondary); font-size:12px; }
 .agent-key-status { color:var(--success); font-size:12px; font-weight:400; }
 .api-key-input-wrap { position:relative; display:block; }
 .api-key-input { padding-right:42px; }

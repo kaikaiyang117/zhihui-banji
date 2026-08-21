@@ -7,10 +7,11 @@ const activeView = ref('single')
 
 const periods = ref([])
 const entries = ref([])
+const timetableScope = ref({})
 const teachers = ref([])
 const changes = ref([])
 const daySchedule = ref(null)
-const selectedDate = ref(today())
+const selectedDate = ref('')
 const teacherFilter = ref('')
 const loading = ref(true)
 const saving = ref(false)
@@ -27,12 +28,19 @@ const fileInput = ref(null)
 
 const entryForm = reactive({ weekday: 1, period_no: 1, subject: '', teacher_name: '', room: '', session_type: '普通课', week_pattern: '全周', week_start: 1, week_end: 99, note: '' })
 const periodForm = reactive({ period_no: 1, label: '', start_time: '', end_time: '', session_type: '普通课' })
-const changeForm = reactive({ change_date: today(), period_no: 1, action: '调课', subject: '', teacher_name: '', room: '', session_type: '普通课', note: '' })
+const changeForm = reactive({ change_date: '', period_no: 1, action: '调课', subject: '', teacher_name: '', room: '', session_type: '普通课', note: '' })
 
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const sessionTypes = ['普通课', '早自习', '晚自习', '班会', '自习', '社团', '考试', '活动']
 const weekPatterns = ['全周', '单周', '双周']
 const changeActions = ['调课', '代课', '停课', '考试', '活动']
+const subjectToneMap = {
+  语文: 'subject-tone-rose', 数学: 'subject-tone-blue', 英语: 'subject-tone-mint', 政治: 'subject-tone-violet',
+  历史: 'subject-tone-amber', 地理: 'subject-tone-teal', '地/生': 'subject-tone-aqua', 体育: 'subject-tone-orange',
+  信息技术: 'subject-tone-cyan', 通用: 'subject-tone-slate', 班会: 'subject-tone-pink', 物理: 'subject-tone-indigo',
+  化学: 'subject-tone-green', 生物: 'subject-tone-lime',
+}
+const fallbackSubjectTones = ['subject-tone-indigo', 'subject-tone-blue', 'subject-tone-mint', 'subject-tone-violet', 'subject-tone-teal']
 
 const myClasses = ref([])
 const allClasses = ref([])
@@ -45,7 +53,6 @@ const addingClass = ref(false)
 const removingClassId = ref(null)
 const showAddClassDialog = ref(false)
 
-function today() { return new Date().toISOString().slice(0, 10) }
 function resetEntryForm() { Object.assign(entryForm, { weekday: 1, period_no: periods.value[0]?.period_no || 1, subject: '', teacher_name: '', room: '', session_type: '普通课', week_pattern: '全周', week_start: 1, week_end: 99, note: '' }); editingEntryId.value = null }
 function resetPeriodForm() { Object.assign(periodForm, { period_no: periods.value.length + 1, label: '', start_time: '', end_time: '', session_type: '普通课' }) }
 function resetChangeForm() { Object.assign(changeForm, { change_date: selectedDate.value, period_no: periods.value[0]?.period_no || 1, action: '调课', subject: '', teacher_name: '', room: '', session_type: '普通课', note: '' }) }
@@ -54,6 +61,11 @@ const filteredEntries = computed(() => teacherFilter.value ? entries.value.filte
 const previewRows = computed(() => importPreview.value?.rows || [])
 const commitRows = computed(() => previewRows.value.filter(item => item.valid))
 const scheduleForDate = computed(() => daySchedule.value?.entries || [])
+const timetableRangeLabel = computed(() => {
+  const className = timetableScope.value.class_name || '当前班级'
+  const weekLabel = daySchedule.value?.week_no ? `第${daySchedule.value.week_no}周` : '当前周'
+  return `${className} · ${weekLabel}课程`
+})
 
 const myClassIds = computed(() => new Set(myClasses.value.map(c => Number(c.class_id))))
 const availableClasses = computed(() => allClasses.value.filter(c => !myClassIds.value.has(Number(c.id))))
@@ -83,6 +95,13 @@ function cellSecondary(item) {
   if (item.room) return item.room
   if (item.session_type && item.session_type !== '普通课') return item.session_type
   return ''
+}
+function subjectTone(subject) {
+  const name = String(subject || '').trim()
+  if (subjectToneMap[name]) return subjectToneMap[name]
+  let hash = 0
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)) | 0
+  return fallbackSubjectTones[Math.abs(hash) % fallbackSubjectTones.length]
 }
 function entryAccessibleLabel(item) {
   return [
@@ -117,11 +136,16 @@ function openChange() { resetChangeForm(); showChangeEditor.value = true }
 async function load() {
   loading.value = true; error.value = ''
   try {
+    if (!selectedDate.value) {
+      const runtime = await get('/api/system/runtime')
+      selectedDate.value = runtime.business_date || ''
+      changeForm.change_date = selectedDate.value
+    }
     const query = teacherFilter.value ? `?teacher_name=${encodeURIComponent(teacherFilter.value)}` : ''
     const [data, changesData, dayData] = await Promise.all([
       get(`/api/timetable${query}`), get('/api/timetable/changes'), get(`/api/timetable/day?date=${selectedDate.value}`),
     ])
-    periods.value = data.periods || []; entries.value = data.entries || []; teachers.value = data.teachers || []
+    timetableScope.value = data.scope || {}; periods.value = data.periods || []; entries.value = data.entries || []; teachers.value = data.teachers || []
     changes.value = changesData.changes || []; daySchedule.value = dayData
   } catch (e) { error.value = e.message } finally { loading.value = false }
 }
@@ -241,7 +265,7 @@ onMounted(load)
       </section>
 
       <section v-if="!loading" class="card timetable-week-card">
-        <div class="section-heading"><div><h2>固定周课表</h2><p>默认显示科目和教室；点击课程查看教师、单双周和备注</p></div><span class="hint">{{ entries.length }} 项课程</span></div>
+        <div class="section-heading timetable-section-heading"><div><h2>{{ timetableRangeLabel }}</h2></div></div>
         <div v-if="!periods.length" class="empty-state">还没有配置节次。先点击"节次与作息"，再录入课程或导入Excel课表。</div>
         <div v-else class="timetable-grid-scroll" aria-label="固定周课表，可横向滚动查看">
           <div class="timetable-grid">
@@ -249,8 +273,8 @@ onMounted(load)
           <template v-for="period in periods" :key="period.id">
             <div class="timetable-period-cell"><strong>{{ period.label || `${period.period_no}节` }}</strong><small>{{ period.start_time }}<template v-if="period.end_time">–{{ period.end_time }}</template></small><em v-if="period.session_type && period.session_type !== '普通课'">{{ period.session_type }}</em></div>
             <button v-for="weekday in 7" :key="`${period.id}-${weekday}`" class="timetable-cell" :aria-label="cellAriaLabel(weekday, period.period_no)" @click="openEntry(cellEntries(weekday, period.period_no)[0], weekday, period.period_no)">
-              <template v-if="cellEntries(weekday, period.period_no).length"><span v-for="item in cellEntries(weekday, period.period_no)" :key="item.id" class="timetable-entry" :title="cellLabel(item)"><strong>{{ item.subject }}</strong><small v-if="cellSecondary(item)">{{ cellSecondary(item) }}</small><em v-if="item.week_pattern !== '全周'">{{ item.week_pattern }}</em></span></template>
-              <span v-else class="timetable-empty">添加</span>
+              <template v-if="cellEntries(weekday, period.period_no).length"><span v-for="item in cellEntries(weekday, period.period_no)" :key="item.id" class="timetable-entry" :class="subjectTone(item.subject)" :title="cellLabel(item)"><strong>{{ item.subject }}</strong><small v-if="cellSecondary(item)">{{ cellSecondary(item) }}</small><em v-if="item.week_pattern !== '全周'">{{ item.week_pattern }}</em></span></template>
+              <span v-else class="timetable-empty" aria-hidden="true"></span>
             </button>
           </template>
           </div>
@@ -376,20 +400,38 @@ onMounted(load)
 .timetable-action-card > span { display: grid; flex: 1; gap: 3px; }
 .timetable-action-card small { color: var(--text-secondary); font-size: 11px; }
 .timetable-week-card { overflow: hidden; }
+.timetable-section-heading { align-items: center; margin-bottom: 16px; }
+.timetable-section-heading h2 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
 .timetable-grid-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 2px; }
-.timetable-grid { display: grid; grid-template-columns: 100px repeat(7, minmax(96px, 1fr)); min-width: 772px; border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
-.timetable-grid-head { padding: 11px 8px; background: var(--surface-subtle, #f8f8fa); border-right: 1px solid var(--border-light); color: var(--text-secondary); font-size: 12px; font-weight: 600; text-align: center; }
-.timetable-period-head { text-align: left; }
-.timetable-period-cell { display: grid; align-content: center; gap: 3px; min-height: 76px; padding: 8px; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface-subtle, #f8f8fa); }
-.timetable-period-cell strong { font-size: 12px; }
-.timetable-period-cell small,.timetable-period-cell em { color: var(--text-tertiary); font-size: 10px; font-style: normal; }
-.timetable-cell { display: grid; align-content: start; gap: 4px; min-height: 76px; padding: 6px; border: 0; border-top: 1px solid var(--border-light); border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.timetable-grid { display: grid; grid-template-columns: 104px repeat(7, minmax(96px, 1fr)); min-width: 776px; border: 1px solid var(--border-light); border-radius: 12px; overflow: hidden; background: var(--border-light); gap: 1px; }
+.timetable-grid-head { padding: 12px 8px; background: var(--surface-subtle, #f8f8fa); color: var(--text-secondary); font-size: 12px; font-weight: 650; letter-spacing: 0.02em; text-align: center; }
+.timetable-period-head { color: var(--text-tertiary); }
+.timetable-period-cell { display: grid; align-content: center; justify-items: center; gap: 4px; min-height: 84px; padding: 8px 6px; background: var(--surface-subtle, #f8f8fa); text-align: center; }
+.timetable-period-cell strong { color: var(--text); font-size: 12px; }
+.timetable-period-cell small,.timetable-period-cell em { color: var(--text-tertiary); font-size: 10px; font-style: normal; white-space: nowrap; }
+.timetable-period-cell em { color: var(--primary); }
+.timetable-cell { display: grid; place-items: center; min-height: 84px; padding: 8px; border: 0; background: var(--surface); color: var(--text); text-align: center; cursor: pointer; }
 .timetable-cell:hover { background: var(--primary-bg); }
-.timetable-entry { display: grid; gap: 2px; min-width: 0; padding: 6px 7px; border-radius: 8px; background: var(--primary-bg); }
-.timetable-entry strong { overflow: hidden; font-size: 13px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.timetable-cell:focus-visible { position: relative; z-index: 1; outline: 3px solid var(--primary); outline-offset: -3px; }
+.timetable-entry { display: grid; justify-items: center; align-content: center; gap: 3px; width: 100%; min-width: 0; min-height: 38px; box-sizing: border-box; padding: 6px 5px; border: 1px solid var(--entry-border, rgba(86, 99, 182, 0.12)); border-radius: 9px; background: var(--entry-bg, var(--primary-bg)); text-align: center; }
+.timetable-entry strong { overflow: hidden; max-width: 100%; color: var(--entry-ink, var(--text)); font-size: 13px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .timetable-entry small { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.timetable-entry em { width: max-content; max-width: 100%; padding: 1px 5px; border-radius: 5px; background: rgba(86,99,182,.1); color: var(--primary); font-size: 10px; font-style: normal; font-weight: 500; }
-.timetable-empty { color: var(--text-tertiary); font-size: 11px; }
+.timetable-entry em { width: max-content; max-width: 100%; padding: 1px 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.58); color: var(--entry-ink, var(--primary)); font-size: 10px; font-style: normal; font-weight: 600; }
+.subject-tone-rose { --entry-bg: #fff0ee; --entry-border: #f4c7be; --entry-ink: #994134; }
+.subject-tone-blue { --entry-bg: #edf2ff; --entry-border: #cbd8ff; --entry-ink: #324f9c; }
+.subject-tone-mint { --entry-bg: #eaf8f2; --entry-border: #c2e5d2; --entry-ink: #216044; }
+.subject-tone-violet { --entry-bg: #f2edff; --entry-border: #d9caff; --entry-ink: #6547a8; }
+.subject-tone-amber { --entry-bg: #fff7e5; --entry-border: #f2d79d; --entry-ink: #83580b; }
+.subject-tone-teal { --entry-bg: #e8f7f6; --entry-border: #b9e1dd; --entry-ink: #17615f; }
+.subject-tone-aqua { --entry-bg: #eaf7ff; --entry-border: #c1e4f7; --entry-ink: #1d5f86; }
+.subject-tone-orange { --entry-bg: #fff0e6; --entry-border: #f6cbb1; --entry-ink: #9a4d1f; }
+.subject-tone-cyan { --entry-bg: #eaf8fb; --entry-border: #bde5ea; --entry-ink: #1d6470; }
+.subject-tone-slate { --entry-bg: #f1f3f6; --entry-border: #d6dbe4; --entry-ink: #475467; }
+.subject-tone-pink { --entry-bg: #fff0f7; --entry-border: #f1c6da; --entry-ink: #8d3c65; }
+.subject-tone-indigo { --entry-bg: #eef0fb; --entry-border: #ccd1f1; --entry-ink: #4b58a8; }
+.subject-tone-green { --entry-bg: #eef8e9; --entry-border: #c8e1bb; --entry-ink: #3b6730; }
+.subject-tone-lime { --entry-bg: #f4f8e8; --entry-border: #d9e6b3; --entry-ink: #5e711f; }
+.timetable-empty { display: block; width: 100%; min-height: 32px; }
 .timetable-lower-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 16px; margin-top: 16px; }
 .day-meta { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
 .day-course-row { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-light); }

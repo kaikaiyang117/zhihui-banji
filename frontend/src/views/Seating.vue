@@ -173,7 +173,6 @@ onMounted(load)
     <div class="page-title-bar">
       <div>
         <div class="page-title">班级座位表</div>
-        <div class="page-subtitle">座位从上到下、从左到右编号，学生面向上方讲台</div>
       </div>
       <a class="btn btn-outline btn-export" href="/api/export/sheet/座位表"><Download :size="14" :stroke-width="2" /> 导出Excel</a>
     </div>
@@ -230,7 +229,7 @@ onMounted(load)
             <div class="seating-back"><span>后门</span><span>后排</span><span>后门</span></div>
           </div>
         </div>
-        <div class="hint" style="margin-top:10px">{{ saving ? '正在保存…' : editing ? '点击座位修改姓名；拖动学生卡片可直接换座，回车或移开焦点即可保存' : '学生面向上方讲台，编辑模式支持拖拽换座' }}</div>
+        <div v-if="saving || editing" class="hint" style="margin-top:10px">{{ saving ? '正在保存…' : '点击座位修改姓名；拖动学生卡片可直接换座，回车或移开焦点即可保存' }}</div>
       </div>
     </div>
   </div>

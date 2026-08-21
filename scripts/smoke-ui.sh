@@ -59,7 +59,11 @@ SNAPSHOT="$("${PWCLI[@]}" snapshot 2>&1)"
 printf '%s\n' "$SNAPSHOT"
 grep -q '手机访问' <<< "$SNAPSHOT"
 grep -q '更新' <<< "$SNAPSHOT"
-grep -q '开发日期 2026-04-15' <<< "$SNAPSHOT"
+grep -q '2026-04-15 · 从最需要处理的事情开始' <<< "$SNAPSHOT"
+if grep -q '开发日期' <<< "$SNAPSHOT"; then
+  echo '页面不应显示开发日期提示。' >&2
+  exit 1
+fi
 grep -q '高二政治月考' <<< "$SNAPSHOT"
 grep -q '语文早读' <<< "$SNAPSHOT"
 "${PWCLI[@]}" close >/dev/null 2>&1 || true

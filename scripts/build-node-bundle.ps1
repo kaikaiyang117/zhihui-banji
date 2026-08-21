@@ -5,11 +5,25 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
+$NodeMajor = [int]((& node -p "process.versions.node.split('.')[0]"))
+if ($NodeMajor -ne 22) {
+  throw "打包必须使用 Node.js 22.x，当前主版本为 $NodeMajor。"
+}
+
 $Version = if ($env:APP_VERSION) { $env:APP_VERSION -replace '^v', '' } else { '0.0.0-dev' }
 $ElectronVersion = $env:ELECTRON_VERSION
 if (-not $ElectronVersion -and (Test-Path 'desktop\package.json')) {
   $DesktopPkg = Get-Content 'desktop\package.json' -Raw | ConvertFrom-Json
   $ElectronVersion = $DesktopPkg.devDependencies.electron
+}
+$ElectronRebuildBin = Join-Path $ProjectRoot 'desktop\node_modules\.bin\electron-rebuild.cmd'
+$ElectronBin = Join-Path $ProjectRoot 'desktop\node_modules\.bin\electron.cmd'
+if ($ElectronVersion -and (-not (Test-Path $ElectronRebuildBin) -or -not (Test-Path $ElectronBin))) {
+  Write-Host '==> 安装锁定的 Electron 打包工具'
+  Set-Location (Join-Path $ProjectRoot 'desktop')
+  npm ci
+  if ($LASTEXITCODE -ne 0) { throw "桌面依赖安装失败：$LASTEXITCODE" }
+  Set-Location $ProjectRoot
 }
 
 Write-Host '==> 构建前端产物'
@@ -44,10 +58,16 @@ Set-Content -Path 'build\server-bundle\static\app-version.json' -Value ("{`"vers
 
 if ($ElectronVersion) {
   Write-Host "==> 重建 better-sqlite3 为 Electron ${ElectronVersion} ABI"
-  Set-Location 'build\server-bundle'
-  npx @electron/rebuild -f -w better-sqlite3 -v "$ElectronVersion" -t prod
+  & $ElectronRebuildBin -f -w better-sqlite3 -v "$ElectronVersion" -t prod --module-dir (Join-Path $ProjectRoot 'build\server-bundle')
   if ($LASTEXITCODE -ne 0) { throw "Electron ABI 重建失败：$LASTEXITCODE" }
-  Set-Location $ProjectRoot
+  Write-Host '==> 校验 Electron 原生模块'
+  $PreviousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
+  $env:ELECTRON_RUN_AS_NODE = '1'
+  & $ElectronBin -e "const Database=require('./build/server-bundle/node_modules/better-sqlite3'); const db=new Database(':memory:'); db.close();"
+  $ProbeExitCode = $LASTEXITCODE
+  if ($null -eq $PreviousElectronRunAsNode) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
+  else { $env:ELECTRON_RUN_AS_NODE = $PreviousElectronRunAsNode }
+  if ($ProbeExitCode -ne 0) { throw "Electron 原生模块校验失败：$ProbeExitCode" }
 }
 
 Write-Host "server-bundle 完成：$ProjectRoot\build\server-bundle"

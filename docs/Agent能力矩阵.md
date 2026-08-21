@@ -83,8 +83,8 @@
 |---|---|---|---|
 | `class_student_count` | 无 | 无 | 使用当前班级/学期上下文 |
 | `students_search` | 无 | `keyword`, `limit` | 只返回基础学生信息；学生标识统一返回 `student_id`，兼容旧字段 `id` |
-| `students_query` | 无 | `fields`, `keyword`, `gender`, `boarding_status`, `class_role`, `limit` | `fields` 最多 10 个；只返回字段白名单 |
-| `students_aggregate` | `group_by` | `keyword`, `gender`, `boarding_status`, `class_role`, `include_empty`, `include_students`, `limit` | 支持 `guardian_occupation` 等分组；服务端完成统计 |
+| `students_query` | 无 | `fields`, `keyword`, `gender`, `boarding_status`, `class_role`, `limit` | `fields` 最多 10 个；只返回字段白名单，监护人字段不含电话 |
+| `students_aggregate` | `group_by` | `keyword`, `gender`, `boarding_status`, `class_role`, `include_empty`, `include_students`, `limit` | 支持监护人关系/职业等分组；服务端完成统计 |
 | `student_get_profile` | `student_id` | 无 | 网页可用；微信默认拒绝敏感档案 |
 | `student_get_timeline` | `student_id` | `limit` | 返回事件、沟通和待办摘要 |
 | `student_term_comment_context` | `student_ids` | `limit` | 生成评语前读取安全的学期事实摘要；最多 30 人，不含家庭电话、住址和沟通原文 |
@@ -114,6 +114,19 @@
 |---|---|---|---:|---:|---:|---|---|
 | 修改学生资料 | 待新增 | 待设计 | 是 | 待确认 | 否 | 敏感写入，必须二次确认 | 未接入 |
 | 删除或批量修改数据 | 待新增 | 待设计 | 是 | 否/待评估 | 否 | 高风险写入，默认禁止 | 未接入 |
+
+## 后续评测与预留方向
+
+当前 Harness 已覆盖意图归一化、计划校验、批量查询纠错、权限过滤、确认写入验证和审计。后续工作按以下顺序推进：
+
+- [ ] 记录完整 trace/span，支持按任务回放首个错误步骤。
+- [ ] 将线上脱敏 bad case 自动沉淀为固定评测样例。
+- [ ] 图片、语音、文件等多模态消息。
+- [ ] 多微信账号和多账号会话隔离。
+- [ ] 群聊策略和群成员权限。
+- [ ] 本地 MCP Server。
+
+新增工具或模型供应商时，先扩展固定回归样例和本矩阵；写入工具继续保持单条、低风险、确认后执行，删除、批量和敏感字段写入不开放。多模态、多账号、群聊和 MCP 不作为当前工作包的隐性范围。
 
 ## 新增能力模板
 

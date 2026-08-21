@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "decision": "accept_with_minor_warnings",
+  "hard_gates_passed": true,
+  "warnings": [
+    {
+      "directions": ["247.5", "292.5"],
+      "issue": "The vertical component is subtle at actual display size.",
+      "resolution": "Accepted because leftward intent is clear, all four cardinal directions pass, and the complete clockwise sequence remains readable."
+    },
+    {
+      "transitions": ["157.5→180", "337.5→000"],
+      "issue": "Continuity metrics reported local outliers.",
+      "resolution": "Accepted because independent visual QA found no visible identity, baseline, or silhouette break."
+    }
+  ],
+  "repair_required": false
+}

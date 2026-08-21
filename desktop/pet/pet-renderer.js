@@ -10,10 +10,28 @@
     'failed', 'waiting', 'review', 'success', 'sleep', 'reminder',
   ]);
 
+  const V2_STATES = {
+    idle: { row: 0, cols: 6, durations: [280, 110, 110, 140, 140, 320] },
+    'running-right': { row: 1, cols: 8, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+    'running-left': { row: 2, cols: 8, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+    waving: { row: 3, cols: 4, durations: [140, 140, 140, 280] },
+    jumping: { row: 4, cols: 5, durations: [140, 140, 140, 140, 280] },
+    failed: { row: 5, cols: 8, durations: [140, 140, 140, 140, 140, 140, 140, 240] },
+    waiting: { row: 6, cols: 6, durations: [150, 150, 150, 150, 150, 260] },
+    running: { row: 7, cols: 6, durations: [120, 120, 120, 120, 120, 220] },
+    review: { row: 8, cols: 6, durations: [150, 150, 150, 150, 150, 280] },
+  };
+
+  const STATE_ALIASES = {
+    success: 'waving',
+    sleep: 'idle',
+    reminder: 'waiting',
+  };
+
   let currentState = 'idle';
   let frame = 0;
+  let lastFrameAt = 0;
   let animId = null;
-  let reducedMotion = false;
   let osReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let petWidth = 96;
   let petHeight = 104;
@@ -23,10 +41,16 @@
   let atlasLoaded = false;
   let atlasImage = null;
   let atlasManifest = null;
+  let lookDirection = null;
+  let dragging = false;
+  let dragState = null;
+  let dragLastScreenX = 0;
 
   window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
     osReducedMotion = e.matches;
-    reducedMotion = osReducedMotion || (petSettings_reducedMotion || false);
+    frame = 0;
+    lastFrameAt = 0;
+    lookDirection = null;
   });
 
   let petSettings_reducedMotion = false;
@@ -43,32 +67,36 @@
   };
 
   function loadSpriteAtlas() {
-    const basePath = window.petAPI ? window.petAPI.getAtlasBasePath : null;
-    if (!basePath) return Promise.resolve(false);
-    return fetch('pet.json')
-      .then(r => r.json())
+    if (!window.petAPI || !window.petAPI.getManifest) return Promise.resolve(false);
+    return window.petAPI.getManifest()
       .then(manifest => {
+        if (!manifest || manifest.spriteVersionNumber !== 2) return false;
         atlasManifest = manifest;
         return new Promise((resolve) => {
           const img = new Image();
-          img.onload = () => { atlasImage = img; atlasLoaded = true; resolve(true); };
+          img.onload = () => {
+            atlasImage = img;
+            atlasLoaded = img.naturalWidth === 1536 && img.naturalHeight === 2288;
+            resolve(atlasLoaded);
+          };
           img.onerror = () => { atlasLoaded = false; resolve(false); };
-          img.src = manifest.atlas || 'pet-atlas.png';
+          img.src = manifest.spritesheetPath;
         });
       })
       .catch(() => { atlasLoaded = false; return false; });
   }
 
-  function drawAtlasFrame(state, frameNum) {
+  function atlasStateDefinition(state) {
     if (!atlasLoaded || !atlasManifest || !atlasImage) return false;
-    const stateDef = atlasManifest.states && atlasManifest.states[state];
-    if (!stateDef) return false;
-    const row = stateDef.row || 0;
-    const cols = stateDef.cols || 1;
-    const duration = stateDef.duration || 1;
-    const col = frameNum % cols;
-    const fw = atlasManifest.frameWidth || petWidth;
-    const fh = atlasManifest.frameHeight || petHeight;
+    const mappedState = STATE_ALIASES[state] || state;
+    if (atlasManifest.spriteVersionNumber === 2) return V2_STATES[mappedState] || false;
+    return atlasManifest.states && atlasManifest.states[mappedState];
+  }
+
+  function drawAtlasCell(row, col) {
+    if (!atlasLoaded || !atlasImage) return false;
+    const fw = 192;
+    const fh = 208;
     const sx = col * fw;
     const sy = row * fh;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -76,17 +104,28 @@
     return true;
   }
 
+  function drawAtlasFrame(state, frameNum) {
+    const stateDef = atlasStateDefinition(state);
+    if (!stateDef) return false;
+    return drawAtlasCell(stateDef.row || 0, frameNum % (stateDef.cols || 1));
+  }
+
+  function drawLookFrame(directionIndex) {
+    if (!atlasLoaded || atlasManifest.spriteVersionNumber !== 2) return false;
+    const row = directionIndex < 8 ? 9 : 10;
+    return drawAtlasCell(row, directionIndex % 8);
+  }
+
   function applySettings(settings) {
     if (!settings) return;
     petSettings_reducedMotion = !!settings.reducedMotion;
-    reducedMotion = osReducedMotion || petSettings_reducedMotion;
     const sizeMap = { small: 72, medium: 96, large: 128 };
     petWidth = sizeMap[settings.size] || 96;
     petHeight = Math.round(petWidth * 1.08);
     canvas.width = petWidth;
     canvas.height = petHeight;
-    if (animId) cancelAnimationFrame(animId);
-    tick();
+    bubble.style.bottom = `${petHeight + 8}px`;
+    ctx.imageSmoothingEnabled = true;
   }
 
   function setState(state) {
@@ -94,6 +133,8 @@
     if (currentState === state) return;
     currentState = state;
     frame = 0;
+    lastFrameAt = 0;
+    lookDirection = null;
   }
 
   function toggleBubble() {
@@ -111,6 +152,14 @@
     }
   }
 
+  function showClickReaction() {
+    setState('waving');
+    window.clearTimeout(clickTimer);
+    clickTimer = window.setTimeout(() => {
+      if (currentState === 'waving') setState('idle');
+    }, 1200);
+  }
+
   function setBubbleText(text) {
     if (!text || typeof text !== 'string') {
       bubble.classList.remove('visible');
@@ -125,15 +174,30 @@
     }, 4000);
   }
 
-  function tick() {
+  function tick(timestamp = performance.now()) {
     draw();
     const effectiveReducedMotion = osReducedMotion || petSettings_reducedMotion;
-    if (!effectiveReducedMotion) frame++;
+    if (effectiveReducedMotion) {
+      frame = 0;
+    } else if (!atlasLoaded) {
+      frame++;
+    } else {
+      const stateDef = atlasStateDefinition(dragState || currentState);
+      const durations = stateDef && stateDef.durations;
+      const duration = durations ? durations[frame % durations.length] : 120;
+      if (!lastFrameAt) lastFrameAt = timestamp;
+      if (timestamp - lastFrameAt >= duration) {
+        frame = (frame + 1) % ((stateDef && stateDef.cols) || 1);
+        lastFrameAt = timestamp;
+      }
+    }
     animId = requestAnimationFrame(tick);
   }
 
   function draw() {
-    if (atlasLoaded && drawAtlasFrame(currentState, frame)) return;
+    if (lookDirection !== null && currentState === 'idle' && !dragState &&
+        !osReducedMotion && !petSettings_reducedMotion && drawLookFrame(lookDirection)) return;
+    if (atlasLoaded && drawAtlasFrame(dragState || currentState, frame)) return;
     drawProcedural();
   }
 
@@ -340,6 +404,22 @@
     }
   }
 
+  function updateLookDirection(x, y, rect) {
+    if (!atlasLoaded || atlasManifest.spriteVersionNumber !== 2 || currentState !== 'idle' ||
+        osReducedMotion || petSettings_reducedMotion || dragging) {
+      lookDirection = null;
+      return;
+    }
+    const dx = x - rect.width / 2;
+    const dy = y - rect.height / 2;
+    if (Math.hypot(dx, dy) < 12) {
+      lookDirection = null;
+      return;
+    }
+    const degrees = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+    lookDirection = Math.round(degrees / 22.5) % 16;
+  }
+
   container.addEventListener('click', (e) => {
     if (pendingSingleClick) {
       clearTimeout(clickTimer);
@@ -350,6 +430,7 @@
       clickTimer = setTimeout(() => {
         if (pendingSingleClick) {
           pendingSingleClick = false;
+          showClickReaction();
           toggleBubble();
         }
       }, 300);
@@ -366,10 +447,19 @@
   });
 
   container.addEventListener('mousedown', (e) => {
-    if (e.button === 0 && window.petAPI) window.petAPI.notifyDragStart();
+    if (e.button !== 0) return;
+    dragging = true;
+    dragState = null;
+    dragLastScreenX = e.screenX;
+    lookDirection = null;
+    if (window.petAPI) window.petAPI.notifyDragStart();
   });
 
   container.addEventListener('mouseup', () => {
+    dragging = false;
+    dragState = null;
+    frame = 0;
+    lastFrameAt = 0;
     if (window.petAPI) window.petAPI.notifyDragEnd();
   });
 
@@ -378,7 +468,27 @@
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const onPet = x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
+    if (dragging) {
+      const deltaX = e.screenX - dragLastScreenX;
+      if (Math.abs(deltaX) >= 1) {
+        const nextDragState = deltaX > 0 ? 'running-right' : 'running-left';
+        if (dragState !== nextDragState) {
+          dragState = nextDragState;
+          frame = 0;
+          lastFrameAt = 0;
+        }
+        dragLastScreenX = e.screenX;
+      }
+    } else if (onPet) {
+      updateLookDirection(x, y, rect);
+    } else {
+      lookDirection = null;
+    }
     if (window.petAPI) window.petAPI.notifyMouseMove(onPet);
+  });
+
+  document.addEventListener('mouseleave', () => {
+    if (!dragging) lookDirection = null;
   });
 
   document.addEventListener('visibilitychange', () => {
@@ -386,7 +496,7 @@
       if (animId) cancelAnimationFrame(animId);
       animId = null;
     } else {
-      if (!animId) tick();
+      if (!animId) tick(performance.now());
     }
   });
 
@@ -395,13 +505,20 @@
     window.petAPI.onBubbleText((text) => setBubbleText(text));
     window.petAPI.onReducedMotionChange((reduced) => {
       petSettings_reducedMotion = !!reduced;
-      reducedMotion = osReducedMotion || petSettings_reducedMotion;
+      frame = 0;
+      lastFrameAt = 0;
+      lookDirection = null;
     });
     window.petAPI.getSettings().then((settings) => applySettings(settings));
-    loadSpriteAtlas();
+    loadSpriteAtlas().then(() => {
+      frame = 0;
+      lastFrameAt = 0;
+    });
   }
 
   canvas.width = petWidth;
   canvas.height = petHeight;
-  tick();
+  bubble.style.bottom = `${petHeight + 8}px`;
+  ctx.imageSmoothingEnabled = true;
+  tick(performance.now());
 })();

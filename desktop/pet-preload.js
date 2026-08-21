@@ -11,11 +11,11 @@ contextBridge.exposeInMainWorld('petAPI', {
   onReducedMotionChange: (callback) => {
     ipcRenderer.on('pet:reduced-motion', (_event, reduced) => callback(reduced));
   },
-  notifyClick: () => ipcRenderer.send('pet:click'),
   notifyDoubleClick: () => ipcRenderer.send('pet:double-click'),
   notifyRightClick: (x, y) => ipcRenderer.send('pet:right-click', x, y),
   notifyDragStart: () => ipcRenderer.send('pet:drag-start'),
   notifyDragEnd: () => ipcRenderer.send('pet:drag-end'),
   notifyMouseMove: (onPet) => ipcRenderer.send('pet:mouse-move', onPet),
+  getManifest: () => ipcRenderer.invoke('pet:get-manifest'),
   getSettings: () => ipcRenderer.invoke('pet:get-settings'),
 });

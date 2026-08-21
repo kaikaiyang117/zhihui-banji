@@ -45,7 +45,7 @@ afterEach(() => {
 
 describe('课程表服务', () => {
   it('迁移到 v29，支持固定周课表和按日解析', () => {
-    expect(schemaVersion(db.connInstance)).toBe(33);
+    expect(schemaVersion(db.connInstance)).toBe(34);
     createPeriod({ periodNo: 1, label: '第1节', startTime: '08:00', endTime: '08:45' });
     createPeriod({ periodNo: 2, label: '第2节', startTime: '08:55', endTime: '09:40' });
     createEntry({ weekday: 3, periodNo: 1, subject: '数学', teacherName: '王老师', room: '高一1班' });
@@ -90,5 +90,21 @@ describe('课程表服务', () => {
     expect(template.statusCode).toBe(200);
     expect(template.headers['content-type']).toContain('spreadsheetml');
     await app.close();
+  });
+
+  it('未传日期时使用全局业务日期', async () => {
+    const previous = process.env.WORKBENCH_BUSINESS_DATE;
+    process.env.WORKBENCH_BUSINESS_DATE = '2026-04-15';
+    const app = buildApp({ config: testConfig() });
+    await app.ready();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/timetable/day' });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body).date).toBe('2026-04-15');
+    } finally {
+      await app.close();
+      if (previous === undefined) delete process.env.WORKBENCH_BUSINESS_DATE;
+      else process.env.WORKBENCH_BUSINESS_DATE = previous;
+    }
   });
 });

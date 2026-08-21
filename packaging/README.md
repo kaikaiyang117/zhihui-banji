@@ -9,9 +9,9 @@
 
 ## 构建
 
-`scripts/build-node-bundle.sh`（macOS/Linux）或 `scripts/build-node-bundle.ps1`（Windows）会依次：构建前端 → 编译 Node 后端 → 组装 `build/server-bundle/`（dist + static + app-version.json + 生产依赖）→ 将 better-sqlite3 重建为打包 Electron 的 ABI。
+`scripts/build-node-bundle.sh`（macOS/Linux）或 `scripts/build-node-bundle.ps1`（Windows）会依次：使用 `.nvmrc` 的 Node 22 构建前端和 Node 后端 → 安装锁定的 Electron 打包工具 → 组装 `build/server-bundle/`（dist + static + app-version.json + 生产依赖）→ 使用本地锁定的 `@electron/rebuild` 将 better-sqlite3 重建为打包 Electron 的 ABI，并立即用 Electron 实际加载校验。
 
-安装打包工具：
+如需单独运行 `electron-builder`，先安装桌面打包工具；标准打包脚本会在缺少这些工具时自动执行同样的安装：
 
 ```bash
 cd desktop && npm ci && cd ..

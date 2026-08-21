@@ -85,6 +85,7 @@ export interface StudentFields {
   家庭住址?: string;
   监护人姓名?: string;
   监护人电话?: string;
+  监护人关系?: string;
   监护人职业?: string;
   是否住校?: string;
   特长?: string;
@@ -93,6 +94,7 @@ export interface StudentFields {
   监护人2姓名?: string;
   监护人2电话?: string;
   监护人2关系?: string;
+  监护人2职业?: string;
 }
 
 function columnsSql(prefix = 's.'): string {

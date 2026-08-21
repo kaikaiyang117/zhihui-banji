@@ -30,7 +30,7 @@ const studentFields = [
   { name: '学号', label: '学号', ph: '如 2201' },
   { name: '姓名', label: '姓名' },
   { name: '性别', label: '性别', options: ['男', '女'] },
-  { name: '出生年月', label: '出生年月', type: 'month' },
+  { name: '出生年月', label: '出生日期', type: 'date' },
   { name: '民族', label: '民族', options: [
     '汉族','蒙古族','回族','藏族','维吾尔族','苗族','彝族','壮族','布依族','朝鲜族',
     '满族','侗族','瑶族','白族','土家族','哈尼族','哈萨克族','傣族','黎族','傈僳族',
@@ -42,19 +42,38 @@ const studentFields = [
   { name: '家庭住址', label: '家庭住址' },
   { name: '监护人姓名', label: '监护人1姓名' },
   { name: '监护人电话', label: '监护人1电话' },
+  { name: '监护人关系', label: '监护人1关系', options: ['父亲','母亲','爷爷','奶奶','外公','外婆','叔伯','姑姨','其他'] },
   { name: '监护人职业', label: '监护人1职业' },
   { name: '监护人2姓名', label: '监护人2姓名' },
   { name: '监护人2电话', label: '监护人2电话' },
   { name: '监护人2关系', label: '监护人2关系', options: ['父亲','母亲','爷爷','奶奶','外公','外婆','叔伯','姑姨','其他'] },
+  { name: '监护人2职业', label: '监护人2职业' },
   { name: '是否住校', label: '是否住校', options: ['住校', '走读'] },
   { name: '特长', label: '特长' },
   { name: '班级任职', label: '班级任职' },
   { name: '备注', label: '备注' },
 ]
 
+const studentFieldGroups = [
+  { title: '基本信息', fields: studentFields.slice(0, 6) },
+  { title: '监护人1', fields: studentFields.slice(6, 10) },
+  { title: '监护人2', optional: true, fields: studentFields.slice(10, 14) },
+  { title: '在校信息', fields: studentFields.slice(14) },
+]
+
+const legacyDateValues = {}
+
 function initForm() {
   if (props.mode === 'student') {
-    studentFields.forEach(f => { form[f.name] = props.studentData?.[f.name] || '' })
+    studentFields.forEach(f => {
+      const value = props.studentData?.[f.name] || ''
+      if (f.type === 'date' && /^\d{4}-\d{2}$/.test(value)) {
+        legacyDateValues[f.name] = value
+        form[f.name] = ''
+      } else {
+        form[f.name] = value
+      }
+    })
   } else {
     props.fields.forEach(f => { form[f.name] = '' })
   }
@@ -72,7 +91,9 @@ async function submit() {
       else errorMsg.value = res.error || '保存失败'
     } else if (props.mode === 'student') {
       const body = {}
-      studentFields.forEach(f => { body[f.name] = form[f.name] ?? '' })
+      studentFields.forEach(f => {
+        body[f.name] = form[f.name] || legacyDateValues[f.name] || ''
+      })
       if (props.studentId) {
         const res = await put(`/api/students/${props.studentId}`, body)
         if (res.ok) emit('success')
@@ -190,18 +211,25 @@ function downloadTemplate() {
       <!-- 学生信息编辑模式 -->
       <template v-else-if="mode === 'student'">
         <form @submit.prevent="submit">
-          <div class="form-row">
-            <div v-for="f in studentFields" :key="f.name" class="form-group" style="min-width:160px">
-              <label>{{ f.label }}</label>
-              <select v-if="f.options" class="form-select" v-model="form[f.name]">
-                <option value="">请选择</option>
-                <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
-              </select>
-              <input v-else-if="f.type === 'month'" type="month" class="form-input"
-                v-model="form[f.name]">
-              <input v-else class="form-input" v-model="form[f.name]" :placeholder="f.ph || ''">
+          <section v-for="group in studentFieldGroups" :key="group.title" class="student-form-section">
+            <div class="student-form-section-head">
+              <strong>{{ group.title }}</strong>
+              <span v-if="group.optional">可选</span>
             </div>
-          </div>
+            <div class="form-row" :class="{ 'guardian-form-row': group.title.startsWith('监护人') }">
+              <div v-for="f in group.fields" :key="f.name" class="form-group" style="min-width:160px">
+                <label>{{ f.label }}</label>
+                <select v-if="f.options" class="form-select" v-model="form[f.name]">
+                  <option value="">请选择</option>
+                  <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+                </select>
+                <input v-else-if="f.type === 'date'" type="date" class="form-input"
+                  v-model="form[f.name]">
+                <input v-else class="form-input" v-model="form[f.name]" :placeholder="f.ph || ''">
+                <small v-if="f.type === 'date' && legacyDateValues[f.name]" class="field-hint">原记录只有年月，请补充具体日期</small>
+              </div>
+            </div>
+          </section>
           <div v-if="errorMsg" class="error-text">{{ errorMsg }}</div>
           <div class="modal-actions">
             <button type="button" class="btn btn-outline" @click="$emit('close')">取消</button>
@@ -263,3 +291,43 @@ function downloadTemplate() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.student-form-section + .student-form-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.student-form-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.student-form-section-head span,
+.field-hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.guardian-form-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .guardian-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

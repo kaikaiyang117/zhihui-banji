@@ -166,6 +166,19 @@ describe('学生档案', () => {
     expect(row.备注).toBe('');
   });
 
+  it('两个监护人的关系和职业字段对称保存', () => {
+    const studentId = createStudent({
+      学号: 'S102', 姓名: '李小明',
+      监护人关系: '父亲', 监护人职业: '教师',
+      监护人2关系: '母亲', 监护人2职业: '护士',
+    });
+    const row = db.connInstance.prepare('SELECT 监护人关系, 监护人职业, 监护人2关系, 监护人2职业 FROM students WHERE id=?').get(studentId) as Record<string, unknown>;
+    expect(row.监护人关系).toBe('父亲');
+    expect(row.监护人职业).toBe('教师');
+    expect(row.监护人2关系).toBe('母亲');
+    expect(row.监护人2职业).toBe('护士');
+  });
+
   it('学号唯一：重复与回收站冲突均返回 409 语义', () => {
     createStudent({ 学号: 'S101', 姓名: '甲' });
     expect(() => createStudent({ 学号: 'S101', 姓名: '乙' }))

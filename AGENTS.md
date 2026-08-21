@@ -34,7 +34,7 @@
 .\scripts\setup-dev.ps1
 ```
 
-脚本会检查 Node.js 20+，安装前端、Node 后端和 Electron 依赖，并处理 esbuild 的脚本许可。
+脚本会检查 Node.js 22.x，安装前端、Node 后端和 Electron 依赖，并处理 esbuild 的脚本许可；项目根目录 `.nvmrc` 是开发与流水线的 Node 版本基准。
 
 手动安装和启动：
 
@@ -52,11 +52,11 @@ cd ../server && npm install && npm run build:server
 cd ../desktop && npm install && npm run dev
 ```
 
-桌面开发（推荐）：先启动 `desktop`（后端就绪），再另开终端执行 `frontend` 的 `npm run dev`；非打包模式的 Electron 窗口会自动探测 5173 并加载 Vite dev server，获得毫秒级 HMR，`/api` 请求经 Vite 代理自动转发到实际后端端口。未启动 Vite 时回退到后端托管的静态页面。`npm run watch` 仍是局域网手机访问场景的更新方式（手机不会自动刷新，以最新一次构建为准）。
+桌面开发（推荐）：先在 `desktop` 执行 `npm run dev`，再另开终端在 `frontend` 执行 `npm run dev`；桌面开发命令会探测 5173 并加载 Vite dev server，获得毫秒级 HMR，`/api` 请求经 Vite 代理自动转发到实际后端端口。未启动 Vite 时回退到后端托管的静态页面。`npm run watch` 仍是局域网手机访问场景的更新方式（手机不会自动刷新，以最新一次构建为准）。
 
-也可以双击 `启动工作台.bat` 或 `启动工作台.command` 启动桌面工作台。Windows/macOS 打包版本通过系统托盘管理后台服务：桌面快捷方式启动时不显示终端，托盘菜单提供“打开工作台”和“退出工作台”；`启动工作台.bat` 仍是开发/调试入口，保留可见终端和 `Ctrl+C` 停止方式。
+也可以双击 `启动工作台.bat` 或 `启动工作台.command` 启动源码工作台；这两个日常启动入口加载本地构建页面，不启动 Vite，也不覆盖系统日期。Windows/macOS 打包版本通过系统托盘管理后台服务：桌面快捷方式启动时不显示终端，托盘菜单提供“打开工作台”和“退出工作台”；源码启动入口保留可见终端和 `Ctrl+C` 停止方式。
 
-开发启动脚本默认设置 `WORKBENCH_BUSINESS_DATE=2026-04-15`，让“今天、逾期、未来 7 天”和 Agent 当前日期落在已导入的春季校历内。该变量只覆盖业务日期，审计、凭证过期和数据库时间仍使用真实时钟；设置为空可恢复系统日期。
+需要复现历史业务日期时，可由开发者显式设置 `WORKBENCH_BUSINESS_DATE=YYYY-MM-DD`。日常启动和生产环境不设置该变量，系统使用真实日期；该变量只覆盖业务日期，审计、凭证过期和数据库时间仍使用真实时钟。
 
 局域网开发模式：
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ExternalLink, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { listToolLinks, createToolLink, updateToolLink, deleteToolLink, recordToolLinkUsage } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
@@ -15,6 +15,7 @@ const editorEl = ref(null)
 const saving = ref(false)
 const editError = ref('')
 const editingId = ref(null)
+const logoState = reactive(new Map())
 let returnFocus = null
 
 const CATEGORIES = ['教务系统', '教学平台', '备课资源', '班级沟通', '学校服务', '其他']
@@ -40,6 +41,56 @@ const groupedItems = computed(() => {
 
 function extractDomain(url) {
   try { return new URL(url).hostname } catch { return url }
+}
+
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim())
+}
+
+function isPrivateHost(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (host === 'localhost' || host.endsWith('.local') || !host.includes('.')) return true
+  const parts = host.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(Number.isNaN)) return false
+  const [a, b] = parts
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+}
+
+function logoKey(item) {
+  return `${item.id}:${item.url}`
+}
+
+function logoCandidates(item) {
+  if (!isHttpUrl(item.url)) return []
+  try {
+    const parsed = new URL(item.url)
+    const candidates = []
+    if (isHttpUrl(item.icon)) candidates.push(item.icon.trim())
+    candidates.push(new URL('/favicon.ico', parsed.origin).toString())
+    if (!isPrivateHost(parsed.hostname)) {
+      candidates.push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=64`)
+    }
+    return [...new Set(candidates)]
+  } catch {
+    return []
+  }
+}
+
+function logoSrc(item) {
+  const candidates = logoCandidates(item)
+  const index = logoState.get(logoKey(item)) ?? 0
+  return candidates[index] || ''
+}
+
+function handleLogoError(item) {
+  const key = logoKey(item)
+  const candidates = logoCandidates(item)
+  const nextIndex = (logoState.get(key) ?? 0) + 1
+  logoState.set(key, nextIndex < candidates.length ? nextIndex : candidates.length)
+}
+
+function logoLetter(item) {
+  return String(item.name || extractDomain(item.url) || '?').trim().slice(0, 1).toUpperCase()
 }
 
 async function load() {
@@ -184,7 +235,10 @@ onMounted(load)
         <div class="tools-grid">
           <div v-for="item in groupedItems.pinned" :key="item.id" class="tool-card tool-card-pinned" @click="openLink(item)">
             <div class="tool-card-main">
-              <span v-if="item.color" class="tool-card-dot" :style="{ background: item.color }"></span>
+              <span class="tool-card-logo" :style="{ '--tool-logo-color': item.color || 'var(--ds-color-primary)' }">
+                <img v-if="logoSrc(item)" :src="logoSrc(item)" alt="" referrerpolicy="no-referrer" @error="handleLogoError(item)" />
+                <span v-else class="tool-card-logo-fallback" aria-hidden="true">{{ logoLetter(item) }}</span>
+              </span>
               <div class="tool-card-info">
                 <strong>{{ item.name }}</strong>
                 <span class="tool-card-domain">{{ extractDomain(item.url) }}</span>
@@ -211,7 +265,10 @@ onMounted(load)
         <div class="tools-grid">
           <div v-for="item in catItems" :key="item.id" class="tool-card" @click="openLink(item)">
             <div class="tool-card-main">
-              <span v-if="item.color" class="tool-card-dot" :style="{ background: item.color }"></span>
+              <span class="tool-card-logo" :style="{ '--tool-logo-color': item.color || 'var(--ds-color-primary)' }">
+                <img v-if="logoSrc(item)" :src="logoSrc(item)" alt="" referrerpolicy="no-referrer" @error="handleLogoError(item)" />
+                <span v-else class="tool-card-logo-fallback" aria-hidden="true">{{ logoLetter(item) }}</span>
+              </span>
               <div class="tool-card-info">
                 <strong>{{ item.name }}</strong>
                 <span class="tool-card-domain">{{ extractDomain(item.url) }}</span>
@@ -304,7 +361,9 @@ onMounted(load)
 .tool-card:active { transform: scale(.99); }
 .tool-card-pinned { border-color: var(--ds-color-primary-border); background: var(--ds-color-primary-soft); }
 .tool-card-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.tool-card-dot { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; }
+.tool-card-logo { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; overflow: hidden; border: 1px solid var(--ds-color-border); border-radius: 9px; background: var(--ds-color-surface); color: var(--tool-logo-color); }
+.tool-card-logo img { display: block; width: 22px; height: 22px; object-fit: contain; }
+.tool-card-logo-fallback { display: grid; place-items: center; width: 100%; height: 100%; background: color-mix(in srgb, var(--tool-logo-color) 14%, white); color: var(--tool-logo-color); font-size: 14px; font-weight: 700; }
 .tool-card-info { min-width: 0; }
 .tool-card-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .tool-card-domain { font-size: 12px; color: var(--ds-color-ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -314,7 +314,7 @@ export function registerMig09Routes(app: FastifyInstance): void {
     void reply;
     const frozen = Boolean(process.env.MEIMEI_PACKAGED);
     if (!frozen) {
-      return reply.status(400).send({ detail: '开发模式不执行安装，请使用打包后的桌面程序测试更新' });
+      return reply.status(400).send({ detail: '当前启动方式不支持直接安装更新，请使用正式安装版完成更新' });
     }
     if (updateService.isBusy()) {
       return { started: false, status: updateService.updateStatus().status };

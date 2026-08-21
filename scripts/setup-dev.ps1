@@ -3,12 +3,12 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw '未找到 Node.js，请先安装 Node.js 20+。'
+  throw '未找到 Node.js，请先安装 Node.js 22 LTS。'
 }
 
 $NodeMajor = [int]((& node -p "process.versions.node.split('.')[0]"))
-if ($NodeMajor -lt 20) {
-  throw "项目需要 Node.js 20+，当前主版本为 $NodeMajor。"
+if ($NodeMajor -ne 22) {
+  throw "项目需要 Node.js 22.x，当前主版本为 $NodeMajor。"
 }
 
 Set-Location $ProjectRoot

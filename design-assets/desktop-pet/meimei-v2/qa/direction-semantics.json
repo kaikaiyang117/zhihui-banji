@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "visual_qa": "pass",
+  "directions": [
+    { "degrees": "000", "semantic": "up", "result": "pass" },
+    { "degrees": "022.5", "semantic": "up-right", "result": "pass" },
+    { "degrees": "045", "semantic": "up-right", "result": "pass" },
+    { "degrees": "067.5", "semantic": "up-right", "result": "pass" },
+    { "degrees": "090", "semantic": "right", "result": "pass" },
+    { "degrees": "112.5", "semantic": "down-right", "result": "pass" },
+    { "degrees": "135", "semantic": "down-right", "result": "pass" },
+    { "degrees": "157.5", "semantic": "down-right", "result": "pass" },
+    { "degrees": "180", "semantic": "down", "result": "pass" },
+    { "degrees": "202.5", "semantic": "down-left", "result": "pass" },
+    { "degrees": "225", "semantic": "down-left", "result": "pass" },
+    { "degrees": "247.5", "semantic": "down-left", "result": "warning", "note": "Left is clear; downward tilt is subtle." },
+    { "degrees": "270", "semantic": "left", "result": "pass" },
+    { "degrees": "292.5", "semantic": "up-left", "result": "warning", "note": "Left is clear; upward tilt is subtle." },
+    { "degrees": "315", "semantic": "up-left", "result": "pass" },
+    { "degrees": "337.5", "semantic": "up-left", "result": "pass" }
+  ]
+}

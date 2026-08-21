@@ -16,6 +16,7 @@ const os = require('os');
 const APP_NAME = 'MeimeiWorkbench';
 const HEALTH_TIMEOUT_MS = 90 * 1000;
 const isSmoke = process.env.WORKBENCH_SMOKE === '1';
+const useDevFrontend = process.argv.includes('--dev-frontend') && !app.isPackaged && !isSmoke;
 
 let mainWindow = null;
 let tray = null;
@@ -70,7 +71,7 @@ function flushBackendLog() {
 /* ---------------------------------------------------------------- 后端进程
  * Node.js 后端运行在 Electron utilityProcess 中（MIG-10）：
  * 开发与打包共用同一入口 server/dist/entry.js，差异只来自路径和环境变量。
- * 开发模式（未打包）使用系统 Node 子进程：server/node_modules 为系统 Node ABI，
+ * 源码运行（未打包）使用系统 Node 子进程：server/node_modules 为系统 Node ABI，
  * 无法在 utilityProcess（Electron ABI）中加载；打包模式依赖 build/server-bundle
  * 里为 Electron ABI 重建过的原生模块。
  */
@@ -335,16 +336,17 @@ function failBackend(message) {
 function onBackendReady() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     loadAppPage();
+    showMainWindow();
     return;
   }
   createMainWindow();
+  showMainWindow();
 }
 
-/* 开发模式：后端就绪后优先加载 Vite dev server（HMR 热更新），
- * 探测失败（未启动 npm run dev）时回退到后端托管的静态页面。 */
+/* 只有显式使用 npm run dev 时才探测 Vite；日常源码启动与打包版本均加载本地构建页面。 */
 function loadAppPage() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (app.isPackaged || isSmoke) {
+  if (app.isPackaged || !useDevFrontend) {
     mainWindow.loadURL(backendBaseUrl);
     return;
   }
@@ -354,7 +356,7 @@ function loadAppPage() {
     if (settled || !mainWindow || mainWindow.isDestroyed()) return;
     settled = true;
     if (viteUp) {
-      logLine('检测到 Vite dev server（5173），加载开发页面（HMR）…');
+      logLine('检测到前端调试服务（5173），启用热更新…');
       mainWindow.loadURL(viteUrl);
     } else {
       mainWindow.loadURL(backendBaseUrl);
@@ -378,7 +380,7 @@ function createMainWindow() {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    show: false,
+    show: true,
     title: APP_NAME,
     icon: windowIconPath(),
     webPreferences: {
@@ -433,16 +435,20 @@ function showMainWindow() {
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
+  if (process.platform === 'darwin' && app.isReady()) {
+    if (app.dock) app.dock.show();
+    app.focus({ steal: true });
+  }
   mainWindow.show();
   mainWindow.focus();
 }
 
-/* 只允许加载后端回环地址（开发模式下额外放行 Vite dev server 同源）；其余导航一律拦截。 */
+/* 只允许加载后端回环地址（启用前端调试时额外放行 Vite dev server 同源）；其余导航一律拦截。 */
 function isAllowedAppUrl(url) {
   try {
     const target = new URL(url);
     const candidates = [new URL(backendBaseUrl)];
-    if (!app.isPackaged) candidates.push(new URL('http://127.0.0.1:5173'));
+    if (useDevFrontend) candidates.push(new URL('http://127.0.0.1:5173'));
     return candidates.some(base =>
       target.origin === base.origin
       && (target.protocol === 'http:' || target.protocol === 'https:'));
@@ -498,9 +504,9 @@ function setupDownloads() {
   });
 }
 
-/* 开发模式：监听前端构建产物（backend/static），变化后自动刷新窗口。 */
+/* 前端调试模式监听构建产物，变化后自动刷新窗口。 */
 function setupStaticWatcher() {
-  if (app.isPackaged) return;
+  if (app.isPackaged || !useDevFrontend) return;
   const staticDir = path.join(__dirname, '..', 'backend', 'static');
   if (!fs.existsSync(staticDir)) {
     logLine('未找到前端构建目录，跳过自动刷新监听');
@@ -580,6 +586,7 @@ const PET_TRANSIENT_STATES = new Set(['success', 'waving', 'jumping']);
 const PET_TRANSIENT_MIN_MS = { success: 2500, waving: 3000, jumping: 2000 };
 
 const PET_SIZE_MAP = { small: 72, medium: 96, large: 128 };
+const PET_BUBBLE_HEIGHT = 48;
 
 const DEFAULT_PET_SETTINGS = {
   enabled: true,
@@ -590,6 +597,35 @@ const DEFAULT_PET_SETTINGS = {
   reducedMotion: false,
   lastPosition: null,
 };
+
+function petResourceDir() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'pet')
+    : path.join(__dirname, 'pet');
+}
+
+function loadPetManifest() {
+  try {
+    const manifestPath = path.join(petResourceDir(), 'pet.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const spritesheetPath = manifest.spritesheetPath;
+    if (manifest.spriteVersionNumber !== 2 ||
+        typeof spritesheetPath !== 'string' ||
+        path.basename(spritesheetPath) !== spritesheetPath ||
+        !fs.existsSync(path.join(petResourceDir(), spritesheetPath))) {
+      return null;
+    }
+    return {
+      id: typeof manifest.id === 'string' ? manifest.id : 'meimei',
+      displayName: typeof manifest.displayName === 'string' ? manifest.displayName : '美美',
+      description: typeof manifest.description === 'string' ? manifest.description : '',
+      spriteVersionNumber: 2,
+      spritesheetPath,
+    };
+  } catch (_err) {
+    return null;
+  }
+}
 
 class PetStateController {
   constructor() {
@@ -690,7 +726,7 @@ function savePetSettings() {
 function petSizePixels() {
   const s = (petSettings && petSettings.size) || 'medium';
   const w = PET_SIZE_MAP[s] || 96;
-  return { width: w, height: Math.round(w * 1.08) };
+  return { width: w, height: Math.round(w * 1.08) + PET_BUBBLE_HEIGHT };
 }
 
 function defaultPetPosition() {
@@ -720,6 +756,10 @@ function clampPetPosition(pos) {
 
 function createPetWindow() {
   if (petWindow && !petWindow.isDestroyed()) return;
+  if (!loadPetManifest()) {
+    logLine('桌面宠物素材缺失或无效，本次不创建宠物窗口。');
+    return;
+  }
   const { width, height } = petSizePixels();
   const pos = (petSettings && petSettings.lastPosition) || defaultPetPosition();
   const clamped = clampPetPosition(pos);
@@ -737,7 +777,9 @@ function createPetWindow() {
     hasShadow: false,
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'pet-preload.js'),
+      preload: app.isPackaged
+        ? path.join(process.resourcesPath, 'pet-preload.js')
+        : path.join(__dirname, 'pet-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -746,9 +788,7 @@ function createPetWindow() {
     },
   });
 
-  const petHtmlPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'pet', 'index.html')
-    : path.join(__dirname, 'pet', 'index.html');
+  const petHtmlPath = path.join(petResourceDir(), 'index.html');
 
   petWindow.loadFile(petHtmlPath).catch(err => {
     logLine(`宠物页面加载失败：${err.message}`);
@@ -756,7 +796,7 @@ function createPetWindow() {
 
   petWindow.once('ready-to-show', () => {
     if (petWindow && !petWindow.isDestroyed()) {
-      petWindow.show();
+      petWindow.showInactive();
       if (petStateController) {
         petWindow.webContents.send('pet:state-change', petStateController.state);
       }
@@ -771,7 +811,12 @@ function createPetWindow() {
     petWindow = null;
   });
 
-  petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  /* macOS 默认会把整个进程切换为 UIElementApplication，造成主窗口和
+   * Dock 短暂隐藏；桌宠只需要跨空间显示，不应改变应用进程类型。 */
+  petWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  });
   setupPetIgnoreMouseEvents();
 }
 
@@ -824,6 +869,8 @@ function rebuildPetWindow() {
 }
 
 function setupPetIPC() {
+  ipcMain.handle('pet:get-manifest', () => loadPetManifest());
+
   ipcMain.handle('pet:state-change', (_event, state) => {
     if (typeof state !== 'string' || !PET_VALID_STATES.has(state)) {
       return { ok: false, error: 'Invalid state' };
@@ -840,10 +887,6 @@ function setupPetIPC() {
       petWindow.webContents.send('pet:bubble-text', petSettings && petSettings.showBubble ? sanitized : '');
     }
     return { ok: true };
-  });
-
-  ipcMain.on('pet:click', () => {
-    showMainWindow();
   });
 
   ipcMain.on('pet:mouse-move', (_event, onPet) => {
@@ -894,7 +937,7 @@ function setupPetIPC() {
         click: () => {
           if (petSettings) petSettings.reducedMotion = !petSettings.reducedMotion;
           if (petWindow && !petWindow.isDestroyed()) {
-            petWindow.webContents.send('pet:state-change', petStateController ? petStateController.state : 'idle');
+            petWindow.webContents.send('pet:reduced-motion', petSettings.reducedMotion);
           }
           savePetSettings();
         },
@@ -1150,10 +1193,13 @@ async function runSmokeChecks() {
         response.on('end', () => resolve(body.includes('"ready":true')));
       }).on('error', () => resolve(false));
     });
+    const petManifest = loadPetManifest();
     logLine(`SMOKE_ENTRIES=${domResult.phone && domResult.update ? '1' : '0'}`);
     logLine(`SMOKE_BACKEND=${health ? 'ok' : 'fail'}`);
+    logLine(`SMOKE_PET=${petManifest && petManifest.spriteVersionNumber === 2 ? 'ok' : 'fail'}`);
     if (!domResult.phone || !domResult.update) smokeFailures.push('页面缺少“手机访问”或“更新”入口');
     if (!health) smokeFailures.push('后端健康检查失败');
+    if (!petManifest) smokeFailures.push('桌面宠物 v2 素材缺失或无效');
     if (!domResult.ready) smokeFailures.push('首页未渲染');
     if (smokeFailures.length) {
       const snippet = await mainWindow.webContents.executeJavaScript(

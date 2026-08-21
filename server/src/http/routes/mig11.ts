@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 
 import * as timetable from '../../services/timetable.js';
 import { ArchivedScopeError, ScopeError } from '../../services/context.js';
+import { todayString } from '../../services/clock.js';
 
 function wrap(reply: FastifyReply, fn: () => unknown): unknown {
   try { return fn(); } catch (error) {
@@ -51,7 +52,7 @@ export function registerMig11Routes(app: FastifyInstance): void {
 
   app.get('/api/timetable/day', async (request, reply) => {
     const query = request.query as { date?: string };
-    return wrap(reply, () => timetable.daySchedule(query.date ?? new Date().toISOString().slice(0, 10)));
+    return wrap(reply, () => timetable.daySchedule(query.date ?? todayString()));
   });
 
   app.get('/api/timetable/changes', async (request, reply) => {

@@ -39,7 +39,7 @@ describe('schema 与启动迁移', () => {
   it('新库完成全部迁移并创建默认上下文', () => {
     const db = makeDb();
     db.open();
-    expect(db.schemaVersion()).toBe(33);
+    expect(db.schemaVersion()).toBe(34);
     const counts = rowCounts(db.connInstance);
     expect(counts.classes).toBe(1);
     expect(counts.terms).toBe(1);
@@ -54,7 +54,7 @@ describe('schema 与启动迁移', () => {
     const first = rowCounts(db.connInstance);
     db.close();
     db.open();
-    expect(db.schemaVersion()).toBe(33);
+    expect(db.schemaVersion()).toBe(34);
     expect(rowCounts(db.connInstance)).toEqual(first);
     expect(db.connInstance.pragma('integrity_check', { simple: true })).toBe('ok');
   });
@@ -126,15 +126,15 @@ describe('备份与恢复', () => {
 
 describe('迁移中断恢复', () => {
   it('迁移失败后版本停留在失败前，修复后重启成功', () => {
-    const original33 = schemaModule.MIGRATIONS[33];
+    const original34 = schemaModule.MIGRATIONS[34];
     try {
-      delete schemaModule.MIGRATIONS[33];
+      delete schemaModule.MIGRATIONS[34];
       const partial = makeDb();
       partial.open();
-      expect(partial.schemaVersion()).toBe(32);
+      expect(partial.schemaVersion()).toBe(33);
       partial.close();
 
-      schemaModule.MIGRATIONS[33] = (conn) => {
+      schemaModule.MIGRATIONS[34] = (conn) => {
         conn.exec('CREATE TABLE failed_marker (x INTEGER)');
         throw new Error('注入的迁移失败');
       };
@@ -142,15 +142,15 @@ describe('迁移中断恢复', () => {
       expect(() => broken.open()).toThrow(/注入的迁移失败/);
 
       const probe = new Database(broken.paths.dbPath, { readonly: true });
-      expect((probe.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number }).v).toBe(32);
+      expect((probe.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number }).v).toBe(33);
       probe.close();
 
-      schemaModule.MIGRATIONS[33] = original33;
+      schemaModule.MIGRATIONS[34] = original34;
       const fixed = makeDb();
       fixed.open();
-      expect(fixed.schemaVersion()).toBe(33);
+      expect(fixed.schemaVersion()).toBe(34);
     } finally {
-      schemaModule.MIGRATIONS[33] = original33;
+      schemaModule.MIGRATIONS[34] = original34;
     }
   });
 });

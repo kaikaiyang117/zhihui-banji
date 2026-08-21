@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v28）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v34）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。
@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 33;
+export const CURRENT_SCHEMA_VERSION = 34;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -114,12 +114,12 @@ function migration5(conn: Database): void {
     );
 
     INSERT INTO classes(name, grade, status)
-    SELECT '默认班级', '', '使用中'
+    SELECT '我的班级', '', '使用中'
     WHERE NOT EXISTS (SELECT 1 FROM classes);
   `);
   const classRow = conn.prepare('SELECT id FROM classes ORDER BY id LIMIT 1').get() as { id: number };
   conn.prepare(
-    "INSERT INTO terms(class_id, name, status) SELECT ?, '默认学期', '进行中' "
+    "INSERT INTO terms(class_id, name, status) SELECT ?, '当前学期', '进行中' "
     + 'WHERE NOT EXISTS (SELECT 1 FROM terms WHERE class_id=?)',
   ).run(classRow.id, classRow.id);
   const termRow = conn.prepare(
@@ -1900,6 +1900,11 @@ function migration33(conn: Database): void {
   `);
 }
 
+function migration34(conn: Database): void {
+  addColumn(conn, 'students', '监护人关系', "TEXT DEFAULT ''");
+  addColumn(conn, 'students', '监护人2职业', "TEXT DEFAULT ''");
+}
+
 function migration32(conn: Database): void {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notification_templates (
@@ -1958,6 +1963,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   31: migration31,
   32: migration32,
   33: migration33,
+  34: migration34,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */
@@ -1974,6 +1980,7 @@ export function applyBaseSchema(conn: Database): void {
       家庭住址 TEXT,
       监护人姓名 TEXT,
       监护人电话 TEXT,
+      监护人关系 TEXT DEFAULT '',
       监护人职业 TEXT,
       是否住校 TEXT,
       特长 TEXT,
@@ -1982,6 +1989,7 @@ export function applyBaseSchema(conn: Database): void {
       监护人2姓名 TEXT DEFAULT '',
       监护人2电话 TEXT DEFAULT '',
       监护人2关系 TEXT DEFAULT '',
+      监护人2职业 TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime')),
       updated_at TEXT DEFAULT (datetime('now','localtime'))
   );
@@ -1991,6 +1999,8 @@ export function applyBaseSchema(conn: Database): void {
     ['监护人2姓名', "TEXT DEFAULT ''"],
     ['监护人2电话', "TEXT DEFAULT ''"],
     ['监护人2关系', "TEXT DEFAULT ''"],
+    ['监护人关系', "TEXT DEFAULT ''"],
+    ['监护人2职业', "TEXT DEFAULT ''"],
   ] as Array<[string, string]>) {
     try {
       conn.exec(`ALTER TABLE students ADD COLUMN "${col}" ${typ}`);

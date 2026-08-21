@@ -75,10 +75,11 @@ const editData = computed(() => {
     '学号': student['学号'] ?? '', '姓名': student['姓名'] ?? '', '性别': student['性别'] ?? '',
     '出生年月': student['出生年月'] ?? '', '民族': student['民族'] ?? '', '家庭住址': student['家庭住址'] ?? '',
     '监护人姓名': student['监护人姓名'] ?? '', '监护人电话': student['监护人电话'] ?? '',
+    '监护人关系': student['监护人关系'] ?? '',
     '监护人职业': student['监护人职业'] ?? '', '是否住校': student['是否住校'] ?? '',
     '特长': student['特长'] ?? '', '班级任职': student['班级任职'] ?? '', '备注': student['备注'] ?? '',
     '监护人2姓名': student['监护人2姓名'] ?? '', '监护人2电话': student['监护人2电话'] ?? '',
-    '监护人2关系': student['监护人2关系'] ?? '',
+    '监护人2关系': student['监护人2关系'] ?? '', '监护人2职业': student['监护人2职业'] ?? '',
   }
 })
 const photoUrl = computed(() => {
@@ -378,7 +379,7 @@ onMounted(load)
       <div class="card-title">基础信息</div>
       <div class="profile-grid">
         <div><span>性别</span><strong>{{ data.student.性别 || '—' }}</strong></div>
-        <div><span>出生年月</span><strong>{{ data.student.出生年月 || '—' }}</strong></div>
+        <div><span>出生日期</span><strong>{{ data.student.出生年月 || '—' }}</strong></div>
         <div><span>民族</span><strong>{{ data.student.民族 || '—' }}</strong></div>
         <div><span>是否住校</span><strong>{{ data.student.是否住校 || '—' }}</strong></div>
         <div><span>特长</span><strong>{{ data.student.特长 || '—' }}</strong></div>
@@ -391,11 +392,13 @@ onMounted(load)
       <div class="profile-grid">
         <div><span>监护人 1</span><strong>{{ data.student.监护人姓名 || '—' }}</strong></div>
         <div><span>联系电话</span><strong>{{ data.student.监护人电话 || '—' }}</strong></div>
+        <div><span>关系</span><strong>{{ data.student.监护人关系 || '—' }}</strong></div>
         <div><span>职业</span><strong>{{ data.student.监护人职业 || '—' }}</strong></div>
-        <template v-if="data.student.监护人2姓名 || data.student.监护人2电话 || data.student.监护人2关系">
+        <template v-if="data.student.监护人2姓名 || data.student.监护人2电话 || data.student.监护人2关系 || data.student.监护人2职业">
           <div><span>监护人 2</span><strong>{{ data.student.监护人2姓名 || '—' }}</strong></div>
           <div><span>联系电话</span><strong>{{ data.student.监护人2电话 || '—' }}</strong></div>
           <div><span>关系</span><strong>{{ data.student.监护人2关系 || '—' }}</strong></div>
+          <div><span>职业</span><strong>{{ data.student.监护人2职业 || '—' }}</strong></div>
         </template>
         <div><span>家庭住址</span><strong>{{ data.student.家庭住址 || '—' }}</strong></div>
       </div>

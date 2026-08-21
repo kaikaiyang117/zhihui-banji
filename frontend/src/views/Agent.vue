@@ -489,7 +489,6 @@ onBeforeUnmount(() => {
         <div class="agent-profile-heading">
           <div>
             <strong>配置档案</strong>
-            <span>保存多个模型服务，点击卡片切换当前使用的配置</span>
           </div>
           <button class="btn btn-outline" type="button" :disabled="profileBusy" @click="openCreateProfile"><Plus :size="14" /> 新建配置</button>
         </div>
@@ -559,7 +558,6 @@ onBeforeUnmount(() => {
 
       <div class="card excel-import-card">
         <div class="card-title"><FileSpreadsheet :size="16" /> 对话式 Excel 导入</div>
-        <div class="import-intro">上传 Excel 文件，自动识别工作表和字段映射，预览后确认导入。</div>
 
         <div v-if="importError" class="agent-error"><CircleAlert :size="16" /> {{ importError }}</div>
 
@@ -869,7 +867,6 @@ onBeforeUnmount(() => {
 .loading-inline { color:var(--text-secondary); font-size:13px; padding:12px 0; }
 
 .excel-import-card { margin-top:18px; }
-.import-intro { color:var(--text-secondary); font-size:13px; margin-bottom:14px; }
 .import-idle { display:flex; gap:10px; align-items:center; }
 .import-uploading { display:flex; align-items:center; gap:10px; color:var(--text-secondary); font-size:13px; }
 .import-spinner { width:18px; height:18px; border:2px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:import-spin .6s linear infinite; }

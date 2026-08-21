@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileSpreadsheet, MessageCircle, Paperclip, RefreshCw, Send, Settings } from 'lucide-vue-next'
 import { useChat } from '@ai-sdk/vue'
@@ -41,7 +41,6 @@ const accessLoading = ref(false)
 const accessError = ref('')
 const accessBlocked = ref(false)
 const updateOpen = ref(false)
-const runtime = ref(null)
 const contextVersion = ref(0)
 const agentOpen = ref(false)
 const agentInput = ref('')
@@ -115,6 +114,8 @@ const agentChat = useChat({
     },
   }),
   onError: error => {
+    petAgentHadError = true
+    sendPetState('failed')
     agentError.value = error.message || 'Agent 流式响应失败，请稍后重试。'
     scrollAgentToBottom()
   },
@@ -122,6 +123,24 @@ const agentChat = useChat({
 const agentMessages = agentChat.messages
 const agentStatus = agentChat.status
 const agentSending = computed(() => ['submitted', 'streaming'].includes(agentStatus.value))
+let petAgentWasRunning = false
+let petAgentHadError = false
+
+function sendPetState(state) {
+  if (!window.workbenchDesktop?.sendPetState) return
+  window.workbenchDesktop.sendPetState(state).catch(() => {})
+}
+
+watch(agentStatus, status => {
+  if (status === 'submitted' || status === 'streaming') {
+    if (!petAgentWasRunning) petAgentHadError = false
+    petAgentWasRunning = true
+    sendPetState('running')
+  } else if (petAgentWasRunning) {
+    petAgentWasRunning = false
+    sendPetState(petAgentHadError || status === 'error' ? 'failed' : 'success')
+  }
+})
 
 async function createAgentSession() {
   const created = await post('/api/agent/sessions', {})
@@ -182,10 +201,6 @@ async function loadAccessInfo() {
       accessError.value = error.message || '此设备的访问授权无效，请在电脑端重新配对。'
     }
   }
-}
-
-async function loadRuntime() {
-  try { runtime.value = await get('/api/system/runtime') } catch { runtime.value = null }
 }
 
 async function openAccessDialog() {
@@ -697,7 +712,6 @@ async function switchAgentSession(event) {
 onMounted(async () => {
   window.addEventListener('meimei-agent-session-change', switchAgentSession)
   window.addEventListener('workbench-context-change', handleContextChange)
-  await loadRuntime()
   await loadAccessInfo()
   await loadAgentHistory()
 })
@@ -717,7 +731,6 @@ onBeforeUnmount(() => {
         <span>{{ tab.title }}</span>
       </router-link>
       <ContextSwitcher v-if="activeTab === 'teacher'" />
-      <span v-if="runtime?.business_date_overridden" class="runtime-date-badge">开发日期 {{ runtime.business_date }}</span>
       <div class="global-search">
         <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
         <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
@@ -1006,7 +1019,6 @@ onBeforeUnmount(() => {
   transform: translateY(8px) scale(.97);
 }
 
-.runtime-date-badge { align-self: center; padding: 4px 8px; border: 1px solid var(--ds-color-primary-border); border-radius: var(--ds-radius-pill); background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); font: var(--ds-type-meta); white-space: nowrap; }
 .global-search { position: relative; align-self: center; min-width: 0; margin-left: auto; width: min(300px, 32vw); }
 .global-search input { width: 100%; height: 38px; box-sizing: border-box; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-pill); background: rgba(255,255,255,.84); padding: 0 34px 0 14px; color: var(--ds-color-ink); font: var(--ds-type-body); outline: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), box-shadow var(--ds-duration-fast) var(--ds-ease-out); }
 .global-search input:focus { border-color: var(--ds-color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "pet_id": "meimei",
+  "display_name": "美美",
+  "result": "pass_with_minor_direction_warnings",
+  "atlas": {
+    "path": "../final/spritesheet-extended.webp",
+    "width": 1536,
+    "height": 2288,
+    "cell_width": 192,
+    "cell_height": 208,
+    "sha256": "c64581a0051819aff82f1229ae4cfe4afa5b67f075e2fd6739fe75b48ef4ea87",
+    "sprite_version_number": 2
+  },
+  "generation": {
+    "method": "Grounded regeneration from the user's original character references; source images were not used as direct animation frames.",
+    "standard_rows": 9,
+    "look_directions": 16,
+    "repaired_rows": ["running-right", "failed", "look-row-10"]
+  },
+  "qa": {
+    "structural_validation": "pass",
+    "chroma_despill": "pass",
+    "three_reviewer_blind_direction_gate": "pass_with_warnings",
+    "independent_final_visual_qa": "pass",
+    "accepted_warnings": [
+      "247.5 and 292.5 have subtle vertical cues at actual display size.",
+      "157.5→180 and 337.5→000 are continuity metric outliers without a visible break."
+    ]
+  },
+  "installed_paths": [
+    "/Users/mika/project/workbench/desktop/pet/spritesheet.webp",
+    "/Users/mika/.codex/pets/meimei/spritesheet.webp"
+  ],
+  "cleanup": {
+    "kept": "Final WebP, source asset directory, previews, and QA evidence.",
+    "recoverable_intermediates": "/Users/mika/.Trash/meimei-v2-intermediates-20260820"
+  },
+  "verification": [
+    "frontend: npm run build (pass)",
+    "server: npm run typecheck:server (pass)",
+    "server: npm run test:server (18 files, 218 tests pass)",
+    "server: npm run build:server (pass)",
+    "desktop: npm test (pass)",
+    "desktop: npm run build:dir (pass; unsigned local macOS directory build)",
+    "git diff --check (pass)"
+  ],
+  "remaining_manual_qa": [
+    "Windows mouse forwarding, drag, and transparent hit-testing",
+    "Cross-display and high-DPI interaction checks"
+  ]
+}

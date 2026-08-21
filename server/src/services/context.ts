@@ -161,7 +161,7 @@ export function listContexts(conn?: Database): Record<string, unknown> {
 }
 
 export function createClass(
-  name: string, grade = '', termName = '默认学期',
+  name: string, grade = '', termName = '当前学期',
   startDate = '', endDate = '', conn?: Database,
 ): Record<string, unknown> {
   const db = connOf(conn);

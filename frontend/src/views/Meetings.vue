@@ -166,7 +166,7 @@ onMounted(load)
         </template>
       </div>
     </div>
-    <div class="card template-strip"><div><div class="card-title">班会模板</div><div class="hint">把常用主题和形式保存下来，减少重复录入。</div></div><div class="inline-form"><input v-model="templateName" class="form-input" placeholder="模板名称"><button class="btn btn-outline" @click="saveTemplate"><FileText :size="14" /> 保存模板</button></div></div>
+    <div class="card template-strip"><div><div class="card-title">班会模板</div></div><div class="inline-form"><input v-model="templateName" class="form-input" placeholder="模板名称"><button class="btn btn-outline" @click="saveTemplate"><FileText :size="14" /> 保存模板</button></div></div>
   </div>
 </template>
 

@@ -1,0 +1,6 @@
+visual_qa=pass
+qa_note=All nine rows are readable and identity-consistent, with coherent silhouettes, stable baselines, clean transparent edges, and appropriate pose variation.
+direction_semantics=000 up pass;022.5 up-right pass;045 up-right pass;067.5 up-right pass;090 right pass;112.5 down-right pass;135 down-right pass;157.5 down-right pass;180 down pass;202.5 down-left pass;225 down-left pass;247.5 down-left warning—left clear, down subtle;270 left pass;292.5 up-left warning—left clear, up subtle;315 up-left pass;337.5 up-left pass
+review_warnings=247.5/292.5 blind vertical classifications are accepted as minor because all cardinals pass and the labeled clockwise loop remains clear;157.5→180 and 337.5→000 continuity outliers are metric warnings without a visible identity, baseline, or silhouette break
+repair_rows=none
+repair_notes=none

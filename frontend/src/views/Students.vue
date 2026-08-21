@@ -16,7 +16,7 @@ const editData = ref(null)
 const keyword = ref('')
 const router = useRouter()
 const { confirm: confirmDialog } = useConfirmDialog()
-const studentHeaders = ['学号', '姓名', '性别', '出生年月', '民族', '是否住校', '班级任职', '监护人']
+const studentHeaders = ['学号', '姓名', '性别', '出生日期', '民族', '是否住校', '班级任职', '监护人']
 const studentColWidths = [72, 76, 48, 86, 58, 72, 88, 100]
 
 async function load() {
@@ -61,6 +61,7 @@ function startEdit(rowNo) {
     '家庭住址': student['家庭住址'] ?? '',
     '监护人姓名': student['监护人姓名'] ?? '',
     '监护人电话': student['监护人电话'] ?? '',
+    '监护人关系': student['监护人关系'] ?? '',
     '监护人职业': student['监护人职业'] ?? '',
     '是否住校': student['是否住校'] ?? '',
     '特长': student['特长'] ?? '',
@@ -69,6 +70,7 @@ function startEdit(rowNo) {
     '监护人2姓名': student['监护人2姓名'] ?? '',
     '监护人2电话': student['监护人2电话'] ?? '',
     '监护人2关系': student['监护人2关系'] ?? '',
+    '监护人2职业': student['监护人2职业'] ?? '',
   }
   showModal.value = true
 }

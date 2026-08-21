@@ -290,7 +290,7 @@ function addEvidencePlaceholder(db, dataDir, classId, termId) {
   return true;
 }
 
-function ensureScope(db, className = '默认班级', termName = '默认学期') {
+function ensureScope(db, className = '我的班级', termName = '当前学期') {
   let classRow = firstRow(
     db,
     `SELECT id, name FROM classes WHERE name=? AND status='使用中' ORDER BY id LIMIT 1`,

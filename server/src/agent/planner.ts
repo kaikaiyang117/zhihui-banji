@@ -203,7 +203,7 @@ export function build_rule_plan(text: string, registry: ToolRegistry): AgentPlan
     if (!name_query && occupation_query) {
       fields.push('guardian_occupation');
     } else if (!name_query && ['家长', '监护人'].some((term) => normalized_text.includes(term))) {
-      fields.push('guardian_name', 'guardian_occupation', 'guardian2_name', 'guardian2_relationship');
+      fields.push('guardian_name', 'guardian_relationship', 'guardian_occupation', 'guardian2_name', 'guardian2_relationship', 'guardian2_occupation');
     } else if (!name_query) {
       fields.push('gender', 'birth_month', 'ethnicity', 'is_boarding', 'specialty', 'class_role');
     }

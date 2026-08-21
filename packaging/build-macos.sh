@@ -6,11 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-if [ ! -f "backend/static/index.html" ]; then
-  echo "未找到前端构建产物，请先执行：cd frontend && npm run build"
-  exit 1
-fi
-
 VERSION="${APP_VERSION#v}"
 VERSION="${VERSION:-0.0.0-dev}"
 ARCH="${1:-$(uname -m)}"
@@ -30,11 +25,8 @@ if [ ! -d "build/server-bundle/dist" ]; then
   exit 1
 fi
 
-echo "==> 安装桌面依赖"
-cd desktop
-npm ci || npm install
-
 echo "==> 同步桌面应用版本（${VERSION}）"
+cd desktop
 node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version='${VERSION}';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
 
 echo "==> Electron Builder 打包（${ARCH}）"
@@ -60,7 +52,7 @@ if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_APP_PA
 else
   echo "::warning::未配置完整 macOS 公证凭证，将跳过公证。"
 fi
-npx electron-builder --config electron-builder.yml --mac --"${ARCH//x86_64/x64}" --publish never
+./node_modules/.bin/electron-builder --config electron-builder.yml --mac --"${ARCH//x86_64/x64}" --publish never
 cd ..
 
 BUILDER_ARCH="${ARCH//x86_64/x64}"

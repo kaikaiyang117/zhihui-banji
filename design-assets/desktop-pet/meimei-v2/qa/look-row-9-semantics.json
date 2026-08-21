@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "row": 9,
+  "registration": "look-row-9-registration.json",
+  "continuity": "pass: feet and lower body remain registered; head and eye direction advances without a visible reversal or scale pop",
+  "directions": [
+    {"degree": "000", "verdict": "pass", "observed": "eyes and chin point up"},
+    {"degree": "022.5", "verdict": "pass", "observed": "upward gaze begins moving screen-right"},
+    {"degree": "045", "verdict": "pass", "observed": "clear up-right head and eye pose"},
+    {"degree": "067.5", "verdict": "pass", "observed": "rightward turn increases while retaining upward cue"},
+    {"degree": "090", "verdict": "pass", "observed": "face and eyes point screen-right"},
+    {"degree": "112.5", "verdict": "pass", "observed": "rightward pose begins lowering"},
+    {"degree": "135", "verdict": "pass", "observed": "clear down-right head and eye pose"},
+    {"degree": "157.5", "verdict": "pass", "observed": "downward cue dominates while retaining screen-right turn"}
+  ]
+}

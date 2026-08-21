@@ -5,12 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "未找到 Node.js，请先安装 Node.js 20+。"
+  echo "未找到 Node.js，请先安装 Node.js 22 LTS。"
   exit 1
 fi
 
-if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'; then
-  echo "项目需要 Node.js 20+，当前版本为：$(node --version)"
+if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) === 22 ? 0 : 1)'; then
+  echo "项目需要 Node.js 22.x，当前版本为：$(node --version)"
   exit 1
 fi
 

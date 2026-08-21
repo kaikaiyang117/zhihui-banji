@@ -92,6 +92,7 @@ const markers = {
   SMOKE_TITLE: null,
   SMOKE_ENTRIES: null,
   SMOKE_BACKEND: null,
+  SMOKE_PET: null,
   SMOKE_OK: false,
   SMOKE_FAIL: null,
 };
@@ -156,6 +157,9 @@ if (markers.SMOKE_ENTRIES !== '1') {
 }
 if (markers.SMOKE_BACKEND !== 'ok') {
   fail('后端健康检查未通过', output);
+}
+if (markers.SMOKE_PET !== 'ok') {
+  fail('桌面宠物 v2 素材检查未通过', output);
 }
 
 if (backendUrl) {

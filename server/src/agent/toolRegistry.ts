@@ -165,9 +165,11 @@ const STUDENT_QUERY_FIELDS: Record<string, [string, string]> = {
   birth_month: ['s.出生年月', '出生年月'],
   ethnicity: ['s.民族', '民族'],
   guardian_name: ['s.监护人姓名', '监护人姓名'],
+  guardian_relationship: ['s.监护人关系', '监护人关系'],
   guardian_occupation: ['s.监护人职业', '监护人职业'],
   guardian2_name: ['s.监护人2姓名', '监护人2姓名'],
   guardian2_relationship: ['s.监护人2关系', '监护人2关系'],
+  guardian2_occupation: ['s.监护人2职业', '监护人2职业'],
   is_boarding: ['s.是否住校', '是否住校'],
   specialty: ['s.特长', '特长'],
   class_role: ['s.班级任职', '班级任职'],
@@ -240,8 +242,8 @@ function getStudentProfile(args: Record<string, unknown>): Record<string, unknow
   const [classId, termId] = scopeIds({ conn });
   const row = conn.prepare(
     'SELECT id, 学号, 姓名, 性别, 出生年月, 民族, 家庭住址, 监护人姓名, '
-    + '监护人电话, 监护人职业, 是否住校, 特长, 班级任职, 备注, '
-    + '监护人2姓名, 监护人2电话, 监护人2关系 '
+    + '监护人电话, 监护人关系, 监护人职业, 是否住校, 特长, 班级任职, 备注, '
+    + '监护人2姓名, 监护人2电话, 监护人2关系, 监护人2职业 '
     + "FROM students s WHERE id=? AND s.deleted_at='' AND EXISTS("
     + 'SELECT 1 FROM student_enrollments e WHERE e.student_id=s.id AND e.class_id=? AND e.term_id=?)',
   ).get(studentId, classId, termId) as Record<string, unknown> | undefined;
@@ -912,8 +914,8 @@ export function buildRegistry(): ToolRegistry {
               type: 'string',
               enum: [
                 'student_id', 'student_no', 'student_name', 'gender', 'birth_month',
-                'ethnicity', 'guardian_name', 'guardian_occupation', 'guardian2_name',
-                'guardian2_relationship', 'is_boarding', 'specialty', 'class_role',
+                'ethnicity', 'guardian_name', 'guardian_relationship', 'guardian_occupation', 'guardian2_name',
+                'guardian2_relationship', 'guardian2_occupation', 'is_boarding', 'specialty', 'class_role',
               ],
             },
             minItems: 1,
@@ -939,8 +941,8 @@ export function buildRegistry(): ToolRegistry {
           group_by: {
             type: 'string',
             enum: [
-              'gender', 'guardian_occupation', 'is_boarding',
-              'guardian2_relationship', 'class_role', 'ethnicity',
+              'gender', 'guardian_relationship', 'guardian_occupation', 'is_boarding',
+              'guardian2_relationship', 'guardian2_occupation', 'class_role', 'ethnicity',
             ],
             description: '分组字段',
           },

@@ -40,8 +40,7 @@ onMounted(load)
       <div v-else-if="!events.length" class="empty-state">还没有事件记录，记录一次日常观察吧</div>
       <div v-else class="event-list">
         <div v-for="event in events" :key="event.id" class="event-card" :class="{ 'source-highlight': event.id === sourceId }">
-          <div class="event-card-top"><span class="event-type">{{ event.event_type }}</span><span>{{ event.occurred_at }}</span></div>
-          <div class="event-card-name">{{ event.student_name }}</div>
+          <div class="event-card-top"><div class="event-identity"><span class="event-type">{{ event.event_type }}</span><span class="event-card-name">{{ event.student_name }}</span></div><span class="event-date">{{ event.occurred_at }}</span></div>
           <div class="event-card-description">{{ event.description }}</div>
           <div class="event-card-bottom"><span class="tag" :class="event.status === '已完成' ? 'tag-green' : 'tag-orange'">{{ event.status }}</span><span v-if="event.followup_due" class="hint">跟进：{{ event.followup_due }}</span></div>
           <div class="record-actions"><button class="btn btn-sm btn-outline" @click="workflowTarget = event">查看跟进</button><button class="btn btn-sm btn-outline" aria-label="删除事件" @click="removeEvent(event)"><Trash2 :size="13" /></button></div>
@@ -52,3 +51,61 @@ onMounted(load)
     <WorkflowModal v-if="workflowTarget" source-type="event" :source-id="workflowTarget.id" action-label="查看事件跟进" :title="`${workflowTarget.student_name} · ${workflowTarget.event_type}`" @close="workflowTarget = null" @success="workflowTarget = null; load()" />
   </div>
 </template>
+
+<style scoped>
+.event-card-top {
+  align-items: baseline;
+  color: var(--ds-color-ink-secondary);
+  font: var(--ds-type-meta);
+}
+
+.event-identity {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.event-type {
+  color: var(--ds-color-primary);
+  font: var(--ds-type-label);
+}
+
+.event-card-name {
+  margin-top: 0;
+  color: var(--ds-color-ink);
+  font: var(--ds-type-title);
+}
+
+.event-date {
+  flex: 0 0 auto;
+  color: var(--ds-color-ink-muted);
+  font: var(--ds-type-meta);
+}
+
+.event-card-description {
+  margin: 12px 0 10px;
+  color: var(--ds-color-ink-secondary);
+  font: var(--ds-type-body);
+}
+
+.event-card-bottom {
+  flex-wrap: wrap;
+  color: var(--ds-color-ink-muted);
+  font: var(--ds-type-meta);
+}
+
+.event-card-bottom .hint {
+  color: inherit;
+  font: inherit;
+}
+
+.event-card .record-actions {
+  margin-top: 14px;
+}
+
+.event-card .record-actions .btn {
+  margin-top: 0;
+}
+</style>

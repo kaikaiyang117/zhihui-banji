@@ -63,7 +63,7 @@ export function registerMig05Routes(app: FastifyInstance): void {
   app.post('/api/classes', async (request, reply) => {
     const body = request.body as { name: string; grade?: string; term_name?: string; start_date?: string; end_date?: string };
     try {
-      const result = createClass(body.name, body.grade ?? '', body.term_name ?? '默认学期',
+      const result = createClass(body.name, body.grade ?? '', body.term_name ?? '当前学期',
         body.start_date ?? '', body.end_date ?? '');
       return { ok: true, ...result };
     } catch (error) {
