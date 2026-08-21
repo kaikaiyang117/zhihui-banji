@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import * as nt from '../../services/notificationTemplates.js';
 import { ArchivedScopeError, ScopeError } from '../../services/context.js';
+import * as notificationDrafter from '../../agent/notificationDrafter.js';
 
 function mapError(reply: FastifyReply, error: unknown): FastifyReply | undefined {
   if (error instanceof ArchivedScopeError) return reply.status(409).send({ detail: error.message });
@@ -12,6 +13,9 @@ function mapError(reply: FastifyReply, error: unknown): FastifyReply | undefined
       : /不能/.test(message) ? 403
       : /已存在/.test(message) ? 409 : 400;
     return reply.status(status).send({ detail: message });
+  }
+  if (error instanceof notificationDrafter.NotificationAIDraftError) {
+    return reply.status(400).send({ detail: error.message });
   }
   const record = error as { code?: unknown };
   if (record && typeof record.code === 'string' && record.code.startsWith('SQLITE_CONSTRAINT')) {
@@ -51,6 +55,25 @@ export function registerNotificationTemplateRoutes(app: FastifyInstance): void {
       variableValues: body.variable_values ?? {},
     });
   }));
+
+  app.post('/api/notification-templates/generate-ai', async (request, reply) => {
+    try {
+      const body = request.body as {
+        template_id?: number;
+        variable_values?: Record<string, string>;
+        instruction?: string;
+      };
+      return await notificationDrafter.generateNotificationDraft({
+        templateId: Number(body.template_id ?? 0),
+        variableValues: body.variable_values ?? {},
+        instruction: body.instruction,
+      });
+    } catch (error) {
+      const mapped = mapError(reply, error);
+      if (mapped) return mapped;
+      throw error;
+    }
+  });
 
   app.post('/api/notification-templates', async (request, reply) => wrap(reply, () => ({
     ok: true,

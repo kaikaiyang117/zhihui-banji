@@ -5,7 +5,7 @@ import * as audit from './audit.js';
 
 export class NotificationTemplateError extends Error {}
 
-export const SCENES = ['放假通知', '安全提醒', '调课通知', '班级活动', '材料收集'];
+export const SCENES = ['放假通知', '安全提醒', '调课通知', '班级活动', '缴费回执', '学习提醒', '家长会', '材料收集'];
 
 export interface TemplateVariable {
   name: string;
@@ -53,6 +53,38 @@ const SYSTEM_TEMPLATES: Array<{ name: string; scene: string; content: string; va
       { name: 'activity_name', label: '活动名称', required: true, format: 'text', default_value: '' },
       { name: 'activity_date', label: '活动日期', required: true, format: 'date', default_value: '' },
       { name: 'activity_details', label: '活动详情', required: false, format: 'text', default_value: '' },
+      { name: 'class_name', label: '班级名称', required: false, format: 'class_name', default_value: '' },
+    ],
+  },
+  {
+    name: '缴费回执/项目确认',
+    scene: '缴费回执',
+    content: `各位家长：\n学校已明确的{payment_item}请于{payment_deadline}前完成{payment_action}。已完成的家长无需重复操作，如有疑问请提前联系班主任。\n\n{class_name}班主任`,
+    variables: [
+      { name: 'payment_item', label: '项目名称', required: true, format: 'text', default_value: '' },
+      { name: 'payment_deadline', label: '截止日期', required: true, format: 'date', default_value: '' },
+      { name: 'payment_action', label: '要求动作', required: false, format: 'text', default_value: '缴费或提交回执' },
+      { name: 'class_name', label: '班级名称', required: false, format: 'class_name', default_value: '' },
+    ],
+  },
+  {
+    name: '学习安排提醒',
+    scene: '学习提醒',
+    content: `各位家长：\n本阶段学习安排：{study_content}。请家长协助孩子合理安排时间，按要求完成。\n\n{class_name}班主任`,
+    variables: [
+      { name: 'study_content', label: '学习安排', required: true, format: 'text', default_value: '' },
+      { name: 'class_name', label: '班级名称', required: false, format: 'class_name', default_value: '' },
+    ],
+  },
+  {
+    name: '家长会通知',
+    scene: '家长会',
+    content: `各位家长：\n家长会将于{meeting_date}{meeting_time}在{meeting_location}举行，会议主题为{meeting_topic}。请您准时参加，如有特殊情况请提前联系班主任。\n\n{class_name}班主任`,
+    variables: [
+      { name: 'meeting_date', label: '会议日期', required: true, format: 'date', default_value: '' },
+      { name: 'meeting_time', label: '会议时间', required: true, format: 'time', default_value: '' },
+      { name: 'meeting_location', label: '会议地点', required: true, format: 'text', default_value: '' },
+      { name: 'meeting_topic', label: '会议主题', required: false, format: 'text', default_value: '本阶段学生学习与成长沟通' },
       { name: 'class_name', label: '班级名称', required: false, format: 'class_name', default_value: '' },
     ],
   },
@@ -150,7 +182,7 @@ export function generateContent(options: {
   templateId: number;
   variableValues: Record<string, string>;
   conn?: Database;
-}): { content: string; missingVariables: string[] } {
+}): { content: string; missingVariables: string[]; resolvedValues: Record<string, string> } {
   const conn = connOf(options.conn);
   const row = rowByIdOrFail(options.templateId, { conn });
   if (Number(row.is_system) !== 1 && Number(row.is_owner_saved) !== 1) {
@@ -188,7 +220,7 @@ export function generateContent(options: {
   for (const [key, val] of Object.entries(values)) {
     content = content.replaceAll(`{${key}}`, val);
   }
-  return { content, missingVariables: missing };
+  return { content, missingVariables: missing, resolvedValues: values };
 }
 
 export function savePersonalTemplate(options: {

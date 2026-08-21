@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AlertTriangle, CalendarDays, CheckCircle, Edit3, FileUp, Plus, X } from 'lucide-vue-next'
 import { get, post, put, upload } from '../api'
 
@@ -17,6 +17,9 @@ const fileInput = ref(null)
 const importPreview = ref(null)
 const showEditor = ref(false)
 const editingId = ref(null)
+const termCalendarCard = ref(null)
+const listCardHeight = ref('')
+let calendarResizeObserver = null
 const form = reactive({ calendar_date: today(), day_type: '上课日', title: '', is_school_day: true, note: '' })
 
 const dayTypes = ['上课日', '放假日', '调休上课', '考试日', '活动日', '其他']
@@ -52,7 +55,20 @@ async function load() {
     weeks.value = data.weeks || []
     scope.value = data.scope || scope.value
     summary.value = data.summary || summary.value
-  } catch (e) { error.value = e.message } finally { loading.value = false }
+  } catch (e) { error.value = e.message } finally {
+    loading.value = false
+    await nextTick()
+    syncListHeight()
+  }
+}
+
+function syncListHeight() {
+  if (window.innerWidth <= 900) {
+    listCardHeight.value = ''
+    return
+  }
+  const height = termCalendarCard.value?.getBoundingClientRect().height
+  if (height) listCardHeight.value = `${Math.ceil(height)}px`
 }
 
 async function saveEntry() {
@@ -92,7 +108,18 @@ async function commitImport() {
   } catch (e) { error.value = e.message } finally { committing.value = false }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (typeof ResizeObserver !== 'undefined' && termCalendarCard.value) {
+    calendarResizeObserver = new ResizeObserver(syncListHeight)
+    calendarResizeObserver.observe(termCalendarCard.value)
+  }
+  window.addEventListener('resize', syncListHeight)
+})
+onBeforeUnmount(() => {
+  calendarResizeObserver?.disconnect()
+  window.removeEventListener('resize', syncListHeight)
+})
 </script>
 
 <template>
@@ -116,7 +143,7 @@ onMounted(load)
     </section>
 
     <div class="school-calendar-layout">
-      <section class="card term-calendar-card">
+      <section ref="termCalendarCard" class="card term-calendar-card">
         <div class="calendar-head"><div><strong><CalendarDays :size="16" /> 学期全览</strong><small>第 {{ summary.current_week || '—' }} 周 / {{ summary.week_count || '—' }} 周</small></div><span class="hint">点击日期查看或修正安排</span></div>
         <div v-if="loading" class="loading">加载中…</div>
         <div v-else-if="!weeks.length" class="empty-state compact">当前学期还没有设置起止日期，无法生成学期视图。</div>
@@ -136,7 +163,7 @@ onMounted(load)
         <div class="calendar-legend"><span><i class="legend-dot school-dot"></i>上课日</span><span><i class="legend-dot holiday-dot"></i>非上课日</span><span><i class="legend-dot event-dot"></i>特殊安排</span><span><i class="legend-dot unset-dot"></i>未设置</span></div>
       </section>
 
-      <section class="card school-calendar-list-card">
+      <section class="card school-calendar-list-card" :style="listCardHeight ? { height: listCardHeight } : undefined">
         <div class="card-title"><CalendarDays :size="16" /> 重点安排 <span class="count">{{ specialEntries.length }} 项</span></div>
         <div v-if="!specialEntries.length" class="empty-state compact">当前学期还没有考试、活动、调休或节假日说明。</div>
         <div v-else class="school-calendar-list"><button v-for="entry in specialEntries" :key="entry.id" class="school-calendar-list-row" @click="openEditor(entry)"><span class="school-calendar-date">{{ entry.calendar_date.slice(5) }}</span><span class="school-calendar-list-copy"><strong>{{ entry.title || entry.day_type }}</strong><small>{{ entry.day_type }} · {{ entry.is_school_day ? '上课日' : '非上课日' }}<template v-if="entry.note"> · {{ entry.note }}</template></small></span><Edit3 :size="14" /></button></div>
@@ -157,33 +184,33 @@ onMounted(load)
 .calendar-summary-item { display: grid; gap: 4px; padding: 14px 16px; }
 .calendar-summary-item span, .calendar-summary-item small { color: var(--text-secondary); font-size: 11px; }
 .calendar-summary-item strong { font-size: 24px; line-height: 1.1; }
-.school-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .65fr); gap: 16px; margin-top: 16px; align-items: stretch; }
+.school-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .65fr); gap: 16px; margin-top: 16px; align-items: start; }
 .calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .calendar-head > div { display: grid; gap: 4px; }
 .calendar-head strong { display: flex; align-items: center; gap: 7px; }
 .calendar-head small, .calendar-head .hint { color: var(--text-secondary); font-size: 11px; }
-.term-calendar-card, .school-calendar-list-card { min-width: 0; min-height: 0; height: 100%; align-self: stretch; }
+.term-calendar-card, .school-calendar-list-card { min-width: 0; min-height: 0; height: auto; align-self: start; }
 .term-calendar-card { display: flex; flex-direction: column; }
 .term-calendar-scroll { flex: 0 0 auto; min-height: 0; overflow-x: auto; padding-bottom: 2px; }
 .term-week-grid { min-width: 0; border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
-.term-week-header, .term-week-row { display: grid; grid-template-columns: 72px repeat(7, minmax(0, 1fr)); }
+.term-week-header, .term-week-row { display: grid; grid-template-columns: 88px repeat(7, minmax(0, 1fr)); }
 .term-week-header { background: var(--surface-subtle, #f8f8fa); color: var(--text-tertiary); font-size: 11px; font-weight: 600; }
 .term-week-header > span { padding: 9px 7px; text-align: center; }
 .term-week-header > span:first-child { text-align: left; }
 .term-week-row { border-top: 1px solid var(--border-light); }
 .term-week-row.is-current-week { background: rgba(91, 106, 191, .035); }
 .term-week-label { display: grid; align-content: center; gap: 3px; padding: 7px; border-right: 1px solid var(--border-light); }
-.term-week-label strong { color: var(--text); font-size: 11px; }.term-week-label small { color: var(--text-tertiary); font-size: 10px; }
-.term-day { display: grid; align-content: start; gap: 4px; min-height: 76px; padding: 7px; border: 0; border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.term-week-label strong { color: var(--text); font-size: 11px; }.term-week-label small { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+.term-day { display: grid; align-content: center; justify-items: center; gap: 4px; min-height: 76px; padding: 7px; border: 0; border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: center; cursor: pointer; }
 .term-day:last-child { border-right: 0; }.term-day:hover:not(:disabled) { background: var(--primary-bg); }.term-day.is-outside { background: var(--bg); color: var(--text-tertiary); cursor: default; }.term-day.is-today { box-shadow: inset 0 0 0 2px var(--primary); }.term-day.is-school { background: rgba(45, 180, 95, .065); }.term-day.is-holiday { background: rgba(235, 90, 105, .06); }.term-day.is-special { background: var(--primary-bg); }
 .term-day-number { color: var(--text-secondary); font-size: 11px; font-weight: 700; }.term-day.is-today .term-day-number { color: var(--primary); }.term-day strong { overflow: hidden; color: var(--text); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.term-day small { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; color: var(--text-secondary); font-size: 11px; }
 .legend-dot { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; background: var(--success); }
 .holiday-dot { background: var(--danger); }.event-dot { background: var(--primary); }.unset-dot { background: var(--border); }
-.school-calendar-list-card { display: flex; flex-direction: column; overflow: hidden; }.school-calendar-list { display: grid; flex: 1 1 auto; min-height: 0; gap: 6px; margin-top: 13px; max-height: none; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }.school-calendar-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.school-calendar-list-card { display: flex; flex-direction: column; overflow: hidden; }.school-calendar-list { display: grid; flex: 1 1 auto; min-height: 0; gap: 6px; margin-top: 13px; max-height: 100%; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }.school-calendar-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .school-calendar-list-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 10px 9px; border: 1px solid var(--border-light); border-radius: 10px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
 .school-calendar-list-row:hover { border-color: rgba(91, 106, 191, .35); background: var(--primary-bg); }.school-calendar-date { color: var(--primary); font-size: 12px; font-weight: 700; }.school-calendar-list-copy { display: grid; gap: 3px; min-width: 0; }.school-calendar-list-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.school-calendar-list-copy small { color: var(--text-secondary); }.calendar-import-help { margin-top: 16px; }.calendar-import-help p { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }.calendar-entry-modal { max-width: 620px; }.calendar-preview-modal { width: min(1080px, calc(100vw - 36px)); max-height: min(86vh, 800px); display: flex; flex-direction: column; }.calendar-preview-modal h3 { margin-bottom: 4px; }.calendar-preview-counts { margin: 16px 0 10px; }.calendar-preview-counts .warning { color: var(--warning); }.calendar-warning { display: flex; align-items: center; gap: 6px; }.calendar-preview-table { flex: 1; min-height: 180px; overflow: auto; }.calendar-school-day { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: 12px; }.calendar-school-day input { margin: 0; }
 .modal-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }.calendar-modal-close { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }.calendar-modal-close:hover { background: var(--surface-subtle); color: var(--text); }.calendar-modal-close:active { background: var(--primary-bg); transform: scale(.96); }
-@media (max-width: 900px) { .calendar-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.school-calendar-layout { grid-template-columns: 1fr; }.term-calendar-card, .school-calendar-list-card { height: auto; }.school-calendar-list-card { overflow: visible; }.school-calendar-list { max-height: 420px; } }
+@media (max-width: 900px) { .calendar-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.school-calendar-layout { grid-template-columns: 1fr; }.term-calendar-card, .school-calendar-list-card { height: auto !important; }.school-calendar-list-card { overflow: visible; }.school-calendar-list { max-height: 420px; } }
 @media (max-width: 600px) { .calendar-summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; }.calendar-head .hint { display: none; }.term-calendar-scroll { overflow-x: auto; }.term-week-grid { min-width: 700px; }.calendar-preview-modal { width: calc(100vw - 20px); max-height: 91vh; padding: 16px; } }
 </style>

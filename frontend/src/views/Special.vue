@@ -61,6 +61,16 @@ onMounted(load)
 </template>
 
 <style scoped>
+.focus-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.focus-card {
+  display: flex;
+  flex-direction: column;
+}
+
 .focus-card-head {
   align-items: baseline;
   color: var(--ds-color-ink-secondary);
@@ -103,5 +113,11 @@ onMounted(load)
 
 .focus-card .record-actions .btn {
   margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .focus-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

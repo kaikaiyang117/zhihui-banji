@@ -12,6 +12,7 @@ import {
   clearDeviceCredential,
   del,
   discardExcelImport,
+  downloadExcelImportErrors,
   executeExcelImport,
   fetchWithAccess,
   get,
@@ -583,20 +584,26 @@ async function handleAgentExcelFile(event) {
     const formData = new FormData()
     formData.append('file', file)
     const analysis = await analyzeExcelImport(formData, agentSessionId.value)
+    const singleCandidate = analysis.candidate_modules?.length === 1 ? analysis.candidate_modules[0] : null
     agentExcel.value = {
       ...agentExcel.value,
       step: 'analyzed',
       busy: false,
       fileId: analysis.file_id,
       analysis,
-      module: analysis.candidate_modules?.length === 1 ? analysis.candidate_modules[0].module : '',
-      sheetIndex: 0,
+      module: singleCandidate?.module || '',
+      sheetIndex: singleCandidate?.sheet_index ?? 0,
       duplicateStrategy: 'update',
     }
     scrollAgentToBottom({ instant: true })
   } catch (error) {
     agentExcel.value = { ...agentExcel.value, step: 'idle', busy: false, error: error.detail?.message || error.message || '文件分析失败' }
   }
+}
+
+function selectAgentExcelCandidate(candidate) {
+  agentExcel.value.module = candidate.module
+  agentExcel.value.sheetIndex = candidate.sheet_index ?? 0
 }
 
 async function previewAgentExcel() {
@@ -620,6 +627,14 @@ async function executeAgentExcel() {
     agentExcel.value = { ...agentExcel.value, step: 'result', busy: false, result }
   } catch (error) {
     agentExcel.value = { ...agentExcel.value, busy: false, error: error.detail?.message || error.message || '导入执行失败' }
+  }
+}
+
+async function downloadAgentExcelErrors() {
+  try {
+    await downloadExcelImportErrors(agentExcel.value.fileId, agentExcel.value.module, agentSessionId.value)
+  } catch (error) {
+    agentExcel.value.error = error.message || '错误报告下载失败'
   }
 }
 
@@ -898,10 +913,15 @@ onBeforeUnmount(() => {
               <div v-if="agentExcel.step === 'uploading'" class="agent-excel-loading">正在读取工作表和字段…</div>
               <template v-else-if="agentExcel.analysis && agentExcel.step === 'analyzed'">
                 <div class="agent-excel-summary">{{ formatAgentFileSize(agentExcel.analysis.size_bytes) }} · {{ agentExcel.analysis.sheets?.join('、') || '未识别工作表' }}</div>
+                <div class="agent-excel-recognition">
+                  <span>{{ agentExcel.analysis.recognition_mode === 'hybrid' ? 'AI 语义识别 + 本地规则校验' : '本地规则识别' }}</span>
+                  <span v-if="agentExcel.analysis.scope">导入到 {{ agentExcel.analysis.scope.class_name }} · {{ agentExcel.analysis.scope.term_name }}</span>
+                </div>
+                <div v-if="agentExcel.analysis.recognition_warning" class="agent-excel-warning">{{ agentExcel.analysis.recognition_warning }}</div>
                 <div v-if="agentExcel.analysis.candidate_modules?.length" class="agent-excel-options">
-                  <label v-for="candidate in agentExcel.analysis.candidate_modules" :key="candidate.module" class="agent-excel-option" :class="{ selected: agentExcel.module === candidate.module }">
-                    <input v-model="agentExcel.module" type="radio" :value="candidate.module" :disabled="agentExcel.busy" />
-                    <span><strong>{{ agentExcelModuleName(candidate.module) }}</strong><small>{{ candidate.reason }}</small></span>
+                  <label v-for="candidate in agentExcel.analysis.candidate_modules" :key="`${candidate.module}-${candidate.sheet_index}`" class="agent-excel-option" :class="{ selected: agentExcel.module === candidate.module && agentExcel.sheetIndex === candidate.sheet_index }">
+                    <input :checked="agentExcel.module === candidate.module && agentExcel.sheetIndex === candidate.sheet_index" type="radio" :disabled="agentExcel.busy" @change="selectAgentExcelCandidate(candidate)" />
+                    <span><strong>{{ agentExcelModuleName(candidate.module) }} · {{ agentExcel.analysis.sheets[candidate.sheet_index] }}</strong><small>{{ candidate.reason }}</small></span>
                   </label>
                 </div>
                 <div v-else class="agent-excel-empty">未自动识别模块，请确认文件首行是否为字段名。</div>
@@ -929,7 +949,10 @@ onBeforeUnmount(() => {
               </template>
               <template v-else-if="agentExcel.result && agentExcel.step === 'result'">
                 <div class="agent-excel-success">导入完成：新增 {{ agentExcel.result.imported }}，更新 {{ agentExcel.result.updated }}，跳过 {{ agentExcel.result.skipped }}，错误 {{ agentExcel.result.error_count }}。</div>
-                <div class="agent-excel-controls"><button class="btn btn-outline btn-sm" type="button" @click="resetAgentExcelState">继续上传</button></div>
+                <div class="agent-excel-controls">
+                  <button v-if="agentExcel.result.error_count > 0" class="btn btn-outline btn-sm" type="button" @click="downloadAgentExcelErrors">下载错误报告</button>
+                  <button class="btn btn-outline btn-sm" type="button" @click="discardAgentExcel">继续上传</button>
+                </div>
               </template>
               <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
             </div>
@@ -1307,6 +1330,7 @@ onBeforeUnmount(() => {
 .agent-excel-remove { flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: 7px; background: transparent; color: var(--text-tertiary); font-size: 17px; line-height: 1; cursor: pointer; }
 .agent-excel-remove:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-excel-summary, .agent-excel-loading, .agent-excel-empty { margin-top: 6px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.agent-excel-recognition { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; color: var(--primary); font-size: 11px; }
 .agent-excel-options { display: grid; gap: 5px; margin-top: 8px; }
 .agent-excel-option { display: flex; align-items: flex-start; gap: 7px; padding: 6px 7px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .agent-excel-option.selected { border-color: rgba(91,106,191,.4); background: var(--primary-bg); }

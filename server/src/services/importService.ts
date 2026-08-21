@@ -24,6 +24,9 @@ function cellText(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  if (typeof value === 'object' && value !== null && 'formula' in value) {
+    return cellText((value as { result?: unknown }).result);
+  }
   return String(value).trim();
 }
 

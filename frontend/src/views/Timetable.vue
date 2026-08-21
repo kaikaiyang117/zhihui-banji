@@ -432,7 +432,9 @@ onMounted(load)
 .subject-tone-green { --entry-bg: #eef8e9; --entry-border: #c8e1bb; --entry-ink: #3b6730; }
 .subject-tone-lime { --entry-bg: #f4f8e8; --entry-border: #d9e6b3; --entry-ink: #5e711f; }
 .timetable-empty { display: block; width: 100%; min-height: 32px; }
-.timetable-lower-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 16px; margin-top: 16px; }
+.timetable-lower-grid { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(320px,.85fr); gap: 16px; align-items: start; margin-top: 16px; }
+.day-schedule-card { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:16px; }
+.day-schedule-card > .section-heading, .day-schedule-card > .day-meta, .day-schedule-card > .empty-state { grid-column:1 / -1; }
 .day-meta { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
 .day-course-row { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
 .day-course-row.changed { background: var(--warning-bg, #fff8e1); margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
@@ -494,6 +496,7 @@ onMounted(load)
 @media (max-width: 800px) {
   .timetable-actions { grid-template-columns: 1fr; }
   .timetable-lower-grid { grid-template-columns: 1fr; }
+  .day-schedule-card { grid-template-columns:1fr; }
   .my-classes-list { flex-direction: column; }
   .my-class-row { width: 100%; justify-content: space-between; }
 }

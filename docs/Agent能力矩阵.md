@@ -57,10 +57,11 @@
 | 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
 | 首页近期考试 | `scores.listUpcomingExams` | `query_field_info(upcoming_exams)` | 是 | 是 | 是 | 只读；排除已结束考试并按日期排序 | 开发中 |
 | 多班级教师课程/考试汇总 | `teacherClasses.getTeacherTimetable/getTeacherExams` | 无 | 是 | 否 | 否 | 只读；按教师关联班级汇总，网页专用 | 开发中 |
-| Excel 上传、预览与确认导入 | `excelImportAssistant` | Agent 工具仅兼容提示 | 是 | 否 | 否 | 网页 Agent 对话入口支持 `.xlsx` 上传并绑定当前会话；识别/预览/确认复用 HTTP 服务，确认后提交；iLink 文件未接入 | 已接入 |
+| Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | Agent 工具仅兼容提示 | 是 | 否 | 否 | 网页 Agent 支持 `.xlsx`；本地规则先识别，模型只接收结构轮廓并补充白名单内候选/映射，规则优先且模型不可用时回退；临时状态绑定会话、SHA-256、工作表、班级和学期，预览确认后才提交并保留受保护错误报告；iLink 文件未接入 | 已接入 |
 | 图片/截图证据 | `evidence` | `evidence_list` | 是 | 是 | 是 | 只读元数据；文件写入走网页/业务服务，所有者、学生范围、哈希和软删除校验 | 开发中 |
-| 家校通知模板与内容生成 | `notificationTemplates` | 无 | 是 | 否 | 否 | 网页写入/复制；模板按班级/学期隔离并记录审计 | 开发中 |
-| 家长会/个别谈话准备 | `meetingPrep` | 无 | 是 | 否 | 否 | 敏感只读；学生必须在当前班级/学期范围内 | 开发中 |
+| AI 家校通知场景与内容生成 | `notificationTemplates`、`notificationDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 后端结构只校验事实底稿；网页选择通知类型并调用 AI 生成可编辑文案，不提供模板管理或自动发送 | 开发中 |
+| 家长消息回复前检查与草稿生成 | `parentReply`、`parentReplyDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 敏感只读；只读取当前班级/学期脱敏事实；确定性规则匹配制度边界，模型仅可凭输入原文补充登记规则且不能降级；显示证据状态、待核实条件与投诉升级信号；机械化或越权草稿回退规则草稿；不自动发送，教师确认已发送后才复用现有沟通写入和证据服务 | 开发中 |
+| 家长会/个别谈话准备 | `meetingPrep`、`meetingPrepDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 敏感只读；学生必须在当前班级/学期范围内；同一筛选生成事实和方案，AI 建议引用事实编号，不发送电话与住址，不自动写回 | 已接入 |
 | 教师常用工具入口 | `toolLinks` | `tool_link_search` | 是 | 是 | 是 | URL 仅允许 http(s)，名称唯一，写入需网页确认 | 开发中 |
 | 创建待办 | `work_items.create_work_item` | `create_task` | 是 | 是 | 是 | 低风险写入；预览后必须确认；单条、幂等 | 已接入 |
 | 记录家校沟通 | `communications.create_record` | `record_communication` | 是 | 是 | 是 | 写入；预览后必须确认；隐藏敏感联系人字段 | 已接入 |

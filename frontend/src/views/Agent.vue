@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { BarChart3, Brain, CheckCircle, CircleAlert, Copy, Download, FileSpreadsheet, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, Upload, UserPlus, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import { del, get, post, put, analyzeExcelImport, previewExcelImport, executeExcelImport, discardExcelImport, getExcelImportErrorsUrl } from '../api'
+import { del, get, post, put, analyzeExcelImport, previewExcelImport, executeExcelImport, discardExcelImport, downloadExcelImportErrors } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 
 const router = useRouter()
@@ -391,16 +391,31 @@ async function handleImportFile(event) {
     importAnalysis.value = result
     if (result.candidate_modules?.length === 1) {
       importModule.value = result.candidate_modules[0].module
+      importSheetIndex.value = result.candidate_modules[0].sheet_index ?? 0
     } else {
       importModule.value = ''
+      importSheetIndex.value = 0
     }
-    importSheetIndex.value = 0
     importStep.value = 'analyzed'
   } catch (e) {
     importError.value = e.detail?.message || e.message || '文件分析失败'
     importStep.value = 'idle'
   } finally {
     importBusy.value = false
+  }
+}
+
+function selectImportCandidate(candidate) {
+  importModule.value = candidate.module
+  importSheetIndex.value = candidate.sheet_index ?? 0
+}
+
+async function downloadImportErrors() {
+  importError.value = ''
+  try {
+    await downloadExcelImportErrors(importFileId.value, importModule.value)
+  } catch (e) {
+    importError.value = e.message || '错误报告下载失败'
   }
 }
 
@@ -587,15 +602,24 @@ onBeforeUnmount(() => {
               <span class="import-info-label">工作表</span>
               <span>{{ importAnalysis.sheets.join('、') }}</span>
             </div>
+            <div class="import-info-row">
+              <span class="import-info-label">识别方式</span>
+              <span>{{ importAnalysis.recognition_mode === 'hybrid' ? 'AI 语义识别 + 本地规则校验' : '本地规则识别' }}</span>
+            </div>
+            <div v-if="importAnalysis.scope" class="import-info-row">
+              <span class="import-info-label">导入范围</span>
+              <strong>{{ importAnalysis.scope.class_name }} · {{ importAnalysis.scope.term_name }}</strong>
+            </div>
           </div>
+          <div v-if="importAnalysis.recognition_warning" class="import-recognition-warning">{{ importAnalysis.recognition_warning }}</div>
 
           <div class="import-module-card">
             <div class="import-section-title">识别结果</div>
             <div v-if="importAnalysis.candidate_modules?.length" class="import-module-list">
-              <label v-for="(candidate, idx) in importAnalysis.candidate_modules" :key="candidate.module" class="import-module-option" :class="{ selected: importModule === candidate.module }">
-                <input type="radio" :value="candidate.module" v-model="importModule" :disabled="importBusy" />
+              <label v-for="candidate in importAnalysis.candidate_modules" :key="`${candidate.module}-${candidate.sheet_index}`" class="import-module-option" :class="{ selected: importModule === candidate.module && importSheetIndex === candidate.sheet_index }">
+                <input type="radio" :checked="importModule === candidate.module && importSheetIndex === candidate.sheet_index" :disabled="importBusy" @change="selectImportCandidate(candidate)" />
                 <div class="import-module-info">
-                  <strong>{{ moduleName(candidate.module) }}</strong>
+                  <strong>{{ moduleName(candidate.module) }} · {{ importAnalysis.sheets[candidate.sheet_index] }}</strong>
                   <span class="import-module-reason">{{ candidate.reason }}</span>
                 </div>
                 <span class="import-module-confidence" :class="{ high: candidate.confidence >= 0.8, medium: candidate.confidence >= 0.5 && candidate.confidence < 0.8 }">
@@ -672,7 +696,7 @@ onBeforeUnmount(() => {
                 <tr v-for="(mapping, idx) in importPreview.field_mapping" :key="idx">
                   <td>{{ mapping.source }}</td>
                   <td>{{ mapping.target || '—' }}</td>
-                  <td><span :class="mapping.matched ? 'status-ok' : 'status-off'">{{ mapping.matched ? '已匹配' : '未匹配' }}</span></td>
+                  <td><span :class="mapping.matched ? 'status-ok' : 'status-off'">{{ mapping.matched ? (mapping.source_kind === 'ai' ? 'AI 建议，已校验' : '规则匹配') : '未匹配' }}</span></td>
                 </tr>
               </tbody>
             </table>
@@ -702,13 +726,13 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="importResult.error_count > 0" class="import-error-download">
-            <a :href="getExcelImportErrorsUrl(importFileId)" download class="btn btn-outline" target="_blank">
+            <button type="button" class="btn btn-outline" @click="downloadImportErrors">
               <Download :size="14" /> 下载错误行
-            </a>
+            </button>
           </div>
 
           <div class="import-actions">
-            <button class="btn btn-outline" type="button" @click="resetImport">
+            <button class="btn btn-outline" type="button" @click="doImportDiscard">
               继续导入其他文件
             </button>
           </div>
@@ -874,6 +898,7 @@ onBeforeUnmount(() => {
 .import-info-card { padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); display:grid; gap:8px; margin-bottom:14px; }
 .import-info-row { display:flex; align-items:center; gap:8px; font-size:13px; }
 .import-info-label { color:var(--text-secondary); font-size:12px; min-width:70px; }
+.import-recognition-warning { margin:-6px 0 14px; padding:8px 10px; border-radius:8px; background:var(--warning-bg); color:#8a5a10; font-size:12px; }
 .import-module-card { padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); margin-bottom:14px; }
 .import-section-title { font-size:13px; font-weight:600; margin-bottom:10px; }
 .import-module-list { display:grid; gap:8px; }

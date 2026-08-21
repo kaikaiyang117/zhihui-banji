@@ -35,6 +35,7 @@ import { registerMeetingPrepRoutes } from './http/routes/meetingPrep.js';
 import { registerNotificationTemplateRoutes } from './http/routes/notificationTemplates.js';
 import { registerToolLinkRoutes } from './http/routes/toolLinks.js';
 import { registerExcelImportRoutes } from './http/routes/excelImport.js';
+import { registerParentReplyRoutes } from './http/routes/parentReply.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
 const REDACT_PATHS = [
@@ -160,6 +161,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     registerTeacherClassesRoutes(app);
 
     registerMeetingPrepRoutes(app);
+
+    // ---------- 家长消息回复助手 ----------
+    registerParentReplyRoutes(app);
 
     // ---------- 家校通知模板（SUP-06） ----------
     registerNotificationTemplateRoutes(app);

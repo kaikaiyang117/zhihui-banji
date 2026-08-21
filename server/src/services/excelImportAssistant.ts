@@ -9,6 +9,7 @@ import { previewStudents, commitStudentImport } from './importService.js';
 import * as scores from './scores.js';
 import * as timetable from './timetable.js';
 import * as calendar from './schoolCalendar.js';
+import { getCurrentScope } from './context.js';
 
 export class ExcelImportError extends Error {}
 
@@ -16,6 +17,56 @@ export const SUPPORTED_MODULES = ['students', 'scores', 'calendar', 'timetable']
 export type SupportedModule = typeof SUPPORTED_MODULES[number];
 
 const EXPIRE_MINUTES = 30;
+const MAX_SHEETS = 20;
+const MAX_ROWS_PER_SHEET = 100_000;
+const MAX_COLUMNS_PER_SHEET = 200;
+
+export interface ExcelSemanticInput {
+  filename: string;
+  supported_modules: readonly string[];
+  allowed_targets: Record<string, Array<{ target: string; label: string }>>;
+  sheets: Array<{
+    sheet_index: number;
+    name: string;
+    header_row: number;
+    headers: string[];
+    row_count: number;
+    sample_types: string[][];
+  }>;
+}
+
+export interface ExcelSemanticAnalysis {
+  candidates: unknown[];
+  mappings: unknown[];
+  model: string;
+  warning: string;
+}
+
+export interface ExcelCandidate {
+  module: string;
+  sheet_index: number;
+  confidence: number;
+  reason: string;
+  source: 'rule' | 'ai' | 'hybrid';
+}
+
+interface ExcelFieldMapping {
+  source: string;
+  target: string;
+  matched: boolean;
+  source_kind: 'rule' | 'ai' | 'none';
+  confidence?: number;
+  reason?: string;
+}
+
+interface SemanticMapping {
+  module: string;
+  sheet_index: number;
+  source: string;
+  target: string;
+  confidence: number;
+  reason: string;
+}
 
 interface FileMetadata {
   file_id: string;
@@ -29,10 +80,20 @@ interface FileMetadata {
   expires_at: string;
   sheets: string[];
   headers: string[][];
+  header_rows: number[];
   row_counts: number[];
   sample_rows: unknown[][];
-  candidate_modules: Array<{ module: string; confidence: number; reason: string }>;
+  candidate_modules: ExcelCandidate[];
+  semantic_mappings: SemanticMapping[];
+  recognition_mode: 'rules' | 'hybrid';
+  recognition_warning: string;
+  recognition_model: string;
+  class_id: number;
+  class_name: string;
+  term_id: number;
+  term_name: string;
   preview_state: Record<string, unknown> | null;
+  execution_state: Record<string, unknown> | null;
 }
 
 function tempDir(): string {
@@ -79,15 +140,62 @@ function sanitizeSample(value: unknown): unknown {
   return '';
 }
 
+function safeHeaderCell(value: unknown): string {
+  const raw = cellText(value).slice(0, 80);
+  if (!raw) return '';
+  if (/^\d{7,}$/.test(raw)) return '<数值字段>';
+  if (/^\S+@\S+\.\S+$/.test(raw)) return '<邮箱字段>';
+  return raw;
+}
+
+function headerHintScore(values: string[]): number {
+  const hints = /^(?:学号|学生编号|姓名|学生姓名|性别|出生日期|出生年月|考试名称|考试日期|科目|课程|学科|分数|排名|状态|日期|日历日期|开始日期|结束日期|月份|周次|星期|周几|星期几|节次|第几节|任课教师|教师|老师|教室|备注|事项|安排|内容)$/;
+  const nonEmpty = values.filter(Boolean);
+  const hits = nonEmpty.filter(value => hints.test(value.replace(/\s+/g, ''))).length;
+  const longText = nonEmpty.filter(value => value.length > 40).length;
+  return hits * 20 + Math.min(nonEmpty.length, 12) - longText * 5;
+}
+
+function findHeaderRow(ws: ExcelJS.Worksheet): number {
+  let bestRow = 1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (let rowNo = 1; rowNo <= Math.min(ws.rowCount, 10); rowNo += 1) {
+    const values: string[] = [];
+    for (let column = 1; column <= Math.min(ws.columnCount, 50); column += 1) {
+      values.push(safeHeaderCell(ws.getRow(rowNo).getCell(column).value));
+    }
+    const score = headerHintScore(values);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = rowNo;
+    }
+  }
+  return bestRow;
+}
+
+function sampleType(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'empty';
+  if (value instanceof Date) return 'date';
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'object' && value !== null && 'formula' in value) return 'formula';
+  const raw = String(value).trim();
+  if (/^\d{4}[-/.年]\d{1,2}/.test(raw)) return 'date-text';
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return 'numeric-text';
+  return raw.length > 30 ? 'long-text' : 'text';
+}
+
 async function readExcelMetadata(buffer: Buffer): Promise<{
   sheets: string[];
   headers: string[][];
+  header_rows: number[];
   row_counts: number[];
   sample_rows: unknown[][];
 }> {
   const result = {
     sheets: [] as string[],
     headers: [] as string[][],
+    header_rows: [] as number[],
     row_counts: [] as number[],
     sample_rows: [] as unknown[][],
   };
@@ -96,24 +204,31 @@ async function readExcelMetadata(buffer: Buffer): Promise<{
   try {
     wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer);
-  } catch {
-    return result;
+  } catch (error) {
+    throw new ExcelImportError(`文件无法解析，可能已损坏或受密码保护：${(error as Error).message}`);
   }
 
+  if (wb.worksheets.length === 0) throw new ExcelImportError('Excel 文件中没有可读取的工作表');
+  if (wb.worksheets.length > MAX_SHEETS) throw new ExcelImportError(`工作表不能超过 ${MAX_SHEETS} 个`);
+
   for (const ws of wb.worksheets) {
+    if (ws.rowCount > MAX_ROWS_PER_SHEET) throw new ExcelImportError(`工作表“${ws.name}”超过 ${MAX_ROWS_PER_SHEET} 行`);
+    if (ws.columnCount > MAX_COLUMNS_PER_SHEET) throw new ExcelImportError(`工作表“${ws.name}”超过 ${MAX_COLUMNS_PER_SHEET} 列`);
     result.sheets.push(ws.name);
+    const headerRowNo = findHeaderRow(ws);
+    result.header_rows.push(headerRowNo);
     const headerRow: string[] = [];
     const maxCol = Math.min(ws.columnCount, 50);
     if (ws.rowCount > 0) {
-      const row = ws.getRow(1);
+      const row = ws.getRow(headerRowNo);
       for (let c = 1; c <= maxCol; c += 1) {
-        headerRow.push(cellText(row.getCell(c).value));
+        headerRow.push(safeHeaderCell(row.getCell(c).value));
       }
     }
     result.headers.push(headerRow);
-    result.row_counts.push(Math.max(0, ws.rowCount - 1));
+    result.row_counts.push(Math.max(0, ws.rowCount - headerRowNo));
     const samples: unknown[][] = [];
-    for (let r = 2; r <= Math.min(ws.rowCount, 4); r += 1) {
+    for (let r = headerRowNo + 1; r <= Math.min(ws.rowCount, headerRowNo + 3); r += 1) {
       const sample: unknown[] = [];
       const row = ws.getRow(r);
       for (let c = 1; c <= maxCol; c += 1) {
@@ -127,35 +242,79 @@ async function readExcelMetadata(buffer: Buffer): Promise<{
   return result;
 }
 
-const STUDENT_ALIASES = new Set([
-  '学号', '姓名', '性别', '出生年月', '民族', '家庭住址',
-  '监护人姓名', '监护人电话', '监护人关系', '监护人职业', '是否住校', '特长', '班级任职', '备注',
-  '监护人2姓名', '监护人2电话', '监护人2关系', '监护人2职业',
-]);
+const HEADER_MAPPINGS: Record<string, Record<string, string>> = {
+  students: {
+    '学号': '学号', '学生编号': '学号', '学生学号': '学号',
+    '姓名': '姓名', '学生姓名': '姓名', '性别': '性别',
+    '出生年月': '出生年月', '出生日期': '出生年月', '生日': '出生年月',
+    '民族': '民族', '家庭住址': '家庭住址', '家庭地址': '家庭住址',
+    '监护人姓名': '监护人姓名', '家长姓名': '监护人姓名',
+    '监护人电话': '监护人电话', '家长电话': '监护人电话', '联系电话': '监护人电话',
+    '监护人关系': '监护人关系', '与学生关系': '监护人关系',
+    '监护人职业': '监护人职业', '家长职业': '监护人职业',
+    '是否住校': '是否住校', '住宿情况': '是否住校',
+    '特长': '特长', '班级任职': '班级任职', '备注': '备注',
+    '监护人2姓名': '监护人2姓名', '第二监护人姓名': '监护人2姓名',
+    '监护人2电话': '监护人2电话', '第二监护人电话': '监护人2电话',
+    '监护人2关系': '监护人2关系', '第二监护人关系': '监护人2关系',
+    '监护人2职业': '监护人2职业', '第二监护人职业': '监护人2职业',
+  },
+  scores: {
+    '学号': '学号', '学生编号': '学号', '姓名': '姓名', '学生姓名': '姓名',
+    '考试名称': '考试名称', '考试': '考试名称', '考试日期': '考试日期', '日期': '考试日期',
+    '科目': '科目', '学科': '科目', '课程': '科目', '分数': '分数', '成绩': '分数',
+    '排名': '排名', '名次': '排名', '状态': '状态', '备注': '备注',
+  },
+  calendar: {
+    '日期': 'date', '日历日期': 'date', '校历日期': 'date', '开始日期': 'start_date',
+    '结束日期': 'end_date', '类型': 'day_type', '日期类型': 'day_type',
+    '安排类型': 'day_type', '事项': 'title', '安排': 'title', '内容': 'title',
+    '名称': 'title', '备注': 'note', '说明': 'note',
+    '是否上课': 'is_school_day', '是否行课': 'is_school_day',
+    '月份': '月份', '周次': '周次',
+    '星期一': '星期一', '星期二': '星期二', '星期三': '星期三',
+    '星期四': '星期四', '星期五': '星期五', '星期六': '星期六', '星期日': '星期日',
+  },
+  timetable: {
+    '星期': 'weekday', '周几': 'weekday', '星期几': 'weekday',
+    '节次': 'period_no', '第几节': 'period_no', '课节': 'period_no',
+    '节次名称': 'label', '节次标签': 'label',
+    '开始时间': 'start_time', '上课时间': 'start_time',
+    '结束时间': 'end_time', '下课时间': 'end_time',
+    '科目': 'subject', '课程': 'subject', '学科': 'subject', '课程名称': 'subject',
+    '任课教师': 'teacher_name', '教师': 'teacher_name', '老师': 'teacher_name',
+    '教室': 'room', '上课地点': 'room', '时段类型': 'session_type', '课程类型': 'session_type',
+    '单双周': 'week_pattern', '周次模式': 'week_pattern',
+    '开始周': 'week_start', '起始周': 'week_start',
+    '结束周': 'week_end', '截止周': 'week_end', '备注': 'note',
+  },
+};
 
-const SCORE_ALIASES = new Set([
-  '学号', '姓名', '考试名称', '考试日期', '科目', '分数', '排名', '状态',
-]);
-
-const CALENDAR_ALIASES = new Set([
-  '日期', '日历日期', '类型', '日期类型', '安排类型', '事项', '安排', '内容',
-  '月份', '周次', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日',
-]);
-
-const TIMETABLE_ALIASES = new Set([
-  '星期', '周几', '星期几', '节次', '第几节', '科目', '课程', '学科',
-  '周一', '周二', '周三', '周四', '周五', '周六', '周日',
-  '任课教师', '教师', '老师', '教室', '时段类型', '单双周',
-]);
+const CANONICAL_HEADERS: Record<string, Record<string, string>> = {
+  students: Object.fromEntries(Object.values(HEADER_MAPPINGS.students).map(target => [target, target])),
+  scores: Object.fromEntries(Object.values(HEADER_MAPPINGS.scores).map(target => [target, target])),
+  calendar: {
+    date: '日期', start_date: '开始日期', end_date: '结束日期', day_type: '类型', title: '事项',
+    note: '备注', is_school_day: '是否上课', '月份': '月份', '周次': '周次',
+    '星期一': '星期一', '星期二': '星期二', '星期三': '星期三', '星期四': '星期四',
+    '星期五': '星期五', '星期六': '星期六', '星期日': '星期日',
+  },
+  timetable: {
+    weekday: '星期', period_no: '节次', label: '节次名称', start_time: '开始时间', end_time: '结束时间',
+    subject: '科目', teacher_name: '任课教师', room: '教室', session_type: '时段类型',
+    week_pattern: '单双周', week_start: '开始周', week_end: '结束周', note: '备注',
+  },
+};
 
 function detectModule(headers: string[], sheetName: string): Array<{ module: string; confidence: number; reason: string }> {
   const normalizedHeaders = headers.map(h => h.replace(/\s+/g, '').trim());
   const normalizedSheetName = sheetName.replace(/\s+/g, '').trim();
   const results: Array<{ module: string; confidence: number; reason: string }> = [];
 
-  const studentHits = normalizedHeaders.filter(h => STUDENT_ALIASES.has(h)).length;
-  const hasStudentNo = normalizedHeaders.includes('学号');
-  const hasStudentName = normalizedHeaders.includes('姓名');
+  const studentTargets = normalizedHeaders.map(h => HEADER_MAPPINGS.students[h]).filter(Boolean);
+  const studentHits = studentTargets.length;
+  const hasStudentNo = studentTargets.includes('学号');
+  const hasStudentName = studentTargets.includes('姓名');
   if (hasStudentNo && hasStudentName) {
     results.push({
       module: 'students',
@@ -170,10 +329,11 @@ function detectModule(headers: string[], sheetName: string): Array<{ module: str
     });
   }
 
-  const scoreHits = normalizedHeaders.filter(h => SCORE_ALIASES.has(h)).length;
-  const hasExamName = normalizedHeaders.includes('考试名称');
-  const hasSubject = normalizedHeaders.includes('科目') || normalizedHeaders.includes('学科');
-  const hasScore = normalizedHeaders.includes('分数');
+  const scoreTargets = normalizedHeaders.map(h => HEADER_MAPPINGS.scores[h]).filter(Boolean);
+  const scoreHits = scoreTargets.length;
+  const hasExamName = scoreTargets.includes('考试名称');
+  const hasSubject = scoreTargets.includes('科目');
+  const hasScore = scoreTargets.includes('分数');
   if (hasExamName && (hasSubject || hasScore)) {
     results.push({
       module: 'scores',
@@ -188,11 +348,12 @@ function detectModule(headers: string[], sheetName: string): Array<{ module: str
     });
   }
 
-  const calendarHits = normalizedHeaders.filter(h => CALENDAR_ALIASES.has(h)).length;
+  const calendarTargets = normalizedHeaders.map(h => HEADER_MAPPINGS.calendar[h]).filter(Boolean);
+  const calendarHits = calendarTargets.length;
   const hasWeekdayCols = ['星期一', '星期二', '星期三', '星期四', '星期五'].every(
     d => normalizedHeaders.includes(d),
   );
-  const hasDateCol = normalizedHeaders.includes('日期') || normalizedHeaders.includes('日历日期');
+  const hasDateCol = calendarTargets.includes('date') || calendarTargets.includes('start_date');
   const hasMonthWeek = normalizedHeaders.includes('月份') && normalizedHeaders.includes('周次');
   if (hasMonthWeek && hasWeekdayCols) {
     results.push({
@@ -208,10 +369,11 @@ function detectModule(headers: string[], sheetName: string): Array<{ module: str
     });
   }
 
-  const timetableHits = normalizedHeaders.filter(h => TIMETABLE_ALIASES.has(h)).length;
-  const hasWeekday = normalizedHeaders.some(h => ['星期', '周几', '星期几'].includes(h));
-  const hasPeriod = normalizedHeaders.includes('节次') || normalizedHeaders.includes('第几节');
-  const hasCourse = normalizedHeaders.includes('科目') || normalizedHeaders.includes('课程') || normalizedHeaders.includes('学科');
+  const timetableTargets = normalizedHeaders.map(h => HEADER_MAPPINGS.timetable[h]).filter(Boolean);
+  const timetableHits = timetableTargets.length;
+  const hasWeekday = timetableTargets.includes('weekday');
+  const hasPeriod = timetableTargets.includes('period_no');
+  const hasCourse = timetableTargets.includes('subject');
   if (hasWeekday && hasPeriod && hasCourse) {
     results.push({
       module: 'timetable',
@@ -251,59 +413,58 @@ function detectModule(headers: string[], sheetName: string): Array<{ module: str
   return results.sort((a, b) => b.confidence - a.confidence);
 }
 
-function mapHeaders(headers: string[], module: string): Array<{ source: string; target: string; matched: boolean }> {
+function mapHeaders(
+  headers: string[], module: string, semanticMappings: SemanticMapping[] = [], sheetIndex = 0,
+): ExcelFieldMapping[] {
   const normalized = headers.map(h => h.replace(/\s+/g, '').trim());
-  const result: Array<{ source: string; target: string; matched: boolean }> = [];
-
-  const MAPPING: Record<string, Record<string, string>> = {
-    students: {
-      '学号': '学号', '姓名': '姓名', '性别': '性别', '出生年月': '出生年月',
-      '民族': '民族', '家庭住址': '家庭住址', '监护人姓名': '监护人姓名',
-      '监护人电话': '监护人电话', '监护人关系': '监护人关系', '监护人职业': '监护人职业', '是否住校': '是否住校',
-      '特长': '特长', '班级任职': '班级任职', '备注': '备注',
-      '监护人2姓名': '监护人2姓名', '监护人2电话': '监护人2电话', '监护人2关系': '监护人2关系', '监护人2职业': '监护人2职业',
-    },
-    scores: {
-      '学号': '学号', '姓名': '姓名', '考试名称': '考试名称', '考试日期': '考试日期',
-      '科目': '科目', '学科': '科目', '分数': '分数', '排名': '排名',
-      '状态': '状态', '备注': '备注',
-    },
-    calendar: {
-      '日期': 'date', '日历日期': 'date', '开始日期': 'start_date',
-      '结束日期': 'end_date', '类型': 'day_type', '日期类型': 'day_type',
-      '安排类型': 'day_type', '事项': 'title', '安排': 'title', '内容': 'title',
-      '名称': 'title', '备注': 'note', '是否上课': 'is_school_day', '是否行课': 'is_school_day',
-      '月份': '月份', '周次': '周次',
-      '星期一': '星期一', '星期二': '星期二', '星期三': '星期三',
-      '星期四': '星期四', '星期五': '星期五', '星期六': '星期六', '星期日': '星期日',
-    },
-    timetable: {
-      '星期': 'weekday', '周几': 'weekday', '星期几': 'weekday',
-      '节次': 'period_no', '第几节': 'period_no',
-      '节次名称': 'label', '节次标签': 'label',
-      '开始时间': 'start_time', '上课时间': 'start_time',
-      '结束时间': 'end_time', '下课时间': 'end_time',
-      '科目': 'subject', '课程': 'subject', '学科': 'subject',
-      '任课教师': 'teacher_name', '教师': 'teacher_name', '老师': 'teacher_name',
-      '教室': 'room', '时段类型': 'session_type', '课程类型': 'session_type',
-      '单双周': 'week_pattern', '周次模式': 'week_pattern',
-      '开始周': 'week_start', '起始周': 'week_start',
-      '结束周': 'week_end', '截止周': 'week_end',
-      '备注': 'note',
-    },
-  };
-
-  const mapping = MAPPING[module] ?? {};
+  const result: ExcelFieldMapping[] = [];
+  const mapping = HEADER_MAPPINGS[module] ?? {};
   for (let i = 0; i < headers.length; i += 1) {
     const target = mapping[normalized[i]];
-    result.push({ source: headers[i], target: target ?? '', matched: Boolean(target) });
+    if (target) {
+      result.push({ source: headers[i], target, matched: true, source_kind: 'rule', confidence: 1 });
+      continue;
+    }
+    const semantic = semanticMappings.find(item => item.module === module
+      && item.sheet_index === sheetIndex && item.source === headers[i]);
+    result.push(semantic
+      ? {
+        source: headers[i], target: semantic.target, matched: true, source_kind: 'ai',
+        confidence: semantic.confidence, reason: semantic.reason,
+      }
+      : { source: headers[i], target: '', matched: false, source_kind: 'none' });
   }
 
   return result;
 }
 
-function computePreviewHash(fileId: string, module: string, mapping: Array<{ source: string; target: string; matched: boolean }>, rowCounts: number[]): string {
-  const payload = JSON.stringify({ fileId, module, mapping, rowCounts });
+function assertMappingUnambiguous(mapping: ExcelFieldMapping[]): void {
+  const sourcesByTarget = new Map<string, string[]>();
+  for (const item of mapping) {
+    if (!item.matched || !item.target) continue;
+    const sources = sourcesByTarget.get(item.target) ?? [];
+    sources.push(item.source);
+    sourcesByTarget.set(item.target, sources);
+  }
+  const conflicts = [...sourcesByTarget.entries()].filter(([, sources]) => sources.length > 1);
+  if (conflicts.length > 0) {
+    const detail = conflicts.map(([target, sources]) => `${sources.join('、')} → ${target}`).join('；');
+    throw new ExcelImportError(`字段映射存在冲突，请删除重复列或修改表头：${detail}`);
+  }
+}
+
+function computePreviewHash(options: {
+  fileId: string;
+  sha256: string;
+  module: string;
+  sheetIndex: number;
+  headerRow: number;
+  duplicateStrategy: string;
+  mapping: ExcelFieldMapping[];
+  classId: number;
+  termId: number;
+}): string {
+  const payload = JSON.stringify(options);
   return createHash('sha256').update(payload, 'utf-8').digest('hex');
 }
 
@@ -344,6 +505,11 @@ function loadTempFile(fileId: string): Buffer {
   return fs.readFileSync(filePath);
 }
 
+function removeTempFile(fileId: string): void {
+  const filePath = path.join(tempDir(), fileId);
+  try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { /* ignore */ }
+}
+
 function checkExpiry(meta: FileMetadata): void {
   const now = new Date();
   const expires = new Date(meta.expires_at.replace(' ', 'T'));
@@ -351,6 +517,149 @@ function checkExpiry(meta: FileMetadata): void {
     discardUpload(meta.file_id);
     throw new ExcelImportError('上传文件已过期，请重新上传');
   }
+}
+
+function assertScope(meta: FileMetadata): void {
+  const scope = getCurrentScope();
+  if (Number(scope.class_id) !== Number(meta.class_id) || Number(scope.term_id) !== Number(meta.term_id)) {
+    throw new ExcelImportError(
+      `当前班级或学期已切换；该文件属于“${meta.class_name} / ${meta.term_name}”，请切回后继续或重新上传`,
+    );
+  }
+}
+
+function verifyTempFile(meta: FileMetadata): Buffer {
+  const buffer = loadTempFile(meta.file_id);
+  if (sha256Buffer(buffer) !== meta.sha256) {
+    throw new ExcelImportError('上传文件内容已变化，请重新上传');
+  }
+  return buffer;
+}
+
+function semanticInput(meta: {
+  sheets: string[];
+  headers: string[][];
+  header_rows: number[];
+  row_counts: number[];
+  sample_rows: unknown[][];
+}, filename: string): ExcelSemanticInput {
+  const allowedTargets: ExcelSemanticInput['allowed_targets'] = {};
+  for (const module of SUPPORTED_MODULES) {
+    allowedTargets[module] = Object.entries(CANONICAL_HEADERS[module]).map(([target, label]) => ({ target, label }));
+  }
+  return {
+    filename: path.extname(filename).toLowerCase() === '.xlsx' ? '上传文件.xlsx' : '上传文件',
+    supported_modules: SUPPORTED_MODULES,
+    allowed_targets: allowedTargets,
+    sheets: meta.sheets.map((name, sheetIndex) => {
+      const samples = (meta.sample_rows[sheetIndex] ?? []) as unknown[][];
+      return {
+        sheet_index: sheetIndex,
+        name: safeHeaderCell(name),
+        header_row: meta.header_rows[sheetIndex] ?? 1,
+        headers: meta.headers[sheetIndex].map(safeHeaderCell),
+        row_count: meta.row_counts[sheetIndex] ?? 0,
+        sample_types: samples.map(row => row.map(sampleType)),
+      };
+    }),
+  };
+}
+
+function confidence(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(parsed, 0.95));
+}
+
+function validateSemanticAnalysis(
+  analysis: ExcelSemanticAnalysis,
+  meta: { headers: string[][] },
+): { candidates: ExcelCandidate[]; mappings: SemanticMapping[] } {
+  const candidates: ExcelCandidate[] = [];
+  for (const raw of analysis.candidates) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item = raw as Record<string, unknown>;
+    const module = String(item.module ?? '');
+    const sheetIndex = Number(item.sheet_index);
+    if (!SUPPORTED_MODULES.includes(module as SupportedModule)
+      || !Number.isInteger(sheetIndex) || sheetIndex < 0 || sheetIndex >= meta.headers.length) continue;
+    const score = confidence(item.confidence);
+    if (score <= 0) continue;
+    candidates.push({
+      module, sheet_index: sheetIndex, confidence: score,
+      reason: String(item.reason ?? 'AI 根据列名语义识别').trim().slice(0, 160), source: 'ai',
+    });
+  }
+
+  const mappings: SemanticMapping[] = [];
+  for (const raw of analysis.mappings) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item = raw as Record<string, unknown>;
+    const module = String(item.module ?? '');
+    const sheetIndex = Number(item.sheet_index);
+    const source = String(item.source ?? '').trim();
+    const target = String(item.target ?? '').trim();
+    if (!SUPPORTED_MODULES.includes(module as SupportedModule)
+      || !Number.isInteger(sheetIndex) || sheetIndex < 0 || sheetIndex >= meta.headers.length
+      || !meta.headers[sheetIndex].includes(source) || !CANONICAL_HEADERS[module]?.[target]) continue;
+    const score = confidence(item.confidence);
+    if (score <= 0) continue;
+    mappings.push({
+      module, sheet_index: sheetIndex, source, target, confidence: score,
+      reason: String(item.reason ?? 'AI 根据列名语义映射').trim().slice(0, 160),
+    });
+  }
+  return { candidates, mappings };
+}
+
+function mergeCandidates(rules: ExcelCandidate[], ai: ExcelCandidate[]): ExcelCandidate[] {
+  const merged = new Map<string, ExcelCandidate>();
+  for (const candidate of [...rules, ...ai]) {
+    const key = `${candidate.module}:${candidate.sheet_index}`;
+    const previous = merged.get(key);
+    if (!previous) {
+      merged.set(key, candidate);
+      continue;
+    }
+    merged.set(key, {
+      module: candidate.module,
+      sheet_index: candidate.sheet_index,
+      confidence: Math.max(previous.confidence, candidate.confidence),
+      reason: previous.reason === candidate.reason ? previous.reason : `${previous.reason}；${candidate.reason}`.slice(0, 220),
+      source: previous.source === candidate.source ? previous.source : 'hybrid',
+    });
+  }
+  return [...merged.values()].sort((a, b) => b.confidence - a.confidence);
+}
+
+async function normalizedWorkbookBuffer(
+  buffer: Buffer, sheetIndex: number, headerRow: number, mapping: ExcelFieldMapping[], module: string,
+): Promise<Buffer> {
+  const sourceBook = new ExcelJS.Workbook();
+  await sourceBook.xlsx.load(buffer);
+  const sourceSheet = sourceBook.worksheets[sheetIndex];
+  if (!sourceSheet) throw new ExcelImportError('所选工作表不存在');
+  const targetBook = new ExcelJS.Workbook();
+  const targetSheet = targetBook.addWorksheet(sourceSheet.name.slice(0, 31) || '导入数据');
+  for (let rowNo = 1; rowNo <= sourceSheet.rowCount; rowNo += 1) {
+    for (let column = 1; column <= sourceSheet.columnCount; column += 1) {
+      targetSheet.getRow(rowNo).getCell(column).value = sourceSheet.getRow(rowNo).getCell(column).value;
+    }
+  }
+  for (let column = 1; column <= mapping.length; column += 1) {
+    const item = mapping[column - 1];
+    if (item.matched) targetSheet.getRow(headerRow).getCell(column).value = CANONICAL_HEADERS[module][item.target];
+  }
+  const written = await targetBook.xlsx.writeBuffer();
+  return Buffer.from(written);
+}
+
+function rowsFromHeader(rows: unknown[][], headerRow: number): unknown[][] {
+  return rows.slice(Math.max(0, headerRow - 1));
+}
+
+function originalRow(row: number, headerRow: number): number {
+  return row > 0 ? row + Math.max(0, headerRow - 1) : row;
 }
 
 async function parseXlsxRows(buffer: Buffer, sheetIndex: number): Promise<unknown[][]> {
@@ -365,7 +674,7 @@ async function parseXlsxRows(buffer: Buffer, sheetIndex: number): Promise<unknow
       const value = ws.getRow(r).getCell(c).value;
       if (value instanceof Date) row.push(value.toISOString().slice(0, 10));
       else if (typeof value === 'object' && value !== null && 'formula' in value) {
-        row.push(`=${(value as { formula: string }).formula}`);
+        row.push((value as { result?: unknown }).result ?? '');
       } else row.push(value);
     }
     rows.push(row);
@@ -379,6 +688,7 @@ export async function analyzeUpload(options: {
   sessionId: string;
   owner?: string;
   channel?: string;
+  semanticAnalyzer?: (input: ExcelSemanticInput) => Promise<ExcelSemanticAnalysis>;
 }): Promise<{
   file_id: string;
   filename: string;
@@ -386,30 +696,55 @@ export async function analyzeUpload(options: {
   sha256: string;
   sheets: string[];
   headers: string[][];
+  header_rows: number[];
   row_counts: number[];
   sample_rows: unknown[][];
-  candidate_modules: Array<{ module: string; confidence: number; reason: string }>;
+  candidate_modules: ExcelCandidate[];
+  recognition_mode: 'rules' | 'hybrid';
+  recognition_warning: string;
+  recognition_model: string;
+  scope: { class_id: number; class_name: string; term_id: number; term_name: string };
 }> {
-  const { buffer, originalName, sessionId, owner, channel } = options;
+  const { buffer, originalName, sessionId, owner, channel, semanticAnalyzer } = options;
+  cleanExpiredUploads();
   if (!/\.xlsx$/i.test(originalName)) {
     throw new ExcelImportError('第一版只支持 .xlsx 文件，不支持 .xls、.csv 或其他格式');
   }
   if (buffer.length === 0) throw new ExcelImportError('文件不能为空');
   if (buffer.length > 50 * 1024 * 1024) throw new ExcelImportError('文件不能超过 50MB');
+  if (buffer.subarray(0, 2).toString('utf-8') !== 'PK') {
+    throw new ExcelImportError('文件内容不是有效的 .xlsx 工作簿');
+  }
   const fileId = randomUUID().replace(/-/g, '');
   const sha256 = sha256Buffer(buffer);
   const meta = await readExcelMetadata(buffer);
+  const scope = getCurrentScope();
 
-  const allCandidates: Array<{ module: string; confidence: number; reason: string }> = [];
+  const ruleCandidates: ExcelCandidate[] = [];
   for (let i = 0; i < meta.sheets.length; i += 1) {
     const candidates = detectModule(meta.headers[i], meta.sheets[i]);
     for (const c of candidates) {
-      if (!allCandidates.find(ac => ac.module === c.module)) {
-        allCandidates.push({ ...c, reason: `[${meta.sheets[i]}] ${c.reason}` });
-      }
+      ruleCandidates.push({ ...c, sheet_index: i, reason: `[${meta.sheets[i]}] ${c.reason}`, source: 'rule' });
     }
   }
-  allCandidates.sort((a, b) => b.confidence - a.confidence);
+  let semanticMappings: SemanticMapping[] = [];
+  let aiCandidates: ExcelCandidate[] = [];
+  let recognitionWarning = '';
+  let recognitionModel = '';
+  if (semanticAnalyzer) {
+    try {
+      const analysis = await semanticAnalyzer(semanticInput(meta, originalName));
+      const validated = validateSemanticAnalysis(analysis, meta);
+      semanticMappings = validated.mappings;
+      aiCandidates = validated.candidates;
+      recognitionWarning = analysis.warning;
+      recognitionModel = analysis.model;
+    } catch {
+      recognitionWarning = 'AI 语义识别暂时不可用，本次使用本地规则识别';
+    }
+  }
+  const allCandidates = mergeCandidates(ruleCandidates, aiCandidates);
+  const recognitionMode: 'rules' | 'hybrid' = aiCandidates.length > 0 || semanticMappings.length > 0 ? 'hybrid' : 'rules';
 
   const fileMeta: FileMetadata = {
     file_id: fileId,
@@ -423,17 +758,27 @@ export async function analyzeUpload(options: {
     expires_at: expiresAtIso(),
     sheets: meta.sheets,
     headers: meta.headers,
+    header_rows: meta.header_rows,
     row_counts: meta.row_counts,
     sample_rows: meta.sample_rows,
     candidate_modules: allCandidates,
+    semantic_mappings: semanticMappings,
+    recognition_mode: recognitionMode,
+    recognition_warning: recognitionWarning,
+    recognition_model: recognitionModel,
+    class_id: Number(scope.class_id),
+    class_name: scope.class_name,
+    term_id: Number(scope.term_id),
+    term_name: scope.term_name,
     preview_state: null,
+    execution_state: null,
   };
 
   saveTempFile(fileId, buffer);
   saveMetadata(fileMeta);
 
   audit.record('excel_import_upload', 0, 'upload', {
-    summary: `上传Excel文件：${originalName}，${buffer.length}字节`,
+    summary: `上传Excel文件：${meta.sheets.length}个工作表，${buffer.length}字节`,
     params: { file_id: fileId, size_bytes: buffer.length, sheets: meta.sheets.length },
   });
 
@@ -444,9 +789,17 @@ export async function analyzeUpload(options: {
     sha256,
     sheets: meta.sheets,
     headers: meta.headers,
+    header_rows: meta.header_rows,
     row_counts: meta.row_counts,
     sample_rows: meta.sample_rows,
     candidate_modules: allCandidates,
+    recognition_mode: recognitionMode,
+    recognition_warning: recognitionWarning,
+    recognition_model: recognitionModel,
+    scope: {
+      class_id: Number(scope.class_id), class_name: scope.class_name,
+      term_id: Number(scope.term_id), term_name: scope.term_name,
+    },
   };
 }
 
@@ -463,7 +816,8 @@ export async function generateImportPreview(options: {
 }): Promise<{
   file_id: string;
   module: string;
-  field_mapping: Array<{ source: string; target: string; matched: boolean }>;
+  field_mapping: ExcelFieldMapping[];
+  scope: { class_id: number; class_name: string; term_id: number; term_name: string };
   total_rows: number;
   valid_rows: number;
   error_rows: number;
@@ -482,6 +836,11 @@ export async function generateImportPreview(options: {
   const meta = loadMetadata(fileId);
   assertFileAccess(meta, { owner, session, channel });
   checkExpiry(meta);
+  assertScope(meta);
+  if ((options.classId && Number(options.classId) !== meta.class_id)
+    || (options.termId && Number(options.termId) !== meta.term_id)) {
+    throw new ExcelImportError('导入目标班级或学期与上传时不一致，请重新上传');
+  }
 
   const idx = sheetIndex ?? 0;
   if (idx < 0 || idx >= meta.headers.length) {
@@ -489,8 +848,11 @@ export async function generateImportPreview(options: {
   }
 
   const headers = meta.headers[idx];
-  const fieldMapping = mapHeaders(headers, module);
-  const buffer = loadTempFile(fileId);
+  const fieldMapping = mapHeaders(headers, module, meta.semantic_mappings, idx);
+  assertMappingUnambiguous(fieldMapping);
+  const buffer = verifyTempFile(meta);
+  const headerRow = meta.header_rows[idx] ?? 1;
+  const normalizedBuffer = await normalizedWorkbookBuffer(buffer, idx, headerRow, fieldMapping, module);
 
   let totalRows = 0;
   let validRows = 0;
@@ -501,7 +863,7 @@ export async function generateImportPreview(options: {
   const errors: Array<{ row: number; reason: string }> = [];
 
   if (module === 'students') {
-    const preview = await previewStudents(buffer, meta.filename);
+    const preview = await previewStudents(normalizedBuffer, meta.filename);
     totalRows = preview.rows.length + preview.errors.length;
     validRows = preview.summary.valid;
     newCount = preview.summary.imported;
@@ -510,7 +872,7 @@ export async function generateImportPreview(options: {
     errorRows = preview.errors.length;
     for (const e of preview.errors) errors.push({ row: e.row, reason: e.msg });
   } else if (module === 'scores') {
-    const rows = await parseXlsxRows(buffer, idx);
+    const rows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), headerRow);
     try {
       const preview = scores.previewExamRows(rows, duplicateStrategy ?? 'update');
       totalRows = preview.rows.length;
@@ -519,7 +881,7 @@ export async function generateImportPreview(options: {
       updateCount = preview.summary.update;
       skipCount = preview.summary.skip;
       errorRows = preview.summary.error;
-      for (const e of preview.errors) errors.push({ row: e.row, reason: e.message });
+      for (const e of preview.errors) errors.push({ row: originalRow(e.row, headerRow), reason: e.message });
     } catch (error) {
       if (error instanceof scores.ScoreError) {
         errors.push({ row: 0, reason: error.message });
@@ -528,7 +890,7 @@ export async function generateImportPreview(options: {
     }
   } else if (module === 'calendar') {
     try {
-      const preview = await calendar.previewImport(buffer, meta.filename);
+      const preview = await calendar.previewImport(normalizedBuffer, meta.filename);
       totalRows = preview.summary.parsed;
       validRows = preview.summary.valid;
       newCount = preview.summary.new;
@@ -543,7 +905,7 @@ export async function generateImportPreview(options: {
       } else throw error;
     }
   } else if (module === 'timetable') {
-    const rows = await parseXlsxRows(buffer, idx);
+    const rows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), headerRow);
     try {
       const preview = timetable.previewImport(rows, meta.filename);
       const previewRows = preview.rows as Array<Record<string, unknown>>;
@@ -555,7 +917,7 @@ export async function generateImportPreview(options: {
       skipCount = previewRows.filter(r => r.action === '跳过').length;
       errorRows = previewSummary.invalid;
       for (const r of previewRows) {
-        if (r.error) errors.push({ row: Number(r.row ?? 0), reason: String(r.error) });
+        if (r.error) errors.push({ row: originalRow(Number(r.row ?? 0), headerRow), reason: String(r.error) });
       }
     } catch (error) {
       if (error instanceof timetable.TimetableError) {
@@ -565,12 +927,17 @@ export async function generateImportPreview(options: {
     }
   }
 
-  const previewHash = computePreviewHash(fileId, module, fieldMapping, meta.row_counts);
+  const strategy = duplicateStrategy ?? 'update';
+  const previewHash = computePreviewHash({
+    fileId, sha256: meta.sha256, module, sheetIndex: idx, headerRow,
+    duplicateStrategy: strategy, mapping: fieldMapping, classId: meta.class_id, termId: meta.term_id,
+  });
 
   meta.preview_state = {
     module,
     sheet_index: idx,
-    duplicate_strategy: duplicateStrategy ?? 'update',
+    header_row: headerRow,
+    duplicate_strategy: strategy,
     preview_hash: previewHash,
     total_rows: totalRows,
     valid_rows: validRows,
@@ -586,6 +953,10 @@ export async function generateImportPreview(options: {
     file_id: fileId,
     module,
     field_mapping: fieldMapping,
+    scope: {
+      class_id: meta.class_id, class_name: meta.class_name,
+      term_id: meta.term_id, term_name: meta.term_name,
+    },
     total_rows: totalRows,
     valid_rows: validRows,
     error_rows: errorRows,
@@ -598,7 +969,8 @@ export async function generateImportPreview(options: {
 }
 
 async function doImport(
-  module: string, buffer: Buffer, filename: string, duplicateStrategy: string, sheetIndex: number, requestId: string,
+  module: string, buffer: Buffer, filename: string, duplicateStrategy: string,
+  requestId: string, headerRow: number,
 ): Promise<{
   imported: number;
   updated: number;
@@ -622,7 +994,7 @@ async function doImport(
   }
 
   if (module === 'scores') {
-    const rows = await parseXlsxRows(buffer, sheetIndex);
+    const rows = rowsFromHeader(await parseXlsxRows(buffer, 0), headerRow);
     const preview = scores.previewExamRows(rows, duplicateStrategy);
     const valid = preview.rows.filter(item => item.valid === true && item.action !== '跳过');
     const commitResult = scores.commitExamRows(valid, {
@@ -633,7 +1005,7 @@ async function doImport(
       updated: Number(commitResult.updated ?? 0),
       skipped: Number(commitResult.skipped ?? 0) + preview.summary.skip,
       error_count: preview.errors.length,
-      errors: preview.errors.map(e => ({ row: e.row, reason: e.message })),
+      errors: preview.errors.map(e => ({ row: originalRow(e.row, headerRow), reason: e.message })),
     };
   }
 
@@ -651,17 +1023,20 @@ async function doImport(
   }
 
   if (module === 'timetable') {
-    const rows = await parseXlsxRows(buffer, sheetIndex);
+    const rows = rowsFromHeader(await parseXlsxRows(buffer, 0), headerRow);
     const preview = timetable.previewImport(rows, filename);
     const previewRows = preview.rows as Array<Record<string, unknown>>;
     const validRows = previewRows.filter(r => r.valid === true);
+    const previewErrors = previewRows
+      .filter(row => row.error)
+      .map(row => ({ row: originalRow(Number(row.row ?? 0), headerRow), reason: String(row.error) }));
     const commitResult = timetable.commitImport(validRows, filename, requestId || `excel-import-${randomUUID().replace(/-/g, '')}`) as Record<string, unknown>;
     return {
       imported: Number(commitResult.imported ?? 0),
       updated: Number(commitResult.updated ?? 0),
       skipped: Number(commitResult.skipped ?? 0),
-      error_count: Number(commitResult.error_count ?? 0),
-      errors: [],
+      error_count: Number(commitResult.error_count ?? 0) + previewErrors.length,
+      errors: previewErrors,
     };
   }
 
@@ -692,6 +1067,7 @@ export async function executeImport(options: {
   const meta = loadMetadata(fileId);
   assertFileAccess(meta, { owner, session, channel });
   checkExpiry(meta);
+  assertScope(meta);
 
   if (!meta.preview_state) {
     throw new ExcelImportError('请先生成导入预览');
@@ -705,11 +1081,25 @@ export async function executeImport(options: {
     throw new ExcelImportError('预览模块与请求模块不一致');
   }
 
-  const buffer = loadTempFile(fileId);
+  if (meta.execution_state) {
+    if (String(meta.execution_state.request_id ?? '') !== requestId) {
+      throw new ExcelImportError('该预览已经执行，不能用新的请求再次导入');
+    }
+    return meta.execution_state.result as {
+      imported: number; updated: number; skipped: number; error_count: number;
+      errors: Array<{ row: number; reason: string }>;
+    };
+  }
+
+  const buffer = verifyTempFile(meta);
   const duplicateStrategy = String(meta.preview_state.duplicate_strategy ?? 'update');
   const sheetIndex = Number(meta.preview_state.sheet_index ?? 0);
+  const headerRow = Number(meta.preview_state.header_row ?? meta.header_rows[sheetIndex] ?? 1);
+  const mapping = mapHeaders(meta.headers[sheetIndex], module, meta.semantic_mappings, sheetIndex);
+  assertMappingUnambiguous(mapping);
+  const normalizedBuffer = await normalizedWorkbookBuffer(buffer, sheetIndex, headerRow, mapping, module);
 
-  const result = await doImport(module, buffer, meta.filename, duplicateStrategy, sheetIndex, requestId);
+  const result = await doImport(module, normalizedBuffer, meta.filename, duplicateStrategy, requestId, headerRow);
 
   audit.record('excel_import_execute', 0, 'import', {
     summary: `对话式导入${module}：${result.imported}新增，${result.updated}更新，${result.skipped}跳过`,
@@ -719,7 +1109,9 @@ export async function executeImport(options: {
     },
   });
 
-  discardUpload(fileId);
+  meta.execution_state = { request_id: requestId, result, executed_at: nowIso() };
+  saveMetadata(meta);
+  removeTempFile(fileId);
 
   return result;
 }
@@ -766,16 +1158,19 @@ export function cleanExpiredUploads(): number {
 export async function buildErrorExcel(fileId: string, module: string, options?: { owner?: string; session?: string; channel?: string }): Promise<Buffer> {
   const meta = loadMetadata(fileId);
   assertFileAccess(meta, options);
-  void module;
+  checkExpiry(meta);
+  assertScope(meta);
+  const stateModule = String(meta.preview_state?.module ?? '');
+  if (module !== stateModule) throw new ExcelImportError('错误报告模块与导入预览不一致');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('导入错误');
   ws.getRow(1).values = ['行号', '错误原因'];
-  if (meta.preview_state) {
-    const stateErrors = meta.preview_state.errors as Array<{ row: number; reason: string }> | undefined;
-    if (stateErrors) {
-      for (let i = 0; i < stateErrors.length; i += 1) {
-        ws.getRow(i + 2).values = [stateErrors[i].row, stateErrors[i].reason];
-      }
+  const executionResult = meta.execution_state?.result as { errors?: Array<{ row: number; reason: string }> } | undefined;
+  const stateErrors = executionResult?.errors
+    ?? meta.preview_state?.errors as Array<{ row: number; reason: string }> | undefined;
+  if (stateErrors) {
+    for (let i = 0; i < stateErrors.length; i += 1) {
+      ws.getRow(i + 2).values = [stateErrors[i].row, stateErrors[i].reason];
     }
   }
   return wb.xlsx.writeBuffer() as Promise<Buffer>;

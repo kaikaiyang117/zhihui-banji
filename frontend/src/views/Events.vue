@@ -53,6 +53,16 @@ onMounted(load)
 </template>
 
 <style scoped>
+.event-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.event-card {
+  display: flex;
+  flex-direction: column;
+}
+
 .event-card-top {
   align-items: baseline;
   color: var(--ds-color-ink-secondary);
@@ -107,5 +117,11 @@ onMounted(load)
 
 .event-card .record-actions .btn {
   margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .event-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

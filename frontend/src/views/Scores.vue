@@ -393,6 +393,13 @@ async function evaluateRules() {
   } catch (error) { message.value = error.message }
 }
 
+function hitStatusLabel(hit) {
+  const hitStatus = hit.status || ''
+  const taskStatus = hit.task_status || ''
+  if (!taskStatus || hitStatus === taskStatus) return hitStatus || taskStatus || '待处理'
+  return `${hitStatus || '待处理'} · ${taskStatus}`
+}
+
 function exportExam() {
   if (!selectedExam.value) return
   const anchor = document.createElement('a')
@@ -646,7 +653,7 @@ onMounted(load)
       <article v-for="rule in rules" :key="rule.id" class="score-rule-item">
         <div><strong>{{ rule.name }}</strong><span>{{ rule.metric }}{{ rule.subject_name ? ` · ${rule.subject_name}` : '' }} ≥ {{ rule.threshold }} · {{ rule.priority }}</span><small>最近执行：{{ rule.last_run_at || '尚未执行' }}</small></div>
         <div class="rule-actions"><span>待处理 {{ rule.active_hit_count }}</span><span>已处理 {{ rule.handled_hit_count }}</span><button class="btn btn-sm" :class="rule.enabled ? 'btn-success' : 'btn-outline'" @click="toggleRule(rule)">{{ rule.enabled ? '已启用' : '已停用' }}</button><button class="icon-btn danger" aria-label="删除成绩规则" @click="removeRule(rule)"><Trash2 :size="14" /></button></div>
-        <router-link v-for="hit in rule.hits" :key="hit.id" class="score-rule-hit" :to="`/tasks?bucket=all&task=${hit.task_id}&action=edit`"><span><strong>{{ hit.student_name }}</strong> · {{ hit.previous_exam_name }} → {{ hit.current_exam_name }} · {{ hit.current_value }}</span><em>{{ hit.status }} · {{ hit.task_status || '无工作项' }}</em></router-link>
+        <div class="score-rule-hits"><router-link v-for="hit in rule.hits" :key="hit.id" class="score-rule-hit" :to="`/tasks?bucket=all&task=${hit.task_id}&action=edit`"><span><strong>{{ hit.student_name }}</strong> · {{ hit.previous_exam_name }} → {{ hit.current_exam_name }} · {{ hit.current_value }}</span><em>{{ hitStatusLabel(hit) }}</em></router-link></div>
       </article>
       <details v-if="recentRuns.length" class="score-rule-history"><summary><History :size="13" /> 最近执行历史</summary><div v-for="run in recentRuns" :key="run.id"><span>{{ run.created_at }} · {{ run.trigger_type }}</span><small>命中 {{ run.hit_count }} · 新建 {{ run.created_count }} · 重开 {{ run.reopened_count }} · 解除 {{ run.resolved_count }}</small></div></details>
     </section>
@@ -799,7 +806,9 @@ onMounted(load)
 .score-rule-item > div:first-child { display: grid; gap: 3px; }
 .score-rule-item > div span, .score-rule-item > div small { color: var(--text-secondary); font-size: 11px; }
 .rule-actions { display: flex; align-items: center; gap: 8px; font-size: 11px; }
-.score-rule-hit { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; border-radius: 9px; background: var(--surface-subtle); color: var(--text); font-size: 11px; text-decoration: none; }
+.score-rule-hits { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.score-rule-hit { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 9px 11px; border-radius: 9px; background: var(--surface-subtle); color: var(--text); font-size: 11px; text-decoration: none; }
+.score-rule-hit span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .score-rule-hit em { color: var(--primary); font-style: normal; white-space: nowrap; }
 .score-rule-history { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .score-rule-history summary { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 11px; cursor: pointer; }
@@ -856,7 +865,8 @@ onMounted(load)
   .score-rule-create { grid-template-columns: 1fr; }
   .score-rule-item { grid-template-columns: 1fr; }
   .rule-actions { flex-wrap: wrap; }
-  .score-rule-hit { flex-direction: column; }
+  .score-rule-hits { grid-template-columns: 1fr; }
+  .score-rule-hit { flex-direction: column; align-items: flex-start; }
   .raw-records-hint { display: none; }
   .score-preview-dialog { width: calc(100vw - 20px); max-height: 91vh; padding: 16px; }
   .preview-controls, .preview-footer { align-items: stretch; flex-direction: column; }

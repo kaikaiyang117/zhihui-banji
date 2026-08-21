@@ -1,40 +1,27 @@
 import type { Database } from 'better-sqlite3';
 
-import { getDb, scopeIds, ensureStudentInScope } from './context.js';
+import { todayString } from './clock.js';
+import { ensureStudentInScope, getCurrentScope, getDb, ScopeError, scopeIds } from './context.js';
 
 export class MeetingPrepError extends Error {}
 
-function connOf(conn?: Database): Database {
-  return conn ?? getDb().connInstance;
-}
-
-function text(value: unknown): string {
-  return String(value ?? '').trim();
-}
-
-function maskPhone(value: string): string {
-  if (!value || value.length < 7) return value;
-  return value.slice(0, 3) + '****' + value.slice(-4);
-}
-
-function maskAddress(value: string): string {
-  if (!value) return value;
-  return value.slice(0, Math.min(3, value.length)) + '****';
-}
-
-interface SectionResult {
+export interface MeetingPrepSection {
   category: string;
   source: string;
+  source_label: string;
   date_range: string;
   items: Array<Record<string, unknown>>;
   has_data: boolean;
 }
 
-function emptySection(category: string, source: string, dateRange: string): SectionResult {
-  return { category, source, date_range: dateRange, items: [], has_data: false };
+export interface MeetingPrepSummary {
+  student: Record<string, unknown>;
+  scope: { class_name: string; term_name: string };
+  date_range: { start: string; end: string };
+  sections: Array<MeetingPrepSection>;
 }
 
-export function generateStudentSummary(options: {
+export interface MeetingPrepSummaryOptions {
   studentId: number;
   dateStart?: string;
   dateEnd?: string;
@@ -45,217 +32,211 @@ export function generateStudentSummary(options: {
   includeEvents?: boolean;
   includeHealth?: boolean;
   conn?: Database;
-}): {
-  student: Record<string, unknown>;
-  date_range: { start: string; end: string };
-  sections: Array<SectionResult>;
-} {
+}
+
+function connOf(conn?: Database): Database {
+  return conn ?? getDb().connInstance;
+}
+
+function text(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function isDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function resolveDateRange(options: MeetingPrepSummaryOptions, conn: Database): { start: string; end: string } {
+  const scope = getCurrentScope({ conn });
+  const today = todayString();
+  const termStart = isDate(text(scope.start_date)) ? text(scope.start_date) : `${today.slice(0, 4)}-01-01`;
+  const termEnd = isDate(text(scope.end_date)) && text(scope.end_date) < today ? text(scope.end_date) : today;
+  const start = text(options.dateStart) || (termStart <= termEnd ? termStart : termEnd);
+  const end = text(options.dateEnd) || termEnd;
+  if (!isDate(start) || !isDate(end)) throw new MeetingPrepError('日期格式不正确，请重新选择');
+  if (start > end) throw new MeetingPrepError('起始日期不能晚于截止日期');
+  if (end > today) throw new MeetingPrepError('截止日期不能晚于今天，未来记录不会用于会谈分析');
+  return { start, end };
+}
+
+function emptySection(
+  category: string, source: string, sourceLabel: string, dateRange: string,
+): MeetingPrepSection {
+  return { category, source, source_label: sourceLabel, date_range: dateRange, items: [], has_data: false };
+}
+
+export function generateStudentSummary(options: MeetingPrepSummaryOptions): MeetingPrepSummary {
   const conn = connOf(options.conn);
   const studentId = Number(options.studentId);
   let student: Record<string, unknown>;
   try {
     student = ensureStudentInScope(studentId, { conn });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ScopeError)) throw error;
     throw new MeetingPrepError('学生不存在或不在当前班级/学期');
   }
-  const dateStart = text(options.dateStart);
-  const dateEnd = text(options.dateEnd);
-  const sections: Array<SectionResult> = [];
-  const dateRange = dateStart && dateEnd ? `${dateStart} ~ ${dateEnd}` : '';
-
-  if (options.includeScores !== false) {
-    const section = buildScoresSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
-  }
-
-  if (options.includeAttendance !== false) {
-    const section = buildAttendanceSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
-  }
-
-  if (options.includePoints !== false) {
-    const section = buildPointsSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
-  }
-
-  if (options.includeCommunications !== false) {
-    const section = buildCommunicationsSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
-  }
-
-  if (options.includeEvents !== false) {
-    const section = buildEventsSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
-  }
-
   if (options.includeHealth === true) {
-    const section = buildHealthSection(conn, studentId, dateStart, dateEnd, dateRange);
-    sections.push(section);
+    throw new MeetingPrepError('健康数据尚未接入会谈准备，请先取消该选项');
   }
+  const selected = [
+    options.includeScores !== false,
+    options.includeAttendance !== false,
+    options.includePoints !== false,
+    options.includeCommunications !== false,
+    options.includeEvents !== false,
+  ];
+  if (!selected.some(Boolean)) throw new MeetingPrepError('请至少选择一类事实资料');
 
-  const safeStudent: Record<string, unknown> = { ...student };
-  if (safeStudent['监护人电话']) safeStudent['监护人电话'] = maskPhone(String(safeStudent['监护人电话']));
-  if (safeStudent['监护人2电话']) safeStudent['监护人2电话'] = maskPhone(String(safeStudent['监护人2电话']));
-  if (safeStudent['家庭住址']) safeStudent['家庭住址'] = maskAddress(String(safeStudent['家庭住址']));
+  const range = resolveDateRange(options, conn);
+  const dateRange = `${range.start} ~ ${range.end}`;
+  const sections: Array<MeetingPrepSection> = [];
+  if (options.includeScores !== false) sections.push(buildScoresSection(conn, studentId, range.start, range.end, dateRange));
+  if (options.includeAttendance !== false) sections.push(buildAttendanceSection(conn, studentId, range.start, range.end, dateRange));
+  if (options.includePoints !== false) sections.push(buildPointsSection(conn, studentId, range.start, range.end, dateRange));
+  if (options.includeCommunications !== false) sections.push(buildCommunicationsSection(conn, studentId, range.start, range.end, dateRange));
+  if (options.includeEvents !== false) sections.push(buildEventsSection(conn, studentId, range.start, range.end, dateRange));
 
+  const scope = getCurrentScope({ conn });
   return {
-    student: safeStudent,
-    date_range: { start: dateStart, end: dateEnd },
+    student: {
+      id: student.id,
+      学号: student['学号'],
+      姓名: student['姓名'],
+      性别: student['性别'],
+      班级任职: student['班级任职'],
+      特长: student['特长'],
+      是否住校: student['是否住校'],
+    },
+    scope: { class_name: scope.class_name, term_name: scope.term_name },
+    date_range: range,
     sections,
   };
 }
 
 function buildScoresSection(
   conn: Database, studentId: number, dateStart: string, dateEnd: string, dateRange: string,
-): SectionResult {
-  const section = emptySection('成绩记录', 'exam_records', dateRange);
-  try {
-    const [classId, termId] = scopeIds({ conn });
-    const where = ["e.student_id=?", "e.class_id=?", "e.term_id=?", "e.deleted_at=''"];
-    const params: unknown[] = [studentId, classId, termId];
-    if (dateStart) { where.push("e.exam_date>=?"); params.push(dateStart); }
-    if (dateEnd) { where.push("e.exam_date<=?"); params.push(dateEnd); }
-    const rows = conn.prepare(
-      `SELECT e.exam_name, e.exam_date, e.subject, e.score, e.rank, e.record_status
-       FROM exam_records e WHERE ${where.join(' AND ')}
-       ORDER BY e.exam_date DESC, e.exam_name, e.subject`,
-    ).all(...params) as Array<Record<string, unknown>>;
-    if (rows.length > 0) {
-      section.items = rows.map(row => ({
-        exam_name: row.exam_name,
-        exam_date: row.exam_date,
-        subject: row.subject,
-        score: row.score,
-        rank: row.rank,
-        record_status: row.record_status,
-      }));
-      section.has_data = true;
-    }
-  } catch { }
+): MeetingPrepSection {
+  const section = emptySection('成绩', 'exam_records', '成绩记录', dateRange);
+  const [classId, termId] = scopeIds({ conn });
+  const rows = conn.prepare(
+    `SELECT e.exam_name, e.exam_date, e.subject, e.score, e.rank, e.record_status
+     FROM exam_records e
+     WHERE e.student_id=? AND e.class_id=? AND e.term_id=? AND e.deleted_at=''
+       AND e.exam_date>=? AND e.exam_date<=?
+     ORDER BY e.exam_date DESC, e.exam_name, e.subject`,
+  ).all(studentId, classId, termId, dateStart, dateEnd) as Array<Record<string, unknown>>;
+  if (rows.length > 0) {
+    section.items = rows.map(row => ({
+      exam_name: row.exam_name,
+      exam_date: row.exam_date,
+      subject: row.subject,
+      score: row.score,
+      rank: row.rank,
+      record_status: row.record_status,
+    }));
+    section.has_data = true;
+  }
   return section;
 }
 
 function buildAttendanceSection(
   conn: Database, studentId: number, dateStart: string, dateEnd: string, dateRange: string,
-): SectionResult {
-  const section = emptySection('考勤记录', 'attendance_records', dateRange);
-  try {
-    const [classId, termId] = scopeIds({ conn });
-    const where = ["a.student_id=?", "a.class_id=?", "a.term_id=?", "a.deleted_at=''"];
-    const params: unknown[] = [studentId, classId, termId];
-    if (dateStart) { where.push("a.attendance_date>=?"); params.push(dateStart); }
-    if (dateEnd) { where.push("a.attendance_date<=?"); params.push(dateEnd); }
-    const rows = conn.prepare(
-      `SELECT a.attendance_date, a.scene, a.status, a.reason
-       FROM attendance_records a WHERE ${where.join(' AND ')}
-       ORDER BY a.attendance_date DESC`,
-    ).all(...params) as Array<Record<string, unknown>>;
-    const anomalies = rows.filter(r => String(r.status) !== '出勤');
-    if (anomalies.length > 0) {
-      section.items = anomalies.map(row => ({
-        date: row.attendance_date,
-        scene: row.scene,
-        status: row.status,
-        reason: row.reason,
-      }));
-      section.has_data = true;
-    } else if (rows.length > 0) {
-      section.items = [{ summary: `共 ${rows.length} 条考勤记录，全部正常出勤` }];
-      section.has_data = true;
-    }
-  } catch { }
+): MeetingPrepSection {
+  const section = emptySection('考勤', 'attendance_records', '考勤记录', dateRange);
+  const [classId, termId] = scopeIds({ conn });
+  const rows = conn.prepare(
+    `SELECT a.attendance_date, a.scene, a.status, a.reason
+     FROM attendance_records a
+     WHERE a.student_id=? AND a.class_id=? AND a.term_id=? AND a.deleted_at=''
+       AND a.attendance_date>=? AND a.attendance_date<=?
+     ORDER BY a.attendance_date DESC`,
+  ).all(studentId, classId, termId, dateStart, dateEnd) as Array<Record<string, unknown>>;
+  const anomalies = rows.filter(row => String(row.status) !== '出勤');
+  if (anomalies.length > 0) {
+    section.items = anomalies.map(row => ({
+      date: row.attendance_date,
+      scene: row.scene,
+      status: row.status,
+      reason: row.reason,
+    }));
+    section.has_data = true;
+  } else if (rows.length > 0) {
+    section.items = [{ summary: `所选范围内有 ${rows.length} 条考勤记录，未记录异常` }];
+    section.has_data = true;
+  }
   return section;
 }
 
 function buildPointsSection(
   conn: Database, studentId: number, dateStart: string, dateEnd: string, dateRange: string,
-): SectionResult {
-  const section = emptySection('积分记录', 'point_ledger', dateRange);
-  try {
-    const [classId, termId] = scopeIds({ conn });
-    const where = ["p.student_id=?", "p.class_id=?", "p.term_id=?", "p.status='有效'"];
-    const params: unknown[] = [studentId, classId, termId];
-    if (dateStart) { where.push("p.occurred_at>=?"); params.push(dateStart); }
-    if (dateEnd) { where.push("p.occurred_at<=?"); params.push(dateEnd); }
-    const rows = conn.prepare(
-      `SELECT p.occurred_at, p.amount, p.category, p.reason
-       FROM point_ledger p WHERE ${where.join(' AND ')}
-       ORDER BY p.occurred_at DESC LIMIT 50`,
-    ).all(...params) as Array<Record<string, unknown>>;
-    if (rows.length > 0) {
-      const total = rows.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
-      section.items = rows.map(row => ({
-        date: row.occurred_at,
-        amount: row.amount,
-        category: row.category,
-        reason: row.reason,
-      }));
-      section.items.unshift({ summary: `共 ${rows.length} 条记录，合计 ${total} 分` });
-      section.has_data = true;
-    }
-  } catch { }
+): MeetingPrepSection {
+  const section = emptySection('行为积分', 'point_ledger', '行为积分记录', dateRange);
+  const [classId, termId] = scopeIds({ conn });
+  const rows = conn.prepare(
+    `SELECT p.occurred_at, p.amount, p.category, p.reason
+     FROM point_ledger p
+     WHERE p.student_id=? AND p.class_id=? AND p.term_id=? AND p.status='有效'
+       AND p.occurred_at>=? AND p.occurred_at<=?
+     ORDER BY p.occurred_at DESC LIMIT 30`,
+  ).all(studentId, classId, termId, dateStart, dateEnd) as Array<Record<string, unknown>>;
+  if (rows.length > 0) {
+    const total = rows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+    section.items = [{ summary: `所选范围内共 ${rows.length} 条记录，合计 ${total} 分` }, ...rows.map(row => ({
+      date: row.occurred_at,
+      amount: row.amount,
+      category: row.category,
+      reason: row.reason,
+    }))];
+    section.has_data = true;
+  }
   return section;
 }
 
 function buildCommunicationsSection(
   conn: Database, studentId: number, dateStart: string, dateEnd: string, dateRange: string,
-): SectionResult {
-  const section = emptySection('家校沟通', 'communications', dateRange);
-  try {
-    const [classId, termId] = scopeIds({ conn });
-    const where = ["c.student_id=?", "c.class_id=?", "c.term_id=?", "c.deleted_at=''"];
-    const params: unknown[] = [studentId, classId, termId];
-    if (dateStart) { where.push("c.communicated_at>=?"); params.push(dateStart); }
-    if (dateEnd) { where.push("c.communicated_at<=?"); params.push(dateEnd); }
-    const rows = conn.prepare(
-      `SELECT c.communicated_at, c.method, c.reason, c.status, c.followup_at
-       FROM communications c WHERE ${where.join(' AND ')}
-       ORDER BY c.communicated_at DESC LIMIT 20`,
-    ).all(...params) as Array<Record<string, unknown>>;
-    if (rows.length > 0) {
-      section.items = rows.map(row => ({
-        date: row.communicated_at,
-        method: row.method,
-        reason: row.reason,
-        status: row.status,
-        followup_at: row.followup_at,
-      }));
-      section.has_data = true;
-    }
-  } catch { }
+): MeetingPrepSection {
+  const section = emptySection('家校沟通', 'communications', '家校沟通记录', dateRange);
+  const [classId, termId] = scopeIds({ conn });
+  const rows = conn.prepare(
+    `SELECT c.communicated_at, c.method, c.reason, c.status, c.followup_at
+     FROM communications c
+     WHERE c.student_id=? AND c.class_id=? AND c.term_id=? AND c.deleted_at=''
+       AND c.communicated_at>=? AND c.communicated_at<=?
+     ORDER BY c.communicated_at DESC LIMIT 20`,
+  ).all(studentId, classId, termId, dateStart, dateEnd) as Array<Record<string, unknown>>;
+  if (rows.length > 0) {
+    section.items = rows.map(row => ({
+      date: row.communicated_at,
+      method: row.method,
+      reason: row.reason,
+      status: row.status,
+      followup_at: row.followup_at,
+    }));
+    section.has_data = true;
+  }
   return section;
 }
 
 function buildEventsSection(
   conn: Database, studentId: number, dateStart: string, dateEnd: string, dateRange: string,
-): SectionResult {
-  const section = emptySection('学生事件', 'student_events', dateRange);
-  try {
-    const [classId, termId] = scopeIds({ conn });
-    const where = ["e.student_id=?", "e.class_id=?", "e.term_id=?", "e.deleted_at=''"];
-    const params: unknown[] = [studentId, classId, termId];
-    if (dateStart) { where.push("e.occurred_at>=?"); params.push(dateStart); }
-    if (dateEnd) { where.push("e.occurred_at<=?"); params.push(dateEnd); }
-    const rows = conn.prepare(
-      `SELECT e.occurred_at, e.event_type, e.description, e.status
-       FROM student_events e WHERE ${where.join(' AND ')}
-       ORDER BY e.occurred_at DESC LIMIT 20`,
-    ).all(...params) as Array<Record<string, unknown>>;
-    if (rows.length > 0) {
-      section.items = rows.map(row => ({
-        date: row.occurred_at,
-        event_type: row.event_type,
-        description: row.description,
-        status: row.status,
-      }));
-      section.has_data = true;
-    }
-  } catch { }
+): MeetingPrepSection {
+  const section = emptySection('学生事件', 'student_events', '学生事件记录', dateRange);
+  const [classId, termId] = scopeIds({ conn });
+  const rows = conn.prepare(
+    `SELECT e.occurred_at, e.event_type, e.description, e.status
+     FROM student_events e
+     WHERE e.student_id=? AND e.class_id=? AND e.term_id=? AND e.deleted_at=''
+       AND e.occurred_at>=? AND e.occurred_at<=?
+     ORDER BY e.occurred_at DESC LIMIT 20`,
+  ).all(studentId, classId, termId, dateStart, dateEnd) as Array<Record<string, unknown>>;
+  if (rows.length > 0) {
+    section.items = rows.map(row => ({
+      date: row.occurred_at,
+      event_type: row.event_type,
+      description: row.description,
+      status: row.status,
+    }));
+    section.has_data = true;
+  }
   return section;
-}
-
-function buildHealthSection(
-  _conn: Database, _studentId: number, _dateStart: string, _dateEnd: string, dateRange: string,
-): SectionResult {
-  return emptySection('健康数据', 'health', dateRange);
 }

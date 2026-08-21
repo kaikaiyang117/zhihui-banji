@@ -236,14 +236,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <router-link v-if="activeCountdown" :to="activeCountdown.to" class="dashboard-countdown-strip" aria-label="查看倒计时对应安排">
-      <span class="dashboard-countdown-kind">{{ activeCountdown.kind }}</span>
-      <span class="dashboard-countdown-copy"><strong>{{ activeCountdown.name }}</strong><small>{{ activeCountdown.date }}</small></span>
-      <strong class="dashboard-countdown-value">{{ activeCountdown.countdown }}</strong>
-      <ArrowRight :size="15" aria-hidden="true" />
-    </router-link>
-
     <section class="action-summary" aria-label="今日行动摘要">
+      <router-link v-if="activeCountdown" :to="activeCountdown.to" class="dashboard-countdown-strip" aria-label="查看倒计时对应安排">
+        <span class="dashboard-countdown-kind">{{ activeCountdown.kind }}</span>
+        <span class="dashboard-countdown-copy"><strong>{{ activeCountdown.name }}</strong><small>{{ activeCountdown.date }}</small></span>
+        <strong class="dashboard-countdown-value">{{ activeCountdown.countdown }}</strong>
+      </router-link>
       <router-link :to="{ path: '/tasks', query: { bucket: 'overdue' } }" class="action-summary-card danger">
         <AlertTriangle :size="19" />
         <span>已逾期</span><strong>{{ stats.work_summary.overdue }}</strong>
@@ -420,13 +418,13 @@ onUnmounted(() => {
 .dashboard-more-menu { position: absolute; z-index: 5; top: calc(100% + var(--ds-space-2)); right: 0; display: grid; min-width: 152px; padding: var(--ds-space-2); border-radius: var(--ds-radius-control); background: var(--ds-color-surface); box-shadow: var(--ds-shadow-raised); }
 .dashboard-more-menu button { display: flex; align-items: center; gap: var(--ds-space-2); min-height: 36px; padding: 0 var(--ds-space-3); border: 0; border-radius: var(--ds-radius-sm); color: var(--ds-color-ink); background: transparent; cursor: pointer; font: var(--ds-type-label); text-align: left; }
 .dashboard-more-menu button:hover { background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); }
-.action-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ds-space-3); }
-.action-summary-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--ds-space-2) var(--ds-space-3); min-height: 98px; padding: var(--ds-space-4) 18px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); color: var(--ds-color-ink-secondary); text-decoration: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); }
+.action-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--ds-space-3); }
+.action-summary-card { display: grid; grid-template-columns: auto minmax(0,1fr) auto; grid-template-rows: auto 1fr; align-items: center; gap: var(--ds-space-2) var(--ds-space-3); min-height: 98px; padding: var(--ds-space-4) 18px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); color: var(--ds-color-ink-secondary); text-decoration: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); }
 .action-summary-card:hover { border-color: var(--ds-color-primary-border); background: var(--ds-color-surface-subtle); }
-.action-summary-card > svg { grid-row: 1 / span 2; color: var(--ds-color-primary); }
-.action-summary-card span { color: var(--ds-color-ink-secondary); font: var(--ds-type-label); }
-.action-summary-card strong { color: var(--ds-color-ink); font: var(--ds-type-metric); font-variant-numeric: tabular-nums; }
-.action-summary-card small { color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }
+.action-summary-card > svg { grid-row: 1 / span 2; align-self:center; color: var(--ds-color-primary); }
+.action-summary-card span { align-self:start; min-width:0; color: var(--ds-color-ink-secondary); font: var(--ds-type-label); }
+.action-summary-card strong { align-self:start; justify-self:end; color: var(--ds-color-ink); font: var(--ds-type-metric); font-variant-numeric: tabular-nums; }
+.action-summary-card small { grid-column:2 / -1; align-self:end; min-width:0; color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }
 .action-summary-card.danger { border-color: var(--ds-color-danger-border); background: var(--ds-color-danger-soft); }
 .action-summary-card.danger > svg, .action-summary-card.danger strong { color: var(--ds-color-danger); }
 .action-summary-card.primary { border-color: var(--ds-color-primary-border); background: var(--ds-color-primary-soft); }
@@ -527,18 +525,18 @@ onUnmounted(() => {
 .snapshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .snapshot-grid a { display: grid; gap: var(--ds-space-1); padding: var(--ds-space-3); border-radius: var(--ds-radius-control); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
 .snapshot-grid strong { color: var(--ds-color-ink); font: var(--ds-type-section); font-variant-numeric: tabular-nums; }
-.dashboard-countdown-strip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--ds-space-3); min-height: 48px; padding: 9px 14px; border: 1px solid var(--ds-color-primary-border); border-radius: var(--ds-radius-control); background: var(--ds-color-primary-soft); color: var(--ds-color-ink); text-decoration: none; }
+.dashboard-countdown-strip { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto 1fr; align-items: center; gap: 2px 10px; min-height: 98px; padding: var(--ds-space-4) 18px; border: 1px solid var(--ds-color-primary-border); border-radius: var(--ds-radius-card); background: var(--ds-color-primary-soft); color: var(--ds-color-ink); text-decoration: none; }
 .dashboard-countdown-strip:hover { border-color: var(--ds-color-primary); background: color-mix(in srgb, var(--ds-color-primary-soft) 82%, white); }
-.dashboard-countdown-kind { padding: 3px 7px; border-radius: var(--ds-radius-pill); background: var(--ds-color-primary); color: white; font: var(--ds-type-meta); white-space: nowrap; }
-.dashboard-countdown-copy { display: grid; gap: 2px; min-width: 0; }
+.dashboard-countdown-kind { grid-column:1; grid-row:1 / span 2; align-self:start; padding: 3px 7px; border-radius: var(--ds-radius-pill); background: var(--ds-color-primary); color: white; font: var(--ds-type-meta); white-space: nowrap; }
+.dashboard-countdown-copy { grid-column:2; grid-row:1 / span 2; display:grid; gap:2px; min-width:0; align-self:start; }
 .dashboard-countdown-copy strong { overflow: hidden; font: var(--ds-type-label); text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-countdown-copy small { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
-.dashboard-countdown-value { color: var(--ds-color-primary-hover); font: var(--ds-type-metric); font-size: 21px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dashboard-countdown-strip > svg { color: var(--ds-color-primary); }
+.dashboard-countdown-copy small { flex:0 0 auto; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); white-space:nowrap; }
+.dashboard-countdown-value { grid-column:1 / -1; grid-row:3; align-self:end; justify-self:end; color: var(--ds-color-primary-hover); font: var(--ds-type-metric); font-size: 21px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dashboard-quick-actions-card { margin-top: -2px; }
 .dashboard-quick-actions { margin-bottom: 0; }
 @media (max-width: 900px) {
   .action-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-countdown-strip { grid-column:1 / -1; }
   .today-schedule-list { grid-template-columns: 1fr; }
   .action-columns, .action-columns-compact { grid-template-columns: 1fr; }
   .dashboard-calendar-layout { grid-template-columns: 1fr; grid-template-rows: auto; }
@@ -551,8 +549,7 @@ onUnmounted(() => {
   .dashboard-more-actions summary { justify-content: center; text-align: center; }
   .dashboard-page { gap: var(--ds-space-4); }
   .dashboard-page .card { padding: var(--ds-space-4); }
-  .dashboard-countdown-strip { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--ds-space-2); padding: 9px 11px; }
-  .dashboard-countdown-strip > svg { display: none; }
+  .dashboard-countdown-strip { grid-template-columns: auto minmax(0, 1fr); gap: var(--ds-space-2); padding: 9px 11px; }
   .dashboard-countdown-value { font-size: 18px; }
   .action-summary { gap: var(--ds-space-2); }
   .action-summary-card { grid-template-columns: minmax(0, 1fr) auto; min-height: 88px; padding: var(--ds-space-3); gap: var(--ds-space-1) var(--ds-space-2); }

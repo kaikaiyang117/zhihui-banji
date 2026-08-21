@@ -12,7 +12,9 @@ const loading = ref(true)
 const message = ref('')
 const roomForm = ref({ building: '', floor: '', room_no: '', gender_limit: '不限', capacity: 4, note: '' })
 const editingRoom = ref(null)
+const roomEditorOpen = ref(false)
 const assignForm = ref({ student_id: '', bed_id: '', move_in_at: '', note: '' })
+const assignModalOpen = ref(false)
 const moving = ref(null)
 const moveForm = ref({ bed_id: '', move_in_at: '', reason: '', note: '' })
 const leaderRoom = ref(null)
@@ -60,16 +62,28 @@ async function saveRoom() {
     if (editingRoom.value) await put(`/api/dormitories/rooms/${editingRoom.value.id}`, roomForm.value)
     else await post('/api/dormitories/rooms', roomForm.value)
     message.value = editingRoom.value ? '宿舍信息已保存' : '宿舍已创建'
-    editingRoom.value = null; resetRoomForm(); await load()
+    editingRoom.value = null; resetRoomForm(); roomEditorOpen.value = false; await load()
   } catch (error) { message.value = `保存失败：${error.message}` }
+}
+
+function openNewRoom() {
+  editingRoom.value = null
+  resetRoomForm()
+  roomEditorOpen.value = true
 }
 
 function editRoom(room) {
   editingRoom.value = room
   roomForm.value = { building: room.building, floor: room.floor, room_no: room.room_no, gender_limit: room.gender_limit, capacity: room.capacity, note: room.note || '' }
+  roomEditorOpen.value = true
 }
 
-function cancelRoomEdit() { editingRoom.value = null; resetRoomForm() }
+function cancelRoomEdit() { editingRoom.value = null; resetRoomForm(); roomEditorOpen.value = false }
+
+function openAssignModal() {
+  assignForm.value = { student_id: '', bed_id: '', move_in_at: '', note: '' }
+  assignModalOpen.value = true
+}
 
 function openLeader(room) {
   leaderRoom.value = room
@@ -124,7 +138,7 @@ async function assign() {
   if (!assignForm.value.student_id || !assignForm.value.bed_id) return
   try {
     await post('/api/dormitories/assignments', { ...assignForm.value, student_id: Number(assignForm.value.student_id), bed_id: Number(assignForm.value.bed_id) })
-    message.value = '住宿安排已保存'; assignForm.value = { student_id: '', bed_id: '', move_in_at: '', note: '' }; await load()
+    message.value = '住宿安排已保存'; assignForm.value = { student_id: '', bed_id: '', move_in_at: '', note: '' }; assignModalOpen.value = false; await load()
   } catch (error) { message.value = `安排失败：${error.message}` }
 }
 
@@ -158,20 +172,20 @@ onMounted(load)
 
 <template>
   <div>
-    <div class="page-title-bar"><div><div class="page-title">宿舍管理</div><div class="page-subtitle">管理房间、床位、寝室长和当前班级学生的入住记录</div></div><button class="btn btn-outline" @click="load"><RotateCcw :size="14" /> 刷新</button></div>
+    <div class="page-title-bar"><div><div class="page-title">宿舍管理</div><div class="page-subtitle">管理房间、床位、寝室长和当前班级学生的入住记录</div></div><div class="dorm-page-actions"><button class="btn btn-outline" @click="load"><RotateCcw :size="14" /> 刷新</button><button class="btn btn-outline" @click="openAssignModal"><UserRound :size="14" /> 安排入住</button><button class="btn btn-primary" @click="openNewRoom"><Plus :size="14" /> 新增宿舍</button></div></div>
     <div v-if="message" class="inline-message">{{ message }}</div>
 
     <div class="dorm-stats"><div class="overview-card"><span>宿舍房间</span><strong>{{ rooms.length }}</strong></div><div class="overview-card"><span>当前入住</span><strong>{{ occupiedCount }}</strong></div><div class="overview-card"><span>待安排学生</span><strong>{{ unassigned.length }}</strong></div><div class="overview-card"><span>最近查寝</span><strong>{{ latestInspection ? latestInspection.inspection_date : '未记录' }}</strong></div></div>
-
-    <div class="card dorm-form-card"><div class="card-title"><BedDouble :size="16" /> {{ editingRoom ? '编辑宿舍' : '新增宿舍' }}</div><div class="form-grid"><label>楼栋<input v-model="roomForm.building" class="form-input" placeholder="如：一号楼"></label><label>楼层<input v-model="roomForm.floor" class="form-input" placeholder="如：1"></label><label>房间号<input v-model="roomForm.room_no" class="form-input" placeholder="如：101"></label><label>性别限制<select v-model="roomForm.gender_limit" class="form-select"><option>不限</option><option>男</option><option>女</option></select></label><label>床位数<input v-model.number="roomForm.capacity" class="form-input" type="number" min="1" max="8"><small class="field-hint">每间宿舍最多8人</small></label><label>备注<input v-model="roomForm.note" class="form-input" placeholder="可选"></label></div><div class="modal-actions"><button v-if="editingRoom" class="btn btn-outline" @click="cancelRoomEdit">取消编辑</button><button class="btn btn-primary" @click="saveRoom"><Plus v-if="!editingRoom" :size="14" /><Check v-else :size="14" /> {{ editingRoom ? '保存宿舍' : '创建宿舍' }}</button></div></div>
-
-    <div class="card dorm-form-card"><div class="card-title">安排入住 <span class="count">当前班级 · 当前学期</span></div><div class="dorm-assign-form"><select v-model="assignForm.student_id" class="form-select"><option value="">选择待安排学生</option><option v-for="student in unassigned" :key="student.id" :value="student.id">{{ student.姓名 }} · {{ student.学号 }}</option></select><select v-model="assignForm.bed_id" class="form-select"><option value="">选择空床位</option><option v-for="bed in availableBeds" :key="bed.id" :value="bed.id">{{ bed.room_label }}</option></select><input v-model="assignForm.move_in_at" class="form-input" type="date"><button class="btn btn-primary" @click="assign">保存安排</button></div></div>
 
     <div class="card inspection-card"><div class="inspection-head"><div><div class="card-title"><ClipboardCheck :size="16" /> 查寝管理</div><div class="inspection-summary">记录当前入住学生的在寝、未归、晚归和请假状态</div></div><button class="btn btn-primary" @click="openInspection"><ClipboardCheck :size="14" /> 发起查寝</button></div><div v-if="!inspections.length" class="empty-inline">还没有查寝记录。</div><div v-else class="inspection-history"><button v-for="item in inspections" :key="item.id" class="inspection-history-item" @click="showInspection(item)"><span><strong>{{ item.inspection_date }} {{ item.inspection_time }}</strong><small>{{ item.inspector || '未填写查寝人' }}</small></span><span class="inspection-counts"><em>在寝 {{ item.present_count }}</em><em v-if="item.absent_count">未归 {{ item.absent_count }}</em><em v-if="item.late_count">晚归 {{ item.late_count }}</em><em v-if="item.leave_count">请假 {{ item.leave_count }}</em></span></button></div></div>
 
     <div v-if="loading" class="loading">加载中...</div>
     <div v-else-if="!rooms.length" class="card empty-state">还没有宿舍房间，请先创建房间和床位。</div>
     <div v-else class="dorm-room-grid"><article v-for="room in rooms" :key="room.id" class="card dorm-room-card"><div class="dorm-room-head"><div><h3>{{ roomLabel(room) }}</h3><span>{{ room.gender_limit }} · {{ room.occupied_count }}/{{ room.capacity }} 人 · {{ room.status }}</span><div class="room-leader"><UserRound :size="13" /> 寝室长：{{ room.leader?.姓名 || '未指定' }}</div></div><div class="room-head-actions"><button class="btn btn-sm btn-outline" @click="openLeader(room)"><UserRound :size="13" /> 寝室长</button><button class="btn btn-sm btn-outline" @click="editRoom(room)"><Pencil :size="13" /> 编辑</button></div></div><div class="bed-grid"><button v-for="bed in room.beds" :key="bed.id" type="button" class="bed-cell" :class="{ occupied: bed.assignment_id, unavailable: bed.status !== '可用', selected: selectedBedId === bed.id }" :disabled="!bed.assignment_id" :aria-pressed="selectedBedId === bed.id" @click="selectBed(bed)"><strong>{{ bed.bed_no }}号床</strong><span v-if="bed.assignment_id">{{ bed.姓名 }}</span><span v-else>{{ bed.status === '可用' ? '空床' : bed.status }}</span></button></div><div v-if="selectedBed && selectedBed.room.id === room.id && selectedAssignment" class="room-bed-toolbar"><div class="room-bed-selection"><span class="selection-label">已选择</span><strong>{{ selectedAssignment.姓名 }}</strong><span>{{ roomLabel(room) }} · {{ selectedBed.bed.bed_no }}号床</span></div><div class="room-bed-actions"><button class="btn btn-sm btn-outline" @click="openMove(selectedAssignment)">调宿</button><button class="btn btn-sm btn-danger" @click="checkout(selectedAssignment)">退宿</button></div></div></article></div>
+
+    <div v-if="roomEditorOpen" class="modal-overlay show" @click.self="cancelRoomEdit"><div class="modal dorm-editor-modal"><div class="dorm-modal-title-row"><div><div class="modal-kicker">宿舍设置</div><h3>{{ editingRoom ? '编辑宿舍' : '新增宿舍' }}</h3></div><button class="dorm-modal-close" type="button" aria-label="关闭" @click="cancelRoomEdit"><X :size="18" /></button></div><div class="form-grid"><label>楼栋<input v-model="roomForm.building" class="form-input" placeholder="如：一号楼"></label><label>楼层<input v-model="roomForm.floor" class="form-input" placeholder="如：1"></label><label>房间号<input v-model="roomForm.room_no" class="form-input" placeholder="如：101"></label><label>性别限制<select v-model="roomForm.gender_limit" class="form-select"><option>不限</option><option>男</option><option>女</option></select></label><label>床位数<input v-model.number="roomForm.capacity" class="form-input" type="number" min="1" max="8"><small class="field-hint">每间宿舍最多8人</small></label><label>备注<input v-model="roomForm.note" class="form-input" placeholder="可选"></label></div><div class="modal-actions"><button class="btn btn-outline" @click="cancelRoomEdit">取消</button><button class="btn btn-primary" @click="saveRoom"><Plus v-if="!editingRoom" :size="14" /><Check v-else :size="14" /> {{ editingRoom ? '保存宿舍' : '创建宿舍' }}</button></div></div></div>
+
+    <div v-if="assignModalOpen" class="modal-overlay show" @click.self="assignModalOpen = false"><div class="modal dorm-editor-modal"><div class="dorm-modal-title-row"><div><div class="modal-kicker">入住安排</div><h3>安排学生入住</h3><p class="hint">当前班级 · 当前学期</p></div><button class="dorm-modal-close" type="button" aria-label="关闭" @click="assignModalOpen = false"><X :size="18" /></button></div><div class="dorm-assign-form"><select v-model="assignForm.student_id" class="form-select"><option value="">选择待安排学生</option><option v-for="student in unassigned" :key="student.id" :value="student.id">{{ student.姓名 }} · {{ student.学号 }}</option></select><select v-model="assignForm.bed_id" class="form-select"><option value="">选择空床位</option><option v-for="bed in availableBeds" :key="bed.id" :value="bed.id">{{ bed.room_label }}</option></select><input v-model="assignForm.move_in_at" class="form-input" type="date"></div><div class="modal-actions"><button class="btn btn-outline" @click="assignModalOpen = false">取消</button><button class="btn btn-primary" @click="assign">保存安排</button></div></div></div>
 
     <div v-if="moving" class="modal-overlay show" @click.self="moving = null"><div class="modal"><div class="modal-kicker">调宿</div><h3>{{ moving.姓名 }} · {{ moving.room_no }}-{{ moving.bed_no }}号床</h3><div class="form-grid"><label>目标床位<select v-model="moveForm.bed_id" class="form-select"><option value="">选择空床位</option><option v-for="bed in availableBeds" :key="bed.id" :value="bed.id">{{ bed.room_label }}</option></select></label><label>入住日期<input v-model="moveForm.move_in_at" class="form-input" type="date"></label><label class="form-grid-wide">调宿原因<textarea v-model="moveForm.reason" class="form-textarea" rows="2" placeholder="如：同楼调整、班级变动"></textarea></label></div><div class="modal-actions"><button class="btn btn-outline" @click="moving = null"><X :size="14" /> 取消</button><button class="btn btn-primary" @click="move"><Check :size="14" /> 保存调宿</button></div></div></div>
 
@@ -188,7 +202,7 @@ onMounted(load)
 .dorm-stats .overview-card { min-height:86px; padding:15px 18px; display:grid; gap:6px; }
 .dorm-stats span,.dorm-room-head span { color:var(--text-secondary); font-size:12px; }
 .dorm-stats strong { font-size:24px; line-height:1; }
-.dorm-form-card { margin-bottom:14px; }
+.dorm-page-actions { display:flex; align-items:center; gap:8px; }
 .inspection-card { margin-bottom:14px; }
 .inspection-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .inspection-summary, .empty-inline, .inspection-detail-meta { color:var(--text-secondary); font-size:12px; }
@@ -201,12 +215,24 @@ onMounted(load)
 .inspection-counts em { color:var(--text-secondary); font-size:11px; font-style:normal; }
 .dorm-assign-form { display:grid; grid-template-columns:1fr 1fr 170px auto; gap:8px; }
 .dorm-room-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+.dorm-room-card { container-type:inline-size; }
 .dorm-room-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:14px; }
-.dorm-room-head h3 { margin:0 0 4px; font-size:16px; }
+.dorm-room-head > div:first-child { min-width:0; }
+.dorm-room-head h3 { margin:0 0 4px; overflow:hidden; font-size:16px; text-overflow:ellipsis; white-space:nowrap; }
 .room-head-actions { display:flex; gap:6px; }
-.room-leader { display:flex; align-items:center; gap:4px; margin-top:6px; color:var(--primary); font-size:12px; }
+.dorm-room-head > div:first-child > span { white-space:nowrap; }
+.room-leader { display:inline-flex; align-items:center; gap:4px; margin:0 0 0 8px; color:var(--primary); font-size:12px; vertical-align:middle; white-space:nowrap; }
+@container (max-width:400px) {
+  .dorm-room-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 10px; }
+  .dorm-room-head > div:first-child { display:contents; }
+  .dorm-room-head > div:first-child > h3 { grid-column:1; grid-row:1; align-self:center; overflow:visible; font-size:14px; letter-spacing:-.03em; text-overflow:clip; }
+  .dorm-room-head > div:first-child > span { grid-column:1; grid-row:2; }
+  .dorm-room-head > div:first-child > .room-leader { grid-column:2; grid-row:2; margin:0; }
+  .room-head-actions { grid-column:2; grid-row:1; align-self:start; gap:4px; }
+  .room-head-actions .btn-sm { gap:4px; padding:4px 7px; font-size:11px; }
+}
 .bed-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:8px; }
-.bed-cell { min-height:86px; width:100%; padding:10px; display:flex; flex-direction:column; gap:4px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); font:inherit; font-size:12px; text-align:left; appearance:none; }
+.bed-cell { min-height:86px; width:100%; padding:10px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--text); font:inherit; font-size:12px; text-align:center; appearance:none; }
 .bed-cell.occupied { border-color:rgba(91,106,191,.35); background:var(--primary-bg); }
 .bed-cell.occupied { cursor:pointer; }
 .bed-cell.occupied:hover, .bed-cell.selected { border-color:var(--primary); }
@@ -221,6 +247,12 @@ onMounted(load)
 .room-bed-selection strong { font-size:13px; }
 .room-bed-actions { display:flex; flex-shrink:0; gap:7px; }
 .danger-link { color:var(--danger); }
+.dorm-editor-modal { width:min(620px, calc(100vw - 30px)); }
+.dorm-editor-modal .form-grid > label { align-content:start; }
+.dorm-modal-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.dorm-modal-close { display:grid; flex:0 0 32px; width:32px; height:32px; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:var(--text-secondary); cursor:pointer; }
+.dorm-modal-close:hover { background:var(--surface-subtle); color:var(--text); }
+.dorm-modal-close:active { background:var(--primary-bg); transform:scale(.96); }
 .modal-wide { width:min(760px, calc(100vw - 30px)); }
 .inspection-record-editor, .inspection-detail-list { max-height:420px; overflow:auto; margin-top:14px; border-top:1px solid var(--border); }
 .inspection-record-row { display:grid; grid-template-columns:minmax(150px, 1fr) 110px minmax(120px, 1fr); gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
@@ -232,5 +264,5 @@ onMounted(load)
 .status-晚归 { background:#fff7e6; color:#ad6800; }
 .status-请假 { background:#f5f5f5; color:var(--text-secondary); }
 @media (max-width:900px) { .dorm-stats { grid-template-columns:1fr 1fr; } }
-@media (max-width:720px) { .dorm-stats .overview-card:last-child { grid-column:1 / -1; } .dorm-assign-form { grid-template-columns:1fr; } .inspection-head, .inspection-history-item { align-items:flex-start; flex-direction:column; } .inspection-counts { justify-content:flex-start; } .room-head-actions { flex-direction:column; } .room-bed-toolbar { align-items:flex-start; flex-direction:column; } .inspection-record-row { grid-template-columns:1fr; gap:5px; } }
+@media (max-width:720px) { .dorm-stats .overview-card:last-child { grid-column:1 / -1; } .dorm-page-actions { width:100%; flex-wrap:wrap; } .dorm-page-actions .btn { flex:1; justify-content:center; } .dorm-assign-form { grid-template-columns:1fr; } .inspection-head, .inspection-history-item { align-items:flex-start; flex-direction:column; } .inspection-counts { justify-content:flex-start; } .room-head-actions { flex-direction:column; } .room-bed-toolbar { align-items:flex-start; flex-direction:column; } .inspection-record-row { grid-template-columns:1fr; gap:5px; } }
 </style>

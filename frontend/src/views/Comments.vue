@@ -226,8 +226,8 @@ onMounted(() => {
 .comment-variable-list .filter-pill { cursor: pointer; }
 .comment-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding-bottom: 14px; }
 .comment-filters label, .comment-batch-modal label, .comment-edit-modal label, .modal > label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-.comment-list { display: grid; gap: 10px; }
-.comment-card { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.comment-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }
+.comment-card { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
 .comment-card-head { display: flex; align-items: flex-start; gap: 12px; }
 .comment-card-head > div { min-width: 0; flex: 1; }
 .comment-card-head strong { display: block; font-size: 15px; }
@@ -235,7 +235,7 @@ onMounted(() => {
 .comment-card > p { margin: 12px 0; color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .comment-card-meta { display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-secondary); font-size: 11px; }
 .comment-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
-.comment-card .record-actions { margin-top: 12px; }
+.comment-card .record-actions { margin-top: auto; padding-top: 12px; }
 .comment-migration-note { display: block; margin-top: 12px; }
 .comment-batch-modal { max-width: 760px; }
 .comment-ai-modal { max-width: 860px; }
@@ -284,6 +284,8 @@ onMounted(() => {
 .comment-version-list p { margin-top: 7px; color: var(--text); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .compact-empty { padding: 18px 10px; }
 @media (max-width: 800px) {
+  .comment-list { grid-template-columns: 1fr; }
+  .comment-card { min-height: 0; }
   .comment-template-layout { grid-template-columns: 1fr; }
   .comment-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .comment-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }

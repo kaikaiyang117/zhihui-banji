@@ -10,6 +10,7 @@ import {
   ExcelImportError,
 } from '../../services/excelImportAssistant.js';
 import { currentActor } from '../../services/audit.js';
+import { analyzeExcelSemantics } from '../../agent/excelSemanticAnalyzer.js';
 
 async function readUpload(request: { file?: () => Promise<{ toBuffer: () => Promise<Buffer>; filename: string; mimetype: string }> }): Promise<{ buffer: Buffer; filename: string }> {
   const data = await request.file?.();
@@ -37,6 +38,7 @@ export function registerExcelImportRoutes(app: FastifyInstance): void {
     try {
       const result = await analyzeUpload({
         buffer, originalName: filename, sessionId, owner: actor.actorId, channel: actor.channel,
+        semanticAnalyzer: analyzeExcelSemantics,
       });
       return result;
     } catch (error) {

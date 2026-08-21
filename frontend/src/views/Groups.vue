@@ -165,13 +165,14 @@ onMounted(load)
 .group-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px; }
 .group-card-head h3 { margin:0 0 4px; font-size:16px; }
 .group-card-head span,.group-member-row small,.group-picker-row small { color:var(--text-secondary); font-size:11px; }
-.group-member-list { display:grid; gap:7px; }
-.group-member-row { display:flex; justify-content:space-between; gap:8px; padding:8px 10px; background:var(--bg); border-radius:8px; font-size:13px; }
+.group-member-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.group-member-row { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding:8px 10px; background:var(--bg); border-radius:8px; font-size:13px; }
+.group-member-row span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .group-member-row em { color:var(--primary); font-size:11px; font-style:normal; }
 .group-editor-modal { max-width:720px; }
 .group-picker-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 12px; max-height:300px; overflow:auto; }
 .group-picker-row { display:flex; align-items:center; gap:7px; min-width:0; font-size:13px; }
 .group-picker-row span { flex:1; min-width:0; }
 .form-select-sm { width:auto; min-width:70px; padding:5px 7px; }
-@media (max-width:640px) { .group-toolbar-card { align-items:stretch; flex-direction:column; } .group-create-form { width:100%; } .group-picker-list { grid-template-columns:1fr; } }
+@media (max-width:640px) { .group-toolbar-card { align-items:stretch; flex-direction:column; } .group-create-form { width:100%; } .group-member-list, .group-picker-list { grid-template-columns:1fr; } }
 </style>
