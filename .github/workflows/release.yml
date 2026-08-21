@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Manual build version (for example 0.3.0)'
+        description: 'Manual release tag (for example v2.3.9)'
         required: false
         default: '0.0.0-dev'
 
@@ -43,9 +43,33 @@ jobs:
         working-directory: server
         run: npm ci && npm run typecheck:server && npm run test:server && npm run build:server
 
+  prepare_release:
+    name: Prepare GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.version, 'v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=true
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "美美大王工作台 $RELEASE_TAG" \
+              --notes "安装包正在通过 GitHub Actions 构建。"
+          fi
+
   build:
     name: Build ${{ matrix.artifact }}
-    needs: verify
+    needs: [verify, prepare_release]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -161,17 +185,16 @@ jobs:
           fi
           spctl --assess --type execute --verbose "desktop/dist/mac/MeimeiWorkbench.app" 2>/dev/null && echo 'Gatekeeper 评估通过' || echo '未签名/未公证构建（预期行为）'
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: meimei-workbench-${{ matrix.artifact }}
-          path: artifacts/*
-          if-no-files-found: error
-          retention-days: 14
+      - name: Upload build package to draft Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: gh release upload "$RELEASE_TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.version, 'v'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -180,11 +203,14 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Download platform artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
+      - name: Download platform packages from draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
+          rm -f release-assets/SHA256SUMS.txt release-assets/update-manifest.json
 
       - name: Create checksums
         working-directory: release-assets
@@ -193,7 +219,7 @@ jobs:
       - name: Create update manifest
         working-directory: release-assets
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: node "$GITHUB_WORKSPACE/packaging/create-update-manifest.mjs"
 
@@ -233,12 +259,22 @@ jobs:
           未签名安装包仅建议在可信环境中测试使用。配置对应 GitHub Actions Secrets 后，后续标签发布会自动启用签名和 macOS 公证。
           EOF
 
-      - name: Create GitHub Release
+      - name: Upload checksums and update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release-assets/* \
+          gh release upload "$RELEASE_TAG" \
+            release-assets/SHA256SUMS.txt release-assets/update-manifest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "美美大王工作台 $GITHUB_REF_NAME" \
-            --generate-notes \
+            --draft=false \
+            --title "美美大王工作台 $RELEASE_TAG" \
             --notes "$(cat release-notes.md)"
