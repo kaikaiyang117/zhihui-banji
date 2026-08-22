@@ -533,9 +533,14 @@ function setupStaticWatcher() {
 function createTray() {
   const iconPath = trayIconPath();
   if (!iconPath) return;
+  const sourceIcon = nativeImage.createFromPath(iconPath);
+  if (sourceIcon.isEmpty()) {
+    logLine(`托盘图标加载失败：${iconPath}`);
+    return;
+  }
   const trayIcon = process.platform === 'darwin'
-    ? nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 })
-    : iconPath;
+    ? sourceIcon.resize({ width: 18, height: 18 })
+    : sourceIcon;
   if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
   tray = new Tray(trayIcon);
   tray.setToolTip(APP_DISPLAY_NAME);
@@ -553,22 +558,28 @@ function createTray() {
   tray.on('click', showMainWindow);
 }
 
+function appAssetPath(name) {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, name)
+    : path.join(__dirname, 'assets', name);
+}
+
 function windowIconPath() {
   if (process.platform === 'darwin') {
-    const png = path.join(__dirname, 'assets', 'icon.png');
+    const png = appAssetPath('icon.png');
     return fs.existsSync(png) ? png : undefined;
   }
-  const ico = path.join(__dirname, 'assets', 'icon.ico');
+  const ico = appAssetPath('icon.ico');
   return fs.existsSync(ico) ? ico : undefined;
 }
 
 function trayIconPath() {
   if (process.platform === 'darwin') {
-    const png = path.join(__dirname, 'assets', 'icon.png');
+    const png = appAssetPath('icon.png');
     if (fs.existsSync(png)) return png;
     return undefined;
   }
-  const ico = path.join(__dirname, 'assets', 'icon.ico');
+  const ico = appAssetPath('icon.ico');
   if (fs.existsSync(ico)) return ico;
   return undefined;
 }
@@ -1190,7 +1201,7 @@ async function runSmokeChecks() {
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
       domResult = await mainWindow.webContents.executeJavaScript(
-        `({ phone: document.body.innerText.includes('手机访问'), update: document.body.innerText.includes('更新'), ready: document.body.innerText.includes('今天') })`
+        `({ phone: document.body.innerText.includes('手机访问'), update: Boolean(document.querySelector('button[aria-label="检查软件更新"]')), ready: document.body.innerText.includes('今天') })`
       );
       if (domResult.phone && domResult.update && domResult.ready) break;
       await new Promise(resolve => setTimeout(resolve, 700));
@@ -1237,7 +1248,7 @@ function finishSmoke(ok) {
 /* ---------------------------------------------------------------- 生命周期 */
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
-    const dockIcon = path.join(__dirname, 'assets', 'icon.png');
+    const dockIcon = appAssetPath('icon.png');
     if (fs.existsSync(dockIcon)) app.dock.setIcon(dockIcon);
   }
   setupDownloads();

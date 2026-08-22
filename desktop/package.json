@@ -2,7 +2,7 @@
   "name": "meimei-workbench-desktop",
   "version": "2.3.9",
   "private": true,
-  "description": "Electron 桌面壳：智汇·班记（启动 Node.js 后端并加载本地页面）",
+  "description": "智汇·班记（本地教师工作台）",
   "main": "main.js",
   "scripts": {
     "dev": "electron . --dev-frontend",
