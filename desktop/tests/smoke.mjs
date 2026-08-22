@@ -155,7 +155,7 @@ try {
 if (exitCode !== 0 || !markers.SMOKE_OK) {
   fail(`Electron 退出码 ${exitCode}，${markers.SMOKE_FAIL || '未输出 SMOKE_OK'}`, output);
 }
-if (!markers.SMOKE_TITLE || !markers.SMOKE_TITLE.includes('美美大王')) {
+if (!markers.SMOKE_TITLE || !markers.SMOKE_TITLE.includes('智汇·班记')) {
   fail(`窗口标题异常：${markers.SMOKE_TITLE}`, output);
 }
 if (markers.SMOKE_ENTRIES !== '1') {

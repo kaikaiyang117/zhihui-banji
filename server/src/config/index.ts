@@ -11,12 +11,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const APP_NAME = 'MeimeiWorkbench';
+export const APP_DISPLAY_NAME = '智汇·班记';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROJECT_ROOT = path.resolve(SERVER_ROOT, '..');
 
 export interface ServerConfig {
   appName: string;
+  displayName: string;
   appVersion: string;
   host: string;
   port: number;
@@ -133,6 +135,7 @@ export function loadConfig(argv: {
 
   return {
     appName: APP_NAME,
+    displayName: APP_DISPLAY_NAME,
     appVersion: loadAppVersion(),
     host,
     port: requestedPort,

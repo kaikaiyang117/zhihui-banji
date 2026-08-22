@@ -17,9 +17,9 @@ try {
     throw "NSIS install failed with exit code $($InstallResult.ExitCode)"
   }
 
-  $InstalledExecutable = Get-ChildItem -LiteralPath $InstallDirectory -Filter 'MeimeiWorkbench.exe' -File -Recurse | Select-Object -First 1
+  $InstalledExecutable = Get-ChildItem -LiteralPath $InstallDirectory -Filter '智汇·班记.exe' -File -Recurse | Select-Object -First 1
   if (-not $InstalledExecutable) {
-    throw "Installation completed but MeimeiWorkbench.exe was not found: $InstallDirectory"
+    throw "Installation completed but 智汇·班记.exe was not found: $InstallDirectory"
   }
 
   Write-Host "==> Run installed application smoke test: $($InstalledExecutable.FullName)"

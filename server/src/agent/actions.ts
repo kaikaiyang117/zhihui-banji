@@ -481,7 +481,7 @@ export function handleConfirmation(
       return [true, successMessage(String(pending.tool_name), result)];
     } catch (error) {
       if (error instanceof ActionError) {
-        return [true, `凯凯小兵没有执行这次操作：${error.message}`];
+        return [true, `凯凯没有执行这次操作：${error.message}`];
       }
       throw error;
     }

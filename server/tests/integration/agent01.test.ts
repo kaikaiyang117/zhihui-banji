@@ -356,7 +356,7 @@ describe('计划执行与纠错', () => {
     model.iter_complete = failingIter;
     const answer = await new AgentRunner({ modelClient: model as never }).chat(
       's-fail', '你好', { channel: 'web', actorId: 'u' });
-    expect(answer).toBe('凯凯小兵尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。');
+    expect(answer).toBe('凯凯尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。');
     const audits = db.connInstance.prepare(
       "SELECT status FROM agent_audit WHERE tool_name='students_search' ORDER BY id",
     ).all() as Array<{ status: string }>;

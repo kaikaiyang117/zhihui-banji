@@ -49,13 +49,13 @@ try {
     $env:REQUIRE_WINDOWS_SIGNING = '1'
   }
 
-  Write-Host "Building MeimeiWorkbench Windows installer: $Version"
+  Write-Host "Building Zhihui-Banji Windows installer: $Version"
   & $BuildScript
   if ($LASTEXITCODE -ne 0) {
     throw "Windows installer build failed: $LASTEXITCODE"
   }
 
-  $installer = Join-Path $ProjectRoot 'artifacts\MeimeiWorkbench-Setup-Windows-x64.exe'
+  $installer = Join-Path $ProjectRoot 'artifacts\Zhihui-Banji-Setup-Windows-x64.exe'
   if (-not (Test-Path $installer)) {
     throw "Installer was not generated: $installer"
   }

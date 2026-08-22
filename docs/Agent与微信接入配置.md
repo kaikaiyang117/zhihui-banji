@@ -1,6 +1,6 @@
 # Agent 与微信 iLink 接入配置
 
-当前实现由美美工作台自己运行 Agent，不依赖 OpenClaw。模型使用 OpenAI-compatible HTTP 接口；微信使用腾讯 iLink Bot 的扫码和消息接口。
+当前实现由智汇·班记自己运行 Agent，不依赖 OpenClaw。模型使用 OpenAI-compatible HTTP 接口；微信使用腾讯 iLink Bot 的扫码和消息接口。
 
 Agent 的当前能力、权限、测试和后续预留方向见：[Agent 能力矩阵](Agent能力矩阵.md)；回归执行结果见：[Agent 回归报告](Agent回归报告.md)。
 
@@ -86,7 +86,7 @@ curl -H "Content-Type: application/json" \
 /清空会话
 ```
 
-两个命令效果相同，只会清空当前微信用户与“凯凯小兵”的 Agent 对话记录，不会删除工作台业务数据。
+两个命令效果相同，只会清空当前微信用户与“凯凯”的 Agent 对话记录，不会删除智汇·班记业务数据。
 
 ## 5. 运行状态
 

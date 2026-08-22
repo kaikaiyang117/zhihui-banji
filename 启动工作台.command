@@ -1,5 +1,5 @@
 #!/bin/bash
-# 美美大王工作台 - macOS 启动脚本
+# 智汇·班记 - macOS 启动脚本
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -45,7 +45,7 @@ if [ -z "$NPM_BIN" ] || [ ! -x "$NPM_BIN" ]; then
 fi
 
 echo "========================================"
-echo "  美美大王工作台 v2.3"
+echo "  智汇·班记 v2.3"
 echo ""
 echo "  由 Electron 启动 Node.js 后端"
 echo "  自动启动前端热更新，数据仅保存在本机"

@@ -56,8 +56,8 @@ fi
 cd ..
 
 BUILDER_ARCH="${ARCH//x86_64/x64}"
-DMG_PATH="desktop/dist/MeimeiWorkbench-macOS-${BUILDER_ARCH}.dmg"
-FINAL_DMG="artifacts/MeimeiWorkbench-macOS-${ARCH}.dmg"
+DMG_PATH="desktop/dist/Zhihui-Banji-macOS-${BUILDER_ARCH}.dmg"
+FINAL_DMG="artifacts/Zhihui-Banji-macOS-${ARCH}.dmg"
 if [ ! -f "$DMG_PATH" ]; then
   echo "未生成 DMG 安装包"
   exit 1

@@ -119,7 +119,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   void app.register(fastifySwagger, {
     openapi: {
       info: {
-        title: config.appName,
+        title: config.displayName,
         version: config.appVersion,
       },
       tags: [{ name: 'system' }],
@@ -203,7 +203,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       },
     }, async (_request, reply) => {
       return reply.send({
-        app: config.appName,
+        app: config.displayName,
         version: config.appVersion,
         ready: options.ready ? options.ready() : true,
       });

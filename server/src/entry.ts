@@ -54,7 +54,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   });
 
   if (args.version) {
-    print(`${config.appName} ${config.appVersion}`);
+    print(`${config.displayName} ${config.appVersion}`);
     return 0;
   }
 
@@ -104,7 +104,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 先安装信号处理器，再输出地址，避免启动方读到地址后立即退出时命中默认信号行为。
   installSignalHandlers(() => result.close(), { log: print, controlChannel: config.desktopChild });
 
-  print(`美美大王工作台启动中 -> http://localhost:${result.port}`);
+  print(`智汇·班记启动中 -> http://localhost:${result.port}`);
   if (config.lanMode) {
     print(`局域网配对入口 -> ${config.lanUrlBase}`);
     print('请在工作台点击"手机访问"生成 5 分钟有效的单次配对二维码。');

@@ -368,9 +368,9 @@ describe('会话存储', () => {
 });
 
 describe('系统提示与 HTTP 冒烟', () => {
-  it('systemPrompt 包含凯凯小兵与业务日期', () => {
+  it('systemPrompt 包含凯凯与业务日期', () => {
     const prompt = systemPrompt();
-    expect(prompt).toContain('凯凯小兵');
+    expect(prompt).toContain('凯凯');
     expect(prompt).toContain('2026-04-15');
   });
 

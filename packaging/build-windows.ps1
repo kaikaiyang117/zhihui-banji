@@ -88,7 +88,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Electron Builder 构建失败：$LASTEXITCODE" }
   Set-Location $ProjectRoot
 
-  $Installer = Get-ChildItem 'desktop\dist\MeimeiWorkbench-Setup-Windows-x64.exe' -ErrorAction Stop
+  $Installer = Get-ChildItem 'desktop\dist\Zhihui-Banji-Setup-Windows-x64.exe' -ErrorAction Stop
   if ($HasCertificate) {
     $Signature = Get-AuthenticodeSignature $Installer.FullName
     if ($Signature.Status -ne 'Valid') {

@@ -201,13 +201,5 @@ export const NAV = [
         { page: 'recycle', icon: 'Trash2', label: '数据恢复' }
       ] }
     ]
-  },
-  {
-    key: 'personal', icon: 'User', title: '个人工作台', school: '健康 · 成长 · 考研',
-    groups: [
-      { title: '健康管理', items: [{ page: 'health', icon: 'Activity', label: '健康追踪' }] },
-      { title: '考研备考', items: [{ page: 'kaoyan', icon: 'BookOpen', label: '考研计划' }] },
-      { title: '知识管理', items: [{ page: 'knowledge', icon: 'Brain', label: '知识库' }] }
-    ]
   }
 ]

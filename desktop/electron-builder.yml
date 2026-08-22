@@ -1,7 +1,7 @@
 # Electron 桌面壳打包配置
 # 构建顺序（由发布脚本执行）：前端 build → Node 后端编译 → server-bundle → electron-builder → 签名/公证
 appId: com.meimei.workbench
-productName: MeimeiWorkbench
+productName: 智汇·班记
 directories:
   output: dist
   buildResources: assets
@@ -30,12 +30,12 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
-  artifactName: MeimeiWorkbench-Setup-Windows-${arch}.${ext}
+  artifactName: Zhihui-Banji-Setup-Windows-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
-  shortcutName: 美美大王工作台
+  shortcutName: 智汇·班记
 mac:
   target:
     - target: dmg
@@ -48,9 +48,9 @@ mac:
   gatekeeperAssess: false
   entitlements: assets/entitlements.mac.plist
   entitlementsInherit: assets/entitlements.mac.plist
-  artifactName: MeimeiWorkbench-macOS-${arch}.${ext}
+  artifactName: Zhihui-Banji-macOS-${arch}.${ext}
 dmg:
-  title: 美美大王工作台
+  title: 智汇·班记
   contents:
     - x: 130
       y: 220

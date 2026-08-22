@@ -28,7 +28,7 @@ Windows PowerShell：
 # 底层构建脚本（需要更细粒度控制时使用）
 .\packaging\build-windows.ps1
 # 可选：对生成的安装包执行安装、启动、退出和卸载验证
-.\packaging\test-windows-installer.ps1 -InstallerPath .\artifacts\MeimeiWorkbench-Setup-Windows-x64.exe
+.\packaging\test-windows-installer.ps1 -InstallerPath .\artifacts\Zhihui-Banji-Setup-Windows-x64.exe
 ```
 
 Windows 打包使用仓库 `.nvmrc` 指定的 Node.js 22.x。打包脚本会自动重建前端和后端资源、安装桌面依赖、生成无 BOM 的版本文件，并在未配置证书时关闭签名证书自动发现。正式标签构建需要提供 `WINDOWS_CERTIFICATE_BASE64` 和 `WINDOWS_CERTIFICATE_PASSWORD`。
@@ -42,6 +42,6 @@ macOS（在对应架构的 Mac 上执行）：
 
 macOS 构建脚本会根据 `desktop/assets/icon.png` 自动生成临时 `icon.icns`；无需手工提交生成的图标文件。Intel 构建会将 Electron Builder 的 `x64` 输出统一命名为发布约定的 `x86_64`。
 
-输出目录：`artifacts/`。Windows 生成 `MeimeiWorkbench-Setup-Windows-x64.exe`，macOS 生成对应架构的 `.dmg`。
+输出目录：`artifacts/`。Windows 生成 `Zhihui-Banji-Setup-Windows-x64.exe`，macOS 生成对应架构的 `.dmg`。
 
 构建顺序固定为：`Vue build → Node 后端编译（build/server-bundle/）→ Electron Builder → 签名/公证 → artifacts/`。Node 后端资源位于 Electron `Contents/Resources/server/`（Windows 为 `resources/server/`），不会打进 `app.asar`。应用版本唯一来源为构建时的 `APP_VERSION`，同步写入 `server-bundle/static/app-version.json` 与桌面应用版本。

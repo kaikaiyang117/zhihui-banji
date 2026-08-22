@@ -444,8 +444,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.context-switcher { position: relative; display: flex; align-items: center; margin-left: 10px; }
-.context-trigger { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 36px; padding: 0 12px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-pill); background: rgba(255,255,255,.84); color: var(--ds-color-ink); font: var(--ds-type-label); cursor: pointer; }
+.context-switcher { position: relative; display: flex; align-items: center; min-width: 0; }
+.context-trigger { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; height: 36px; padding: 0 11px; border: 1px solid transparent; border-radius: 10px; background: var(--ds-color-surface-subtle); color: var(--ds-color-ink); font: var(--ds-type-label); cursor: pointer; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out), transform 100ms ease-out; }
+.context-trigger:hover { border-color: var(--ds-color-border); background: rgba(255,255,255,.88); }
+.context-trigger:active { transform: scale(.98); }
+.context-trigger:focus-visible { outline: none; border-color: var(--ds-color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 .context-trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-archive-badge { padding: 1px 5px; border-radius: 999px; background: var(--warning-bg); color: #9a6200; font-size: 10px; }
 .context-popover { position: absolute; z-index: 320; top: 45px; left: 0; display: grid; width: min(330px, calc(100vw - 24px)); gap: 11px; padding: 16px; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-card); background: rgba(255,255,255,.98); box-shadow: var(--ds-shadow-overlay); }
@@ -487,7 +490,7 @@ button:disabled { opacity: .45; cursor: default; }
 .context-transfer button { border: 1px solid var(--border-strong); background: #fff; }
 .context-empty { padding: 18px; border-radius: 10px; background: var(--bg); color: var(--text-secondary); font-size: 12px; text-align: center; }
 @media (max-width: 760px) {
-  .context-switcher { order: 3; flex: 1 0 100%; margin: 5px 0 1px; }
+  .context-switcher { flex: 1 1 auto; min-width: 0; }
   .context-trigger { width: 100%; max-width: none; justify-content: center; }
   .context-popover { position: fixed; top: 96px; left: 10px; right: 10px; width: auto; }
   .context-modal-scrim { align-items: end; padding: 0; }

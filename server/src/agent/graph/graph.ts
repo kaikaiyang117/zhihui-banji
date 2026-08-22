@@ -24,7 +24,7 @@ export interface GraphRuntime {
   route: (state: GraphState) => 'direct' | 'plan' | 'model';
 }
 
-/** 构建凯凯小兵状态图（未编译）；由 runner 以 checkpointer 编译。 */
+/** 构建凯凯状态图（未编译）；由 runner 以 checkpointer 编译。 */
 export function buildKaikaiGraph(runtime: GraphRuntime) {
   return new StateGraph(StateAnnotation)
     .addNode('load_context', runtime.loadContext)

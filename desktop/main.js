@@ -1,5 +1,5 @@
 'use strict';
-/* 美美大王工作台 Electron 桌面壳
+/* 智汇·班记 Electron 桌面壳
  *
  * 职责：单实例、窗口、托盘、Node.js 后端子进程、导航限制、
  * 下载/外部协议、更新安装协调和退出生命周期。
@@ -14,6 +14,7 @@ const fs = require('fs');
 const os = require('os');
 
 const APP_NAME = 'MeimeiWorkbench';
+const APP_DISPLAY_NAME = '智汇·班记';
 const HEALTH_TIMEOUT_MS = 90 * 1000;
 const isSmoke = process.env.WORKBENCH_SMOKE === '1';
 const useDevFrontend = process.argv.includes('--dev-frontend') && !app.isPackaged && !isSmoke;
@@ -46,7 +47,7 @@ if (app.isPackaged) {
   app.setPath('userData', path.join(base, `${APP_NAME}-Electron`));
 }
 
-app.setName(APP_NAME);
+app.setName(APP_DISPLAY_NAME);
 
 /* ---------------------------------------------------------------- 工具函数 */
 function logLine(text) {
@@ -239,10 +240,10 @@ function handleBackendCrash(message) {
   logLine(`后端异常退出，尝试重启（第 ${backendRestartCount}/${MAX_BACKEND_RESTARTS} 次）……`);
   dialog.showMessageBox({
     type: 'warning',
-    title: '工作台服务异常',
+    title: '智汇·班记服务异常',
     message,
     detail: `完整日志：${backendLogPath()}\n\n${backendLog.slice(-30).join('\n')}`,
-    buttons: ['重启服务', '退出工作台'],
+        buttons: ['重启服务', '退出智汇·班记'],
     defaultId: 0,
     cancelId: 1,
   }).then(({ response }) => {
@@ -317,12 +318,12 @@ function failBackend(message) {
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.executeJavaScript(
-      `document.body.innerHTML = '<div style="padding:40px;font-family:system-ui"><h2>工作台启动失败</h2><pre style="white-space:pre-wrap">${JSON.stringify(message)}</pre><p>完整日志：${JSON.stringify(backendLogPath())}</p></div>'`
+      `document.body.innerHTML = '<div style="padding:40px;font-family:system-ui"><h2>智汇·班记启动失败</h2><pre style="white-space:pre-wrap">${JSON.stringify(message)}</pre><p>完整日志：${JSON.stringify(backendLogPath())}</p></div>'`
     ).catch(() => {});
   } else {
     dialog.showMessageBox({
       type: 'error',
-      title: '工作台启动失败',
+      title: '智汇·班记启动失败',
       message,
       detail: `完整日志：${backendLogPath()}\n\n${backendLog.slice(-30).join('\n')}`,
       buttons: ['退出'],
@@ -381,7 +382,7 @@ function createMainWindow() {
     minWidth: 960,
     minHeight: 640,
     show: true,
-    title: APP_NAME,
+    title: APP_DISPLAY_NAME,
     icon: windowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -537,7 +538,7 @@ function createTray() {
     : iconPath;
   if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
   tray = new Tray(trayIcon);
-  tray.setToolTip(APP_NAME);
+  tray.setToolTip(APP_DISPLAY_NAME);
   const petVisible = petWindow && !petWindow.isDestroyed();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开工作台', click: showMainWindow },
@@ -617,7 +618,7 @@ function loadPetManifest() {
     }
     return {
       id: typeof manifest.id === 'string' ? manifest.id : 'meimei',
-      displayName: typeof manifest.displayName === 'string' ? manifest.displayName : '美美',
+      displayName: typeof manifest.displayName === 'string' ? manifest.displayName : '凯凯',
       description: typeof manifest.description === 'string' ? manifest.description : '',
       spriteVersionNumber: 2,
       spritesheetPath,

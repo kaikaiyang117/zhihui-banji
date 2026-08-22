@@ -191,6 +191,6 @@ describe('子进程生命周期', () => {
     child.stdout?.on('data', (chunk) => { output += chunk; });
     const code = await new Promise<number | null>((resolve) => child.once('exit', resolve));
     expect(code).toBe(0);
-    expect(output.trim()).toBe('MeimeiWorkbench 9.8.7');
+    expect(output.trim()).toBe('智汇·班记 9.8.7');
   });
 });

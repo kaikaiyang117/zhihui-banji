@@ -143,7 +143,7 @@
       bubble.textContent = '';
       clearTimeout(bubbleTimer);
     } else {
-      bubble.textContent = '美美在这里~';
+      bubble.textContent = '凯凯在这里~';
       bubble.classList.add('visible');
       clearTimeout(bubbleTimer);
       bubbleTimer = setTimeout(() => {

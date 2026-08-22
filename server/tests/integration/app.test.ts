@@ -46,7 +46,7 @@ describe('应用工厂（无启动副作用）', () => {
     const response = await app.inject({ method: 'GET', url: '/api/system/health' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      app: 'MeimeiWorkbench',
+      app: '智汇·班记',
       version: '9.8.7',
       ready: true,
     });
@@ -154,7 +154,7 @@ describe('错误映射与 OpenAPI', () => {
     expect(spec.statusCode).toBe(200);
     expect(spec.headers['content-type']).toContain('application/json');
     const parsed = spec.json();
-    expect(parsed.info.title).toBe('MeimeiWorkbench');
+    expect(parsed.info.title).toBe('智汇·班记');
     expect(parsed.info.version).toBe('9.8.7');
     expect(Object.keys(parsed.paths)).toContain('/api/system/health');
     expect(Object.keys(parsed.paths).length).toBeGreaterThan(20);

@@ -1,5 +1,5 @@
 ---
-name: 美美大王工作台
+name: 智汇·班记
 description: 遵循 Apple Design 原则、面向教师日常工作的温润、清晰、可靠的本地教务工作台
 colors:
   canvas: "#f4f3ef"
@@ -70,7 +70,7 @@ motion:
     response: "0.3-0.4s"
 ---
 
-# Design System: 美美大王工作台
+# Design System: 智汇·班记
 
 ## Overview
 

@@ -13,7 +13,7 @@ sleep 1
 mkdir -p "$UPDATE_DIR"
 rm -f "$READY_MARKER"
 MOUNT_POINT="$(hdiutil attach "$DMG_PATH" -nobrowse -readonly | awk '/\/Volumes\// { for (i = 1; i <= NF; i++) if ($i ~ /^\/Volumes\//) { print $i; exit } }')"
-if [ -z "$MOUNT_POINT" ] || [ ! -d "$MOUNT_POINT/MeimeiWorkbench.app" ]; then
+if [ -z "$MOUNT_POINT" ] || [ ! -d "$MOUNT_POINT/智汇·班记.app" ]; then
   exit 1
 fi
 
@@ -23,7 +23,7 @@ cleanup() {
 trap cleanup EXIT
 
 rm -rf "$STAGED_APP"
-ditto "$MOUNT_POINT/MeimeiWorkbench.app" "$STAGED_APP"
+ditto "$MOUNT_POINT/智汇·班记.app" "$STAGED_APP"
 rm -rf "$BACKUP_APP"
 ditto "$TARGET_APP" "$BACKUP_APP"
 

@@ -26,8 +26,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
-const activeTab = computed(() => route.path.startsWith('/p/') ? 'personal' : 'teacher')
-const activeNav = computed(() => NAV.find(t => t.key === activeTab.value))
+const activeNav = NAV[0]
 const searchText = ref('')
 const searchResults = ref([])
 const searchOpen = ref(false)
@@ -153,14 +152,10 @@ async function createAgentSession() {
 }
 
 function itemTo(item) {
-  return activeTab.value === 'teacher' ? '/' + item.page : '/p/' + item.page
+  return '/' + item.page
 }
 function isActive(item) {
-  const base = activeTab.value === 'teacher' ? '/' : '/p/'
-  return route.path === base + item.page
-}
-function tabTo(tab) {
-  return tab.key === 'teacher' ? '/dashboard' : '/p/health'
+  return route.path === '/' + item.page
 }
 
 function handleContextChange() {
@@ -740,14 +735,16 @@ onBeforeUnmount(() => {
 <template>
   <div class="app">
     <header class="top-tabs">
-      <router-link v-for="tab in NAV" :key="tab.key"
-        :to="tabTo(tab)" class="top-tab" :class="{ active: tab.key === activeTab }">
-        <component :is="renderIcon(tab.icon)" class="tab-icon" />
-        <span>{{ tab.title }}</span>
-      </router-link>
-      <ContextSwitcher v-if="activeTab === 'teacher'" />
+      <div class="topbar-leading">
+        <router-link to="/dashboard" class="topbar-home" aria-label="返回教师工作台" title="教师工作台">
+          <component :is="renderIcon(activeNav.icon)" class="tab-icon" />
+          <span>{{ activeNav.title }}</span>
+        </router-link>
+        <span class="topbar-divider" aria-hidden="true"></span>
+        <ContextSwitcher />
+      </div>
       <div class="global-search">
-        <input v-model="searchText" type="search" enterkeyhint="search" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
+        <input v-model="searchText" type="search" enterkeyhint="search" aria-label="全局搜索" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
         <button v-if="searchText" class="search-clear" aria-label="清除搜索" @click="searchText = ''; searchResults = []; searchOpen = false">×</button>
         <div v-if="searchOpen" class="search-popover">
           <div v-if="searching" class="search-empty">搜索中…</div>
@@ -758,22 +755,22 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <button v-if="accessInfo?.enabled && accessInfo?.can_manage" ref="accessTriggerEl" class="access-button" type="button" aria-label="显示手机访问二维码" @click="openAccessDialog">
-        <component :is="renderIcon('Wifi')" :size="16" />
-        <span>手机访问</span>
-      </button>
-      <button v-else-if="accessInfo?.enabled" class="device-logout-button" type="button" aria-label="退出当前授权设备" @click="logoutAccessDevice">
-        <component :is="renderIcon('LogOut')" :size="16" />
-        <span>退出设备</span>
-      </button>
-      <button class="ai-settings-button" type="button" aria-label="打开 AI 设置" @click="router.push('/agent')">
-        <Settings :size="16" />
-        <span>AI 设置</span>
-      </button>
-      <button class="update-button" type="button" aria-label="检查软件更新" @click="updateOpen = true">
-        <component :is="renderIcon('Download')" :size="16" />
-        <span>更新</span>
-      </button>
+      <div class="topbar-actions" role="group" aria-label="系统工具">
+        <button v-if="accessInfo?.enabled && accessInfo?.can_manage" ref="accessTriggerEl" class="access-button" type="button" aria-label="显示手机访问二维码" title="手机访问" @click="openAccessDialog">
+          <component :is="renderIcon('Wifi')" :size="16" />
+          <span>手机访问</span>
+        </button>
+        <button v-else-if="accessInfo?.enabled" class="device-logout-button" type="button" aria-label="退出当前授权设备" title="退出当前设备" @click="logoutAccessDevice">
+          <component :is="renderIcon('LogOut')" :size="16" />
+          <span>退出设备</span>
+        </button>
+        <button class="ai-settings-button" type="button" aria-label="打开 AI 设置" title="AI 设置" @click="router.push('/agent')">
+          <Settings :size="16" />
+        </button>
+        <button class="update-button" type="button" aria-label="检查软件更新" title="检查更新" @click="updateOpen = true">
+          <component :is="renderIcon('Download')" :size="16" />
+        </button>
+      </div>
     </header>
     <UpdateDialog :open="updateOpen" @close="updateOpen = false" />
     <ConfirmDialog />
@@ -832,22 +829,22 @@ onBeforeUnmount(() => {
         <header class="agent-chat-head">
           <div class="agent-chat-identity">
             <div>
-              <div id="agent-chat-title" class="agent-chat-title">凯凯小兵</div>
-              <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>美美工作台 Agent 助手</div>
+              <div id="agent-chat-title" class="agent-chat-title">凯凯</div>
+              <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>智汇·班记智能助手</div>
             </div>
           </div>
           <div class="agent-chat-actions">
             <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话" @click="resetAgentSession">
               <RefreshCw :size="16" />
             </button>
-            <button class="agent-icon-button" type="button" aria-label="收起凯凯小兵" title="收起" @click="closeAgentChat">
+            <button class="agent-icon-button" type="button" aria-label="收起凯凯" title="收起" @click="closeAgentChat">
               <component :is="renderIcon('X')" :size="17" />
             </button>
           </div>
         </header>
         <div ref="agentBody" class="agent-chat-body" aria-live="polite">
           <div v-if="!agentMessages.length" class="agent-chat-welcome">
-            <div class="agent-welcome-title">你好，我是凯凯小兵</div>
+            <div class="agent-welcome-title">你好，我是凯凯</div>
             <span>我可以帮你查询和整理工作台里的学生数据。</span>
             <div class="agent-suggestion-list">
               <button v-for="suggestion in agentSuggestions" :key="suggestion" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
@@ -956,7 +953,7 @@ onBeforeUnmount(() => {
               </template>
               <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
             </div>
-            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给凯凯小兵发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
+            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给凯凯发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
             <div class="agent-composer-bottom">
               <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>工作台数据已连接</div>
               <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="(!agentInput.trim() && !agentExcel.fileId) || agentSending" @click="sendAgentMessage">
@@ -968,9 +965,9 @@ onBeforeUnmount(() => {
         </footer>
         </section>
       </transition>
-      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开凯凯小兵对话" @click="openAgentChat">
+      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开凯凯对话" @click="openAgentChat">
         <MessageCircle :size="19" :stroke-width="2.2" />
-        <span>凯凯小兵</span>
+        <span>凯凯</span>
       </button>
     </div>
     <div class="app-body">
@@ -979,9 +976,12 @@ onBeforeUnmount(() => {
           <div class="sidebar-brand">
             <img class="brand-logo" src="/logo.svg" alt="" aria-hidden="true" />
             <div class="sidebar-brand-copy">
-              <h2>{{ activeNav.title }}</h2>
-              <div class="sub">{{ activeNav.school }}</div>
+              <h2>智汇·班记</h2>
+              <div class="sub">教师智能工作台</div>
             </div>
+          </div>
+          <div class="sidebar-context">
+            <div class="sidebar-school">{{ activeNav.school }}</div>
           </div>
         </div>
         <nav class="sidebar-nav" aria-label="功能导航">
@@ -995,7 +995,7 @@ onBeforeUnmount(() => {
           </div>
         </nav>
         <div class="sidebar-footer">
-          <span>凯凯小兵 为你值守</span>
+          <span class="sidebar-footer-slogan">把时间还给老师，把精力留给教育</span>
         </div>
       </aside>
       <main class="main">
@@ -1042,8 +1042,10 @@ onBeforeUnmount(() => {
   transform: translateY(8px) scale(.97);
 }
 
-.global-search { position: relative; align-self: center; min-width: 0; margin-left: auto; width: min(300px, 32vw); }
-.global-search input { width: 100%; height: 38px; box-sizing: border-box; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-pill); background: rgba(255,255,255,.84); padding: 0 34px 0 14px; color: var(--ds-color-ink); font: var(--ds-type-body); outline: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), box-shadow var(--ds-duration-fast) var(--ds-ease-out); }
+.topbar-leading { display: flex; align-items: center; justify-self: start; min-width: 0; }
+.topbar-divider { flex: 0 0 auto; width: 1px; height: 18px; margin: 0 9px; background: var(--ds-color-border); }
+.global-search { position: relative; justify-self: center; min-width: 0; width: 100%; max-width: 420px; }
+.global-search input { width: 100%; height: 38px; box-sizing: border-box; border: 1px solid var(--ds-color-border); border-radius: 12px; background: rgba(255,255,255,.84); padding: 0 34px 0 14px; color: var(--ds-color-ink); font: var(--ds-type-body); outline: none; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), box-shadow var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); }
 .global-search input:focus { border-color: var(--ds-color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 .search-clear { position: absolute; right: 10px; top: 6px; border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
 .search-popover { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; right: 0; max-height: 360px; overflow: auto; padding: 7px; background: rgba(255,255,255,.98); border-radius: var(--ds-radius-card); box-shadow: var(--ds-shadow-raised); }
@@ -1054,82 +1056,13 @@ onBeforeUnmount(() => {
 .search-kind { flex: 0 0 auto; padding: 3px 6px; border-radius: var(--ds-radius-sm); background: var(--ds-color-primary-soft); color: var(--ds-color-primary-hover); font: var(--ds-type-meta); }
 .search-empty { padding: 18px 10px; text-align: center; color: var(--ds-color-ink-secondary); font: var(--ds-type-body); }
 
-.access-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin: 7px 0 7px 10px;
-  padding: 0 12px;
-  min-height: 36px;
-  border: 1px solid var(--ds-color-success-border);
-  border-radius: var(--ds-radius-pill);
-  background: var(--ds-color-success-soft);
-  color: var(--ds-color-success);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform var(--ds-duration-fast) var(--ds-ease-out), background var(--ds-duration-fast) var(--ds-ease-out);
-  touch-action: manipulation;
-}
-.access-button:active { transform: scale(.97); }
-.device-logout-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin: 7px 0 7px 10px;
-  padding: 0 12px;
-  min-height: 36px;
-  border: 1px solid var(--ds-color-border);
-  border-radius: var(--ds-radius-pill);
-  background: rgba(255,255,255,.78);
-  color: var(--ds-color-ink-secondary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.device-logout-button:active { transform: scale(.97); }
-.ai-settings-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin: 7px 0 7px 8px;
-  padding: 0 10px;
-  min-height: 36px;
-  border: 1px solid var(--ds-color-primary-border);
-  border-radius: var(--ds-radius-pill);
-  background: var(--ds-color-primary-soft);
-  color: var(--ds-color-primary-hover);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform var(--ds-duration-fast) var(--ds-ease-out), background var(--ds-duration-fast) var(--ds-ease-out);
-  touch-action: manipulation;
-}
-.ai-settings-button:hover { background: color-mix(in srgb, var(--ds-color-primary-soft) 72%, var(--ds-color-primary-border)); }
-.ai-settings-button:active { transform: scale(.97); }
-.update-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin: 7px 0 7px 8px;
-  padding: 0 10px;
-  min-height: 36px;
-  border: 1px solid var(--ds-color-border);
-  border-radius: var(--ds-radius-pill);
-  background: rgba(255,255,255,.78);
-  color: var(--ds-color-ink-secondary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: transform var(--ds-duration-fast) var(--ds-ease-out), color var(--ds-duration-fast) var(--ds-ease-out), background var(--ds-duration-fast) var(--ds-ease-out);
-  touch-action: manipulation;
-}
-.update-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
-.update-button:active { transform: scale(.97); }
+.topbar-actions { display: flex; align-items: center; justify-self: end; gap: 2px; padding: 2px; border: 1px solid var(--ds-color-border); border-radius: 12px; background: rgba(255,255,255,.72); box-shadow: 0 1px 2px rgba(28,31,41,.04); }
+.access-button, .device-logout-button, .ai-settings-button, .update-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: transform 100ms ease-out, color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }
+.access-button, .device-logout-button { padding: 0 10px; }
+.ai-settings-button, .update-button { width: 32px; padding: 0; }
+.access-button:hover, .device-logout-button:hover, .ai-settings-button:hover, .update-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
+.access-button:active, .device-logout-button:active, .ai-settings-button:active, .update-button:active { transform: scale(.94); }
+.access-button:focus-visible, .device-logout-button:focus-visible, .ai-settings-button:focus-visible, .update-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 
 .access-scrim {
   position: fixed;
@@ -1359,7 +1292,9 @@ onBeforeUnmount(() => {
 @keyframes agent-thinking-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
 
 @media (min-width: 641px) and (max-width: 1100px) {
-  .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
+  .topbar-leading { grid-column: 1; grid-row: 1; }
+  .topbar-actions { grid-column: 2; grid-row: 1; }
+  .global-search { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: none; }
   .global-search input { min-height: 40px; }
 }
 
@@ -1368,18 +1303,17 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
-  .top-tabs { height: auto; min-height: 52px; flex-wrap: wrap; gap: 2px; }
-  .global-search { order: 3; flex: 1 0 100%; width: 100%; margin: 4px 0 2px; }
+  .topbar-leading { grid-column: 1; grid-row: 1; min-width: 0; }
+  .topbar-divider { display: none; }
+  .topbar-actions { grid-column: 2; grid-row: 1; }
+  .global-search { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: none; }
   .global-search input { height: 40px; min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
-  .search-popover { position: fixed; top: 96px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
-  .access-button { margin-left: auto; padding: 0 10px; }
+  .search-popover { position: fixed; top: 104px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
+  .topbar-actions { flex: 0 0 auto; }
+  .access-button, .device-logout-button, .ai-settings-button, .update-button { min-height: 36px; }
   .access-button span { display: none; }
-  .device-logout-button { margin-left: auto; padding: 0 10px; }
   .device-logout-button span { display: none; }
-  .update-button { margin-left: 6px; padding: 0 10px; }
-  .update-button span { display: none; }
-  .ai-settings-button { margin-left: 6px; padding: 0 10px; }
-  .ai-settings-button span { display: none; }
+  .access-button, .device-logout-button, .ai-settings-button, .update-button { width: 36px; padding: 0; }
   .access-scrim { align-items: end; padding: 0; }
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); }

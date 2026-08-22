@@ -28,10 +28,8 @@ const routes = [
   { path: '/fund', component: () => import('./views/Fund.vue') },
   { path: '/diary', component: () => import('./views/Diary.vue') },
   { path: '/activities', component: () => import('./views/Activities.vue') },
-  { path: '/p', redirect: '/p/health' },
-  { path: '/p/health', component: () => import('./views/Health.vue') },
-  { path: '/p/kaoyan', component: () => import('./views/Kaoyan.vue') },
-  { path: '/p/knowledge', component: () => import('./views/Knowledge.vue') },
+  { path: '/p', redirect: '/dashboard' },
+  { path: '/p/:pathMatch(.*)*', redirect: '/dashboard' },
   { path: '/tools', component: () => import('./views/Tools.vue') }
 ]
 

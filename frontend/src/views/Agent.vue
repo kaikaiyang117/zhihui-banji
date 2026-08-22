@@ -490,7 +490,7 @@ onBeforeUnmount(() => {
     <div class="page-title-bar">
       <div>
         <div class="page-title">AI 设置</div>
-        <div class="page-subtitle">配置模型，让凯凯小兵能够查询工作台数据</div>
+        <div class="page-subtitle">配置模型，让凯凯能够查询智汇·班记数据</div>
       </div>
     </div>
 
