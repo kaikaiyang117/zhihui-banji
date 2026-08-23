@@ -10,6 +10,7 @@ import * as scores from './scores.js';
 import * as timetable from './timetable.js';
 import * as calendar from './schoolCalendar.js';
 import { getCurrentScope } from './context.js';
+import { decideMapping } from '../excel/semantics/mappingPolicy.js';
 
 export class ExcelImportError extends Error {}
 
@@ -54,8 +55,18 @@ interface ExcelFieldMapping {
   source: string;
   target: string;
   matched: boolean;
-  source_kind: 'rule' | 'ai' | 'none';
+  source_kind: 'rule' | 'ai' | 'manual' | 'none';
+  mapping_status: 'accepted' | 'needs_confirmation' | 'ignored';
   confidence?: number;
+  reason?: string;
+}
+
+export interface ArtifactFieldMappingInput {
+  sourceColumn?: string;
+  targetField?: string | null;
+  source?: 'rule' | 'ai' | 'manual';
+  confidence?: number;
+  status?: 'accepted' | 'needs_confirmation' | 'ignored';
   reason?: string;
 }
 
@@ -422,20 +433,57 @@ function mapHeaders(
   for (let i = 0; i < headers.length; i += 1) {
     const target = mapping[normalized[i]];
     if (target) {
-      result.push({ source: headers[i], target, matched: true, source_kind: 'rule', confidence: 1 });
+      const decision = decideMapping('rule');
+      result.push({
+        source: headers[i], target, matched: decision.matched, source_kind: 'rule',
+        mapping_status: decision.status, confidence: decision.confidence,
+      });
       continue;
     }
     const semantic = semanticMappings.find(item => item.module === module
       && item.sheet_index === sheetIndex && item.source === headers[i]);
-    result.push(semantic
-      ? {
-        source: headers[i], target: semantic.target, matched: true, source_kind: 'ai',
-        confidence: semantic.confidence, reason: semantic.reason,
-      }
-      : { source: headers[i], target: '', matched: false, source_kind: 'none' });
+    if (semantic) {
+      const decision = decideMapping('ai', semantic.confidence);
+      result.push({
+        source: headers[i], target: semantic.target, matched: decision.matched, source_kind: 'ai',
+        mapping_status: decision.status, confidence: decision.confidence,
+        reason: semantic.reason,
+      });
+    } else {
+      result.push({
+        source: headers[i], target: '', matched: false, source_kind: 'none',
+        mapping_status: 'ignored',
+      });
+    }
   }
 
   return result;
+}
+
+function mapArtifactHeaders(
+  headers: string[], module: string, mappings: ArtifactFieldMappingInput[],
+): ExcelFieldMapping[] {
+  const defaults = mapHeaders(headers, module);
+  const supplied = new Map(mappings.map(item => [String(item.sourceColumn ?? '').trim(), item]));
+  return defaults.map(item => {
+    const selected = supplied.get(item.source);
+    if (!selected) return item;
+    const target = String(selected.targetField ?? '').trim();
+    if (selected.status === 'ignored' || !target) {
+      return {
+        source: item.source, target: '', matched: false, source_kind: selected.source ?? 'manual',
+        mapping_status: 'ignored', confidence: selected.confidence, reason: selected.reason,
+      };
+    }
+    if (!CANONICAL_HEADERS[module]?.[target]) {
+      throw new ExcelImportError(`字段映射目标不受支持：${target}`);
+    }
+    return {
+      source: item.source, target, matched: selected.status !== 'needs_confirmation',
+      source_kind: selected.source ?? 'manual', mapping_status: selected.status ?? 'accepted',
+      confidence: selected.confidence ?? 1, reason: selected.reason,
+    };
+  });
 }
 
 function assertMappingUnambiguous(mapping: ExcelFieldMapping[]): void {
@@ -1097,6 +1145,9 @@ export async function executeImport(options: {
   const headerRow = Number(meta.preview_state.header_row ?? meta.header_rows[sheetIndex] ?? 1);
   const mapping = mapHeaders(meta.headers[sheetIndex], module, meta.semantic_mappings, sheetIndex);
   assertMappingUnambiguous(mapping);
+  if (mapping.some(item => item.mapping_status === 'needs_confirmation')) {
+    throw new ExcelImportError('存在置信度不足的 AI 字段映射，请先人工确认后再导入');
+  }
   const normalizedBuffer = await normalizedWorkbookBuffer(buffer, sheetIndex, headerRow, mapping, module);
 
   const result = await doImport(module, normalizedBuffer, meta.filename, duplicateStrategy, requestId, headerRow);
@@ -1114,6 +1165,120 @@ export async function executeImport(options: {
   removeTempFile(fileId);
 
   return result;
+}
+
+/** Artifact/ImportPlan 直接使用的业务预览，不依赖旧版 excel-temp 元数据。 */
+export async function previewImportBuffer(options: {
+  buffer: Buffer;
+  filename: string;
+  module: string;
+  sheetIndex: number;
+  headerRow: number;
+  mappings: ArtifactFieldMappingInput[];
+  duplicateStrategy?: string;
+}): Promise<Record<string, unknown>> {
+  if (!SUPPORTED_MODULES.includes(options.module as SupportedModule)) {
+    throw new ExcelImportError(`不支持的导入模块：${options.module}`);
+  }
+  const rows = await parseXlsxRows(options.buffer, options.sheetIndex);
+  const headers = (rows[Math.max(0, options.headerRow - 1)] ?? []).map(value => cellText(value));
+  const mapping = mapArtifactHeaders(headers, options.module, options.mappings);
+  assertMappingUnambiguous(mapping);
+  if (mapping.some(item => item.mapping_status === 'needs_confirmation')) {
+    throw new ExcelImportError('存在置信度不足的字段映射，请先人工确认');
+  }
+  const normalizedBuffer = await normalizedWorkbookBuffer(
+    options.buffer, options.sheetIndex, options.headerRow, mapping, options.module,
+  );
+  let totalRows = 0;
+  let validRows = 0;
+  let errorRows = 0;
+  let newCount = 0;
+  let updateCount = 0;
+  let skipCount = 0;
+  const errors: Array<{ row: number; reason: string }> = [];
+  if (options.module === 'students') {
+    const preview = await previewStudents(normalizedBuffer, options.filename);
+    totalRows = preview.rows.length + preview.errors.length;
+    validRows = preview.summary.valid;
+    newCount = preview.summary.imported;
+    updateCount = preview.summary.updated;
+    skipCount = preview.summary.skipped;
+    errorRows = preview.errors.length;
+    errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.msg })));
+  } else if (options.module === 'scores') {
+    const scoreRows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), options.headerRow);
+    const preview = scores.previewExamRows(scoreRows, options.duplicateStrategy ?? 'update');
+    totalRows = preview.rows.length;
+    validRows = preview.summary.valid;
+    newCount = preview.summary.new;
+    updateCount = preview.summary.update;
+    skipCount = preview.summary.skip;
+    errorRows = preview.summary.error;
+    errors.push(...preview.errors.map(error => ({ row: originalRow(error.row, options.headerRow), reason: error.message })));
+  } else if (options.module === 'calendar') {
+    const preview = await calendar.previewImport(normalizedBuffer, options.filename);
+    totalRows = preview.summary.parsed;
+    validRows = preview.summary.valid;
+    newCount = preview.summary.new;
+    updateCount = preview.summary.update;
+    skipCount = preview.summary.skip;
+    errorRows = preview.summary.error + preview.summary.conflict;
+    errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.message })));
+  } else {
+    const timetableRows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), options.headerRow);
+    const preview = timetable.previewImport(timetableRows, options.filename);
+    const previewRows = preview.rows as Array<Record<string, unknown>>;
+    totalRows = previewRows.length;
+    validRows = (preview.summary as { valid: number }).valid;
+    newCount = previewRows.filter(row => row.action === '新增').length;
+    updateCount = previewRows.filter(row => row.action === '更新').length;
+    skipCount = previewRows.filter(row => row.action === '跳过').length;
+    errorRows = (preview.summary as { invalid: number }).invalid;
+    errors.push(...previewRows.filter(row => row.error).map(row => ({
+      row: originalRow(Number(row.row ?? 0), options.headerRow), reason: String(row.error),
+    })));
+  }
+  return {
+    module: options.module,
+    field_mapping: mapping,
+    total_rows: totalRows,
+    valid_rows: validRows,
+    error_rows: errorRows,
+    new_count: newCount,
+    update_count: updateCount,
+    skip_count: skipCount,
+    errors,
+    duplicate_strategy: options.duplicateStrategy ?? 'update',
+  };
+}
+
+/** Artifact/ImportPlan 直接使用的业务执行；调用方负责外层备份、事务和写后验证。 */
+export async function executeImportBuffer(options: {
+  buffer: Buffer;
+  filename: string;
+  module: string;
+  sheetIndex: number;
+  headerRow: number;
+  mappings: ArtifactFieldMappingInput[];
+  duplicateStrategy?: string;
+  requestId: string;
+}): Promise<Record<string, unknown>> {
+  const rows = await parseXlsxRows(options.buffer, options.sheetIndex);
+  const headers = (rows[Math.max(0, options.headerRow - 1)] ?? []).map(value => cellText(value));
+  const mapping = mapArtifactHeaders(headers, options.module, options.mappings);
+  assertMappingUnambiguous(mapping);
+  if (mapping.some(item => item.mapping_status === 'needs_confirmation')) {
+    throw new ExcelImportError('存在置信度不足的字段映射，请先人工确认');
+  }
+  const normalizedBuffer = await normalizedWorkbookBuffer(
+    options.buffer, options.sheetIndex, options.headerRow, mapping, options.module,
+  );
+  const result = await doImport(
+    options.module, normalizedBuffer, options.filename, options.duplicateStrategy ?? 'update',
+    options.requestId, options.headerRow,
+  );
+  return { ...result, field_mapping: mapping };
 }
 
 export function discardUpload(fileId: string, options?: { owner?: string; session?: string; channel?: string }): void {

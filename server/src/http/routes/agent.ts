@@ -5,9 +5,9 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { AgentRunner } from '../../agent/runner.js';
-import { pendingForSession, confirmAction, cancelAction, ActionError } from '../../agent/actions.js';
+import { pendingForSession, confirmActionAsync, cancelAction, ActionError } from '../../agent/actions.js';
 import { SessionError, SessionStore } from '../../agent/sessionStore.js';
-import { listTools, invokeTool, listAudits, usageStats } from '../../agent/agentService.js';
+import { listTools, invokeToolAsync, listAudits, usageStats } from '../../agent/agentService.js';
 import { ToolError } from '../../agent/toolRegistry.js';
 import {
   createProfile,
@@ -63,8 +63,11 @@ function attachmentFromBody(value: unknown): GraphState['attachment'] {
   if (!value || typeof value !== 'object') return null;
   const input = value as Record<string, unknown>;
   const fileId = String(input.file_id ?? '').trim();
-  if (!fileId || fileId.length > 160) return null;
-  const result: Record<string, unknown> = { file_id: fileId };
+  const artifactId = String(input.artifact_id ?? '').trim();
+  if ((!fileId && !artifactId) || fileId.length > 160 || artifactId.length > 160) return null;
+  const result: Record<string, unknown> = {};
+  if (fileId) result.file_id = fileId;
+  if (artifactId) result.artifact_id = artifactId;
   const filename = String(input.filename ?? '').trim();
   if (filename) result.filename = filename.slice(0, 120);
   if (Array.isArray(input.sheets)) result.sheets = input.sheets.slice(0, 10).map(item => String(item).slice(0, 80));
@@ -77,6 +80,7 @@ function attachmentFromBody(value: unknown): GraphState['attachment'] {
       return [{ module: module.slice(0, 40), reason: String(candidate.reason ?? '').slice(0, 100) }];
     });
   }
+  if (input.user_text_empty === true) result.user_text_empty = true;
   return result;
 }
 
@@ -239,7 +243,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     }
     try {
       new SessionStore().ensureOwned(String(body.session_id ?? ''), actorId, channel);
-      const result = invokeTool(toolName, body.arguments ?? {}, {
+      const result = await invokeToolAsync(toolName, body.arguments ?? {}, {
         channel, actorId,
         sessionId: String(body.session_id ?? ''),
       });
@@ -316,6 +320,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
     let planIndex = -1;
     let currentPlanId = '';
     let currentPlan: Record<string, unknown> | null = null;
+    const startedToolCalls = new Set<string>();
     writeChunk({ type: 'start', messageId });
     try {
       for await (const event of runner.chatStream(body.session_id, body.message, {
@@ -348,17 +353,32 @@ export function registerAgentRoutes(app: FastifyInstance): void {
           const toolName = String(event.name || '工具');
           const input = event.input ?? {};
           if (event.status === 'running') {
+            startedToolCalls.add(toolCallId);
             writeChunk({
               type: 'tool-input-available', toolCallId, toolName,
               input, dynamic: true, title: toolName,
             });
           } else if (event.status === 'error') {
+            if (!startedToolCalls.has(toolCallId)) {
+              startedToolCalls.add(toolCallId);
+              writeChunk({
+                type: 'tool-input-available', toolCallId, toolName,
+                input, dynamic: true, title: toolName,
+              });
+            }
             const error = (event.output as Record<string, unknown> | undefined)?.error as Record<string, unknown> | undefined;
             writeChunk({
               type: 'tool-output-error', toolCallId,
               errorText: String(error?.message || '工具执行失败'), dynamic: true,
             });
           } else {
+            if (!startedToolCalls.has(toolCallId)) {
+              startedToolCalls.add(toolCallId);
+              writeChunk({
+                type: 'tool-input-available', toolCallId, toolName,
+                input, dynamic: true, title: toolName,
+              });
+            }
             writeChunk({
               type: 'tool-output-available', toolCallId,
               output: event.output ?? {}, dynamic: true,
@@ -464,7 +484,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
       return reply.status(422).send({ detail: namespaceError });
     }
     try {
-      const result = confirmAction(Number(actionId), {
+      const result = await confirmActionAsync(Number(actionId), {
         sessionId: body.session_id ?? '', actorId,
         token: body.confirmation_token ?? '',
       });

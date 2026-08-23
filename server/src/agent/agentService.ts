@@ -20,6 +20,7 @@ const WRITE_TOOLS: Record<string, string> = {
   create_knowledge_note: '创建知识库笔记',
   create_class_task: '创建班级任务',
   submit_roll_call_exceptions: '提交点名异常',
+  execute_excel_import: '执行 Excel 导入',
 };
 const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> = {
   create_task: [
@@ -77,6 +78,10 @@ const WRITE_FIELDS: Record<string, [ReadonlySet<string>, ReadonlySet<string>]> =
   submit_roll_call_exceptions: [
     new Set(['session_id', 'exceptions']),
     new Set(['session_id', 'exceptions']),
+  ],
+  execute_excel_import: [
+    new Set(['plan_id', 'preview_hash']),
+    new Set(['plan_id', 'preview_hash', 'request_id']),
   ],
 };
 
@@ -224,6 +229,8 @@ export function previewText(toolName: string, args: Record<string, unknown>): st
   } else if (toolName === 'submit_roll_call_exceptions') {
     const count = Array.isArray(args['exceptions']) ? args['exceptions'].length : 0;
     detail = `提交点名异常 ${count} 人`;
+  } else if (toolName === 'execute_excel_import') {
+    detail = `执行 Excel 导入计划 ${String(args['plan_id'] ?? '')}`;
   } else {
     detail = `为 ${Array.isArray(args['student_ids']) ? args['student_ids'].length : 0} 名学生创建班级任务"${String(args['title'] ?? '')}"`;
   }
@@ -379,7 +386,7 @@ export function invokeTool(
   }
   let result: Record<string, unknown>;
   try {
-    result = registry.execute(name, args);
+    result = registry.execute(name, args, { channel, actorId, sessionId });
   } catch (error) {
     if (error instanceof ToolError) {
       recordAudit(channel, actorId, name, args, 'error', error.message);
@@ -389,6 +396,61 @@ export function invokeTool(
   }
   recordAudit(channel, actorId, name, args, 'success', summaryText(result));
   return result;
+}
+
+/** 异步工具入口。Excel Artifact 读取需要异步解压工作簿，旧同步入口保持兼容。 */
+export async function invokeToolAsync(
+  name: string,
+  argsValue?: Record<string, unknown> | null,
+  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  const channel = options.channel ?? 'local';
+  const actorId = options.actorId ?? '';
+  const sessionId = options.sessionId ?? '';
+  const confirmed = options.confirmed ?? false;
+  const args = argsValue || {};
+  const registry = getRegistry();
+  const definition = registry.get(name);
+  if (definition && definition.writeAction) {
+    if (!actionsAllowed(channel, name)) {
+      const message = '当前渠道没有该写入操作权限。';
+      recordAudit(channel, actorId, name, args, 'denied', message);
+      throw new ToolError(message, { code: 'permission_denied' });
+    }
+    if (!confirmed) {
+      try {
+        const result = createPendingAction({ toolName: name, args, sessionId, channel, actorId });
+        recordAudit(channel, actorId, name, args, 'pending', String(result['preview'] ?? '等待确认'));
+        return result;
+      } catch (error) {
+        if (!(error instanceof ActionError)) throw error;
+        const message = error.message;
+        recordAudit(channel, actorId, name, args, 'error', message);
+        throw new ToolError(message, { code: 'confirmation_required' });
+      }
+    }
+    throw new ToolError('写入操作必须通过确认接口执行', { code: 'permission_denied' });
+  }
+  if (definition && definition.sensitive && channel === 'wechat') {
+    const message = '微信渠道默认不提供敏感档案字段，请在工作台网页端查看。';
+    recordAudit(channel, actorId, name, args, 'denied', message);
+    throw new ToolError(message, { code: 'permission_denied' });
+  }
+  if (definition && !definition.allowChannels.includes(channel)) {
+    const message = '当前渠道没有该工具权限。';
+    recordAudit(channel, actorId, name, args, 'denied', message);
+    throw new ToolError(message, { code: 'permission_denied' });
+  }
+  try {
+    const result = await registry.executeAsync(name, args, { channel, actorId, sessionId });
+    recordAudit(channel, actorId, name, args, 'success', summaryText(result));
+    return result;
+  } catch (error) {
+    if (error instanceof ToolError) {
+      recordAudit(channel, actorId, name, args, 'error', error.message);
+    }
+    throw error;
+  }
 }
 
 export function recordToolFailure(

@@ -234,8 +234,17 @@ describe('模型客户端', () => {
       const client = new OpenAICompatibleClient(new ModelConfig({
         base_url: fake.url, model: 'fake', api_key: 'k', timeout_seconds: 10, thinking: 'disabled',
       }));
-      const response = await client.complete([{ role: 'user', content: '谁是班长？' }], []);
+      const response = await client.complete([{
+        role: 'user',
+        content: '谁是班长？',
+        attachment: { artifact_id: 'artifact-test' },
+        display_content: '谁是班长？',
+      }], []);
       expect(String(response.content)).toContain('班长');
+      const completePayload = fake.calls[0].body as Record<string, unknown>;
+      const sentMessage = (completePayload.messages as Array<Record<string, unknown>>)[0];
+      expect(sentMessage.attachment).toBeUndefined();
+      expect(sentMessage.display_content).toBeUndefined();
 
       const events: string[] = [];
       for await (const event of client.iter_complete([{ role: 'user', content: 'hi' }], [])) {
@@ -285,11 +294,11 @@ describe('模型客户端', () => {
 });
 
 describe('工具注册表与回归', () => {
-  it('33 个工具，微信渠道过滤敏感工具', () => {
+  it('37 个工具，微信渠道过滤敏感工具', () => {
     const registry = getRegistry();
-    expect(registry.list().length).toBe(33);
+    expect(registry.list().length).toBe(37);
     const web = listTools('web');
-    expect(web.length).toBe(33);
+    expect(web.length).toBe(37);
     const wechat = listTools('wechat');
     expect(wechat.length).toBe(26);
     expect(wechat.some((tool) => tool.name === 'student_get_profile')).toBe(false);

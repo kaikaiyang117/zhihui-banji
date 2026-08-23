@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-20）：注册表共 33 个工具，工具契约按 `read_only`/`write_action` 和渠道过滤；数据库 schema v33；网页会话按操作者隔离，确认写入后自动读取业务状态验证。网页 Agent 对话入口已支持 `.xlsx` 上传、识别、预览和确认导入；Agent Excel 工具仍仅提供兼容提示，不直接执行导入。微信 iLink 文件消息、证据缩略图和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-23）：注册表共 37 个工具，工具契约按 `read_only`/`write_action` 和渠道过滤；数据库 schema v37；网页会话按操作者隔离，确认写入后自动读取业务状态验证。网页 Excel 已使用消息附件：选择文件只创建 lightweight `WorkbookArtifact`，发送后才由 Agent 按用户意图懒解析、分析或创建 `ImportPlan`；真实业务预览和统一确认执行链保持不变。微信 iLink 文件消息、证据缩略图和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -57,7 +57,9 @@
 | 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
 | 首页近期考试 | `scores.listUpcomingExams` | `query_field_info(upcoming_exams)` | 是 | 是 | 是 | 只读；排除已结束考试并按日期排序 | 开发中 |
 | 多班级教师课程/考试汇总 | `teacherClasses.getTeacherTimetable/getTeacherExams` | 无 | 是 | 否 | 否 | 只读；按教师关联班级汇总，网页专用 | 开发中 |
-| Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | Agent 工具仅兼容提示 | 是 | 否 | 否 | 网页 Agent 支持 `.xlsx`；本地规则先识别，模型只接收结构轮廓并补充白名单内候选/映射，规则优先且模型不可用时回退；临时状态绑定会话、SHA-256、工作表、班级和学期，预览确认后才提交并保留受保护错误报告；iLink 文件未接入 | 已接入 |
+| Excel Artifact 检查与只读分析 | `excel_inspect_workbook`、`excel_list_regions`、`excel_read_range`、`excel_profile_region` | 结构检查、范围读取、区域统计 | 是 | 是 | 否 | 网页选择文件只上传 Artifact，文字与附件发送后才懒解析；默认 `structure_only`；范围读取最多 200 行/50 列，显式选择 `redacted_values` 或 `allowed_values` 才返回值；Artifact 绑定操作者、渠道、会话、班级、学期和过期时间 | 已接入 |
+| Excel 导入草稿计划 | `excel_create_import_plan`、`excel_update_import_plan` | 保存/修改映射和导入选项 | 是 | 是 | 否 | 只保存草稿，不写业务数据；映射或选项变化会使旧预览失效；Artifact、会话和范围由服务端校验 | 已接入 |
+| Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | `excel_preview_import`、`execute_excel_import` | 是 | 是 | 否 | 附件本身不代表导入，只有明确导入意图才创建计划；真实业务预览绑定 Artifact/ImportPlan；执行前复核预览哈希，确认后创建备份，调用适配器写入并进行写后验证；旧网页 `.xlsx` 入口仍保留兼容；iLink 文件未接入 | 已接入 |
 | 图片/截图证据 | `evidence` | `evidence_list` | 是 | 是 | 是 | 只读元数据；文件写入走网页/业务服务，所有者、学生范围、哈希和软删除校验 | 开发中 |
 | AI 家校通知场景与内容生成 | `notificationTemplates`、`notificationDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 后端结构只校验事实底稿；网页选择通知类型并调用 AI 生成可编辑文案，不提供模板管理或自动发送 | 开发中 |
 | 家长消息回复前检查与草稿生成 | `parentReply`、`parentReplyDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 敏感只读；只读取当前班级/学期脱敏事实；确定性规则匹配制度边界，模型仅可凭输入原文补充登记规则且不能降级；显示证据状态、待核实条件与投诉升级信号；机械化或越权草稿回退规则草稿；不自动发送，教师确认已发送后才复用现有沟通写入和证据服务 | 开发中 |

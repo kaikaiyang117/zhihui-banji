@@ -32,6 +32,15 @@ const DSML_INVOKE_RE = new RegExp(
 );
 const DSML_FRAGMENT_RE = new RegExp(String.raw`</?\s*(?:[|｜]\s*)+DSML\b.*?>`, 'gisu');
 
+function modelMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    const clean = { ...message };
+    delete clean.attachment;
+    delete clean.display_content;
+    return clean;
+  });
+}
+
 export class OpenAICompatibleClient {
   readonly config: ModelConfig;
 
@@ -48,7 +57,7 @@ export class OpenAICompatibleClient {
     }
     const payload: Record<string, unknown> = {
       model: this.config.model,
-      messages,
+      messages: modelMessages(messages),
       temperature: this.config.temperature,
     };
     /* thinking 是非标准扩展字段，只有显式启用才发送，保证严格 OpenAI 兼容端点可接入。 */
@@ -114,7 +123,7 @@ export class OpenAICompatibleClient {
     }
     const payload: Record<string, unknown> = {
       model: this.config.model,
-      messages,
+      messages: modelMessages(messages),
       temperature: this.config.temperature,
       stream: true,
       stream_options: { include_usage: true },

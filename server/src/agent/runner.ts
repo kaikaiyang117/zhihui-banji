@@ -19,8 +19,8 @@ import { OpenAICompatibleClient, type ModelResponse } from './modelClient.js';
 import { systemPrompt } from './prompt.js';
 import { SessionStore } from './sessionStore.js';
 import { buildRegistry, ToolRegistry, ToolError } from './toolRegistry.js';
-import { invokeTool, recordModelUsage, recordToolFailure } from './agentService.js';
-import { handleConfirmation } from './actions.js';
+import { invokeToolAsync, recordModelUsage, recordToolFailure } from './agentService.js';
+import { handleConfirmationAsync } from './actions.js';
 
 export interface RunnerOptions {
   modelClient?: OpenAICompatibleClient;
@@ -41,7 +41,7 @@ export class AgentRunner {
     this.maxTurns = Math.max(1, Math.min(options.maxTurns ?? 5, 10));
   }
 
-  static _callTool(name: string, rawArguments: string, channel: string, actorId: string, sessionId = ''): Record<string, unknown> {
+  static async _callTool(name: string, rawArguments: string, channel: string, actorId: string, sessionId = ''): Promise<Record<string, unknown>> {
     let argumentsValue: unknown;
     try {
       argumentsValue = parseToolArguments(rawArguments);
@@ -56,7 +56,7 @@ export class AgentRunner {
       return toolError('invalid_arguments', message, true);
     }
     try {
-      return invokeTool(name, argumentsValue as Record<string, unknown>, {
+      return await invokeToolAsync(name, argumentsValue as Record<string, unknown>, {
         channel, actorId, sessionId,
       }) as Record<string, unknown>;
     } catch (error) {
@@ -67,22 +67,22 @@ export class AgentRunner {
     }
   }
 
-  private executeToolWithRetry(
+  private async executeToolWithRetry(
     name: string, rawArguments: string, channel: string, actorId: string,
     failureCounts: Record<string, number>, sessionId = '',
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     const key = `${name}:${rawArguments}`;
     if ((failureCounts[key] ?? 0) >= 1) {
       const message = '同一个工具调用已经失败并自动重试过一次，停止继续重复调用。';
       recordToolFailure(channel, actorId, name, {}, 'retry_exhausted', message);
       return toolError('retry_exhausted', message, false);
     }
-    const result = AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
+    const result = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
     const error = result.error as Record<string, unknown> | undefined;
     if (!error) return result;
     failureCounts[key] = 1;
     if (!Boolean(error.autoRetry ?? error.auto_retry)) return result;
-    const retryResult = AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
+    const retryResult = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
     if (!retryResult.error) return retryResult;
     (retryResult.error as Record<string, unknown>).retry_attempts = 1;
     return retryResult;
@@ -140,10 +140,10 @@ export class AgentRunner {
       emit(payload);
     };
 
-    const runSteps = (
+    const runSteps = async (
       emit: EmitFn, state: GraphState, plan: AgentPlan,
       failureCounts: Record<string, number>,
-    ): GraphState['executed'] => {
+    ): Promise<GraphState['executed']> => {
       const results: Record<string, Record<string, unknown>> = {};
       const steps: GraphState['executed'] = [];
       for (const step of plan.steps) {
@@ -154,13 +154,19 @@ export class AgentRunner {
         emitPlanStep(emit, step, 'running');
         let argumentsValue: Record<string, unknown> = {};
         let result: Record<string, unknown>;
+        let toolStarted = false;
         try {
           argumentsValue = resolveReferences(step.arguments, results) as Record<string, unknown>;
           emitToolEvent(emit, step.id, step.tool, 'running', argumentsValue);
-          result = self.executeToolWithRetry(
+          toolStarted = true;
+          result = await self.executeToolWithRetry(
             step.tool, JSON.stringify(argumentsValue), state.channel, state.actorId,
             failureCounts, state.sessionId);
         } catch (error) {
+          if (!toolStarted) {
+            argumentsValue = step.arguments;
+            emitToolEvent(emit, step.id, step.tool, 'running', argumentsValue);
+          }
           result = toolError('plan_error', String((error as Error).message), false);
           recordToolFailure(state.channel, state.actorId, step.tool, {}, 'error', String((error as Error).message));
           argumentsValue = {};
@@ -178,6 +184,10 @@ export class AgentRunner {
       loadContext: (state) => {
         const sessionMessages = self.sessionStore.loadOwned(
           state.sessionId, state.actorId, state.channel);
+        const currentAttachment = state.attachment;
+        const carriedAttachment = !currentAttachment?.artifact_id && isExcelFollowup(state.text)
+          ? latestExcelAttachment(sessionMessages) : null;
+        const attachment = currentAttachment?.artifact_id ? currentAttachment : carriedAttachment;
         const resolvedReference = resolveFollowupStudentReference(state.text, sessionMessages);
         const systemMessage = { role: 'system', content: systemPrompt() };
         let messages: Array<Record<string, unknown>>;
@@ -194,8 +204,7 @@ export class AgentRunner {
             student_context_reference: true,
           });
         }
-        const attachment = state.attachment;
-        if (attachment?.file_id) {
+        if (attachment?.file_id || attachment?.artifact_id) {
           const candidates = Array.isArray(attachment.candidate_modules)
             ? attachment.candidate_modules
               .slice(0, 4)
@@ -212,25 +221,38 @@ export class AgentRunner {
             role: 'system',
             content: [
               '当前会话有一个用户刚上传的 Excel 附件。',
-              `文件标识：${String(attachment.file_id)}`,
+              attachment.file_id ? `旧上传文件标识：${String(attachment.file_id)}` : '',
+              attachment.artifact_id ? `WorkbookArtifact 标识：${String(attachment.artifact_id)}` : '',
               attachment.filename ? `文件名：${String(attachment.filename).slice(0, 120)}` : '',
               sheets ? `工作表：${sheets}` : '',
               candidates.length ? `系统识别的可能模块：${candidates.join('、')}` : '',
-              '如需继续处理，请先向用户说明识别结果；预览和写入必须由网页导入卡片完成，不能绕过确认直接写入。',
+              '如需继续处理，先调用 excel_inspect_workbook 或 excel_list_regions；WorkbookArtifact 使用 artifact_id 参数。可以创建/修改导入草稿计划，并调用 excel_preview_import 生成真实业务预览；写入必须经过 execute_excel_import 和确认链，不能绕过确认直接写入。',
             ].filter(Boolean).join('\n'),
             context_summary: true,
             excel_attachment_context: true,
           });
         }
-        messages.push({ role: 'user', content: state.text });
+        messages.push({
+          role: 'user', content: state.text,
+          ...(currentAttachment?.artifact_id ? {
+            attachment: {
+              artifact_id: String(currentAttachment.artifact_id),
+              filename: String(currentAttachment.filename ?? '').slice(0, 120),
+            },
+            display_content: currentAttachment.user_text_empty === true ? '' : state.text,
+          } : {}),
+        });
         return {
           messages,
           text: resolvedReference.text,
-          directTool: inferDirectTool(resolvedReference.text),
+          directTool: attachment?.artifact_id ? null : inferDirectTool(resolvedReference.text),
+          attachment,
         };
       },
-      route: (state) => (state.directTool ? 'direct' : (shouldAttemptModelPlan(state.text) ? 'plan' : 'model')),
-      applyDirect: (state, config) => {
+      route: (state) => (state.directTool ? 'direct'
+        : (state.attachment?.artifact_id ? 'model'
+          : (shouldAttemptModelPlan(state.text) ? 'plan' : 'model'))),
+      applyDirect: async (state, config) => {
         const [toolName, toolArguments, toolCallId] = state.directTool!;
         const emit = emitFor(config);
         const input = parseToolInput(toolArguments);
@@ -240,7 +262,7 @@ export class AgentRunner {
           role: 'assistant', content: null, reasoning_content: '',
           tool_calls: [{ id: toolCallId, type: 'function', function: { name: toolName, arguments: toolArguments } }],
         });
-        const result = AgentRunner._callTool(toolName, toolArguments, state.channel, state.actorId, state.sessionId);
+        const result = await AgentRunner._callTool(toolName, toolArguments, state.channel, state.actorId, state.sessionId);
         emitToolEvent(emit, toolCallId, toolName, result.error ? 'error' : 'completed', input, result);
         messages.push({ role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(result) });
         return { messages };
@@ -269,7 +291,7 @@ export class AgentRunner {
         let replanCount = state.replanCount;
 
         emitPlanEvent(emit, state.plan, 'started');
-        let executed = runSteps(emit, state, state.plan, failureCounts);
+        let executed = await runSteps(emit, state, state.plan, failureCounts);
         if (hasRetryExhausted(executed)) {
           return { executed, finalAnswer: toolFailureMessage(), halted: true };
         }
@@ -277,7 +299,7 @@ export class AgentRunner {
         const recovery = recoveryPlanForEmptyBatch(state.text, state.plan, executed, availableRegistry);
         if (recovery) {
           emitPlanEvent(emit, recovery, 'replanned');
-          executed = runSteps(emit, state, recovery, failureCounts);
+          executed = await runSteps(emit, state, recovery, failureCounts);
         }
         if (shouldReplan(executed) && replanCount < 1) {
           try {
@@ -288,7 +310,7 @@ export class AgentRunner {
             planReasoningBySession.set(state.sessionId, planner.lastReasoningContent);
             replanCount += 1;
             emitPlanEvent(emit, replanned, 'replanned');
-            executed = runSteps(emit, state, replanned, failureCounts);
+            executed = await runSteps(emit, state, replanned, failureCounts);
           } catch {
             // 重建失败按原计划结果继续
           }
@@ -370,7 +392,7 @@ export class AgentRunner {
           let haltMessage = '';
           for (const call of response.tool_calls) {
             emitToolEvent(emit, call.id || `tool-${turn}`, call.name, 'running', parseToolInput(call.arguments));
-            const result = self.executeToolWithRetry(
+            const result = await self.executeToolWithRetry(
               call.name, call.arguments, state.channel, state.actorId, failureCounts, state.sessionId);
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
             emitToolEvent(
@@ -450,7 +472,7 @@ export class AgentRunner {
     const actorId = options.actorId ?? '';
     const input = String(text ?? '').trim();
     if (!input) return '请输入要查询的内容。';
-    const handled = handleConfirmation(input, { sessionId, actorId, channel });
+    const handled = await handleConfirmationAsync(input, { sessionId, actorId, channel });
     if (handled[0]) return handled[1];
     const graph = await this.buildGraph();
     try {
@@ -470,7 +492,7 @@ export class AgentRunner {
       yield { type: 'delta', content: '请输入要查询的内容。' };
       return;
     }
-    const handled = handleConfirmation(input, { sessionId, actorId, channel });
+    const handled = await handleConfirmationAsync(input, { sessionId, actorId, channel });
     if (handled[0]) {
       yield { type: 'delta', content: handled[1] };
       return;
@@ -565,6 +587,30 @@ function shouldAttemptModelPlan(text: string): boolean {
     '学生', '同学', '家长', '监护人', '职业', '分布', '所有', '每个',
     '成绩', '考勤', '任务', '沟通', '校历', '上课日', '放假', '调休', '节假日',
   ].some((term) => text.includes(term));
+}
+
+function isExcelFollowup(text: string): boolean {
+  return /Excel|工作簿|表格|这个表|这份表|附件|导入|写入|预览|字段|映射|继续/i.test(text);
+}
+
+function latestExcelAttachment(messages: Array<Record<string, unknown>>): Record<string, unknown> | null {
+  let userTurns = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'user') continue;
+    userTurns += 1;
+    if (userTurns > 4) return null;
+    const attachment = message.attachment;
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) continue;
+    const value = attachment as Record<string, unknown>;
+    const artifactId = String(value.artifact_id ?? '').trim();
+    if (!artifactId) continue;
+    return {
+      artifact_id: artifactId,
+      filename: String(value.filename ?? '').slice(0, 120),
+    };
+  }
+  return null;
 }
 
 function recentContext(messages: Array<Record<string, unknown>>): string {

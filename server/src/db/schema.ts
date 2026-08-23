@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 36;
+export const CURRENT_SCHEMA_VERSION = 37;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -2002,6 +2002,56 @@ function migration36(conn: Database): void {
   `);
 }
 
+function migration37(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS excel_artifacts (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        storage_path TEXT NOT NULL,
+        owner_id TEXT NOT NULL DEFAULT '',
+        channel TEXT NOT NULL DEFAULT 'web',
+        session_id TEXT NOT NULL DEFAULT '',
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        term_id INTEGER NOT NULL REFERENCES terms(id),
+        status TEXT NOT NULL DEFAULT 'uploaded',
+        blueprint_json TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        expires_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS excel_import_plans (
+        id TEXT PRIMARY KEY,
+        artifact_id TEXT NOT NULL REFERENCES excel_artifacts(id) ON DELETE CASCADE,
+        adapter_id TEXT NOT NULL,
+        adapter_version TEXT NOT NULL DEFAULT '1',
+        sheet_index INTEGER NOT NULL,
+        region_id TEXT NOT NULL DEFAULT '',
+        mappings_json TEXT NOT NULL DEFAULT '[]',
+        options_json TEXT NOT NULL DEFAULT '{}',
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        term_id INTEGER NOT NULL REFERENCES terms(id),
+        status TEXT NOT NULL DEFAULT 'draft',
+        plan_hash TEXT NOT NULL,
+        preview_json TEXT NOT NULL DEFAULT '',
+        preview_hash TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_excel_artifacts_access
+        ON excel_artifacts(owner_id, channel, session_id, class_id, term_id, status);
+    CREATE INDEX IF NOT EXISTS idx_excel_artifacts_expiry
+        ON excel_artifacts(expires_at, status);
+    CREATE INDEX IF NOT EXISTS idx_excel_import_plans_artifact
+        ON excel_import_plans(artifact_id, status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_excel_import_plans_scope
+        ON excel_import_plans(class_id, term_id, status);
+  `);
+}
+
 function migration32(conn: Database): void {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notification_templates (
@@ -2063,6 +2113,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   34: migration34,
   35: migration35,
   36: migration36,
+  37: migration37,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */

@@ -1,0 +1,80 @@
+import type { Database } from 'better-sqlite3';
+
+import { getDb } from '../../services/context.js';
+import type { ArtifactAccess, ExcelImportPlan } from '../domain/types.js';
+import { requireArtifact } from '../artifacts/artifactRepository.js';
+import {
+  getImportPlan, requireImportPlan, saveImportPreview, markImportPlanStatus,
+} from './importPlanRepository.js';
+import { getImportAdapter } from './adapterRegistry.js';
+
+export class ExcelImportExecutionError extends Error {}
+
+function connOf(conn?: Database): Database {
+  return conn ?? getDb().connInstance;
+}
+
+function contextOf(plan: ExcelImportPlan, access: ArtifactAccess, conn: Database) {
+  const artifact = requireArtifact(plan.artifactId, access, conn);
+  const adapter = getImportAdapter(plan.adapterId);
+  return {
+    artifact, adapter,
+    context: {
+      artifact, plan, mappings: plan.mappings, options: plan.options,
+    },
+  };
+}
+
+export async function previewImportPlan(
+  id: string, access: ArtifactAccess, conn?: Database,
+): Promise<ExcelImportPlan> {
+  const db = connOf(conn);
+  const plan = requireImportPlan(id, access, db);
+  const { adapter, context } = contextOf(plan, access, db);
+  const preview = await adapter.preview(context);
+  return saveImportPreview(id, {
+    ...preview,
+    plan_id: plan.id,
+    artifact_id: plan.artifactId,
+    adapter_id: plan.adapterId,
+    plan_hash: plan.planHash,
+  }, access, db);
+}
+
+export async function executeImportPlan(options: {
+  id: string;
+  previewHash: string;
+  requestId: string;
+  access: ArtifactAccess;
+  conn?: Database;
+}): Promise<Record<string, unknown>> {
+  const db = connOf(options.conn);
+  const plan = requireImportPlan(options.id, options.access, db);
+  if (plan.status !== 'awaiting_confirmation' || !plan.preview || !plan.previewHash) {
+    throw new ExcelImportExecutionError('请先生成导入预览并完成确认');
+  }
+  if (plan.previewHash !== options.previewHash) {
+    throw new ExcelImportExecutionError('导入预览已失效，请重新预览');
+  }
+  const { adapter, context } = contextOf(plan, options.access, db);
+  const result = await adapter.execute({ ...context, requestId: options.requestId });
+  const verification = await adapter.verify({ ...context, requestId: options.requestId }, result);
+  if (!verification.verified) {
+    markImportPlanStatus(plan.id, 'failed', options.access, db);
+    throw new ExcelImportExecutionError(`导入写入验证失败：${verification.evidence}`);
+  }
+  markImportPlanStatus(plan.id, 'executed', options.access, db);
+  return {
+    plan_id: plan.id,
+    status: 'executed',
+    result,
+    verification,
+    request_id: options.requestId,
+  };
+}
+
+export function getPlanForAccess(id: string, access: ArtifactAccess, conn?: Database): ExcelImportPlan {
+  const plan = getImportPlan(id, access, connOf(conn));
+  if (!plan) throw new ExcelImportExecutionError('导入计划不存在或不属于当前会话');
+  return plan;
+}

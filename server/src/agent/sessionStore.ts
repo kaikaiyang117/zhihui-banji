@@ -354,7 +354,7 @@ function redactSummaryValue(value: unknown, key = ''): unknown {
 }
 
 function stripPrivateFields(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  return messages.map((message) => {
+  return messages.filter((message) => message.excel_attachment_context !== true).map((message) => {
     const clean = { ...message };
     delete clean.reasoning_content;
     return clean;

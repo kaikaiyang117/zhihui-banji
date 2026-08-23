@@ -35,6 +35,7 @@ import { registerMeetingPrepRoutes } from './http/routes/meetingPrep.js';
 import { registerNotificationTemplateRoutes } from './http/routes/notificationTemplates.js';
 import { registerToolLinkRoutes } from './http/routes/toolLinks.js';
 import { registerExcelImportRoutes } from './http/routes/excelImport.js';
+import { registerExcelArtifactRoutes } from './http/routes/excelArtifacts.js';
 import { registerParentReplyRoutes } from './http/routes/parentReply.js';
 
 /** 日志脱敏字段（与数据安全规则一致：不记录密钥、电话、地址等）。 */
@@ -172,6 +173,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     // ---------- 对话式 Excel 导入（SUP-02） ----------
     registerExcelImportRoutes(app);
+    registerExcelArtifactRoutes(app);
 
     // ---------- 统计（MIG-05 补齐） ----------
     registerStatsRoutes(app);

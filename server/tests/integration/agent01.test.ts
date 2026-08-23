@@ -130,6 +130,39 @@ describe('确定性直接工具路由', () => {
     expect((toolCall!.tool_calls as Array<{ function: { name: string } }>)[0].function.name)
       .toBe('tasks_list');
   });
+
+  it('Excel 附件作为同一用户回合进入模型工具循环，并保留附件元数据', async () => {
+    const model = new FakeModel({ answer: '我会先检查这份工作簿。' });
+    model.complete = async (): Promise<ModelResponse> => {
+      throw new Error('带附件的请求不应进入普通业务规划器');
+    };
+    const sessionId = 'web:attachment-user:excel-turn';
+    const runner = new AgentRunner({ modelClient: model as never });
+    const answer = await runner.chat(
+      sessionId, '分析这个表', {
+        channel: 'web', actorId: 'attachment-user',
+        attachment: { artifact_id: 'artifact-1', filename: '期中成绩.xlsx' },
+      });
+
+    expect(answer).toContain('检查');
+    expect(model.rounds[0].some((message) =>
+      message.role === 'system' && String(message.content).includes('artifact-1'))).toBe(true);
+    const saved = new SessionStore().loadOwned(sessionId, 'attachment-user', 'web');
+    const user = saved.find((message) => message.role === 'user');
+    expect(user?.attachment).toEqual({ artifact_id: 'artifact-1', filename: '期中成绩.xlsx' });
+    expect(saved.some((message) => message.excel_attachment_context === true)).toBe(false);
+
+    await runner.chat(sessionId, '导入学生系统吧', {
+      channel: 'web', actorId: 'attachment-user',
+    });
+    const followupRound = model.rounds[model.rounds.length - 1];
+    const attachmentContexts = followupRound.filter((message) =>
+      message.role === 'system' && String(message.content).includes('WorkbookArtifact 标识'));
+    expect(attachmentContexts).toHaveLength(1);
+    expect(String(attachmentContexts[0].content)).toContain('artifact-1');
+    const savedAfterFollowup = new SessionStore().loadOwned(sessionId, 'attachment-user', 'web');
+    expect(savedAfterFollowup.filter((message) => message.attachment)).toHaveLength(1);
+  });
 });
 
 describe('计划执行与纠错', () => {
@@ -386,6 +419,41 @@ describe('流式事件序列', () => {
     expect((planEvent.steps as Array<Record<string, unknown>>).length).toBeGreaterThan(0);
     const toolEvent = events.find((event) => event.type === 'tool' && event.status === 'completed');
     expect(toolEvent?.name).toBe('students_query');
+  });
+
+  it('计划参数引用失败时仍先输出工具开始事件，再输出失败事件', async () => {
+    const model = {
+      async complete(): Promise<ModelResponse> {
+        return {
+          content: JSON.stringify({
+            goal: '检查 Excel',
+            steps: [{
+              id: 'inspect', tool: 'excel_inspect_workbook',
+              arguments: { artifact_id: '$context.artifact_id' },
+            }],
+          }),
+          tool_calls: [], reasoning_content: '', usage: null,
+        };
+      },
+      async *iter_complete(): AsyncGenerator<ModelStreamEvent> {
+        yield {
+          content: '',
+          response: { content: '检查失败。', tool_calls: [], reasoning_content: '', usage: null },
+        };
+      },
+    };
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of new AgentRunner({ modelClient: model as never }).chatStream(
+      's-stream-reference-error', '详细处理工作簿', { channel: 'web', actorId: 'u' },
+    )) {
+      events.push(event);
+    }
+    const toolEvents = events.filter((event) => event.type === 'tool' && event.id === 'inspect');
+    expect(toolEvents.length).toBeGreaterThan(0);
+    for (let index = 0; index < toolEvents.length; index += 2) {
+      expect(toolEvents.slice(index, index + 2).map((event) => event.status))
+        .toEqual(['running', 'error']);
+    }
   });
 });
 

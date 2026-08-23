@@ -1,136 +1,231 @@
-import { SUPPORTED_MODULES } from '../../services/excelImportAssistant.js';
-import { ToolError, ToolDefinition } from '../toolRegistry.js';
+import { randomUUID } from 'node:crypto';
+
+import { currentActor } from '../../services/audit.js';
+import { getCurrentScope } from '../../services/context.js';
+import { getStoredArtifact, getStoredArtifactPath, inspectArtifact } from '../../excel/artifacts/artifactService.js';
+import type { ArtifactAccess, FieldMapping, TableRegion } from '../../excel/domain/types.js';
+import { createImportPlan, getImportPlan, updateImportPlan } from '../../excel/imports/importPlanRepository.js';
+import { previewImportPlan } from '../../excel/imports/importPlanService.js';
+import { profileWorkbookRegion, readWorkbookRange, type ExposurePolicy } from '../../excel/query/workbookQuery.js';
+import { ToolError, ToolDefinition, type ToolExecutionContext } from '../toolRegistry.js';
 
 const ALL_CHANNELS = ['web', 'local', 'lan'];
+const EXPOSURE_POLICIES: ExposurePolicy[] = ['structure_only', 'redacted_values', 'allowed_values'];
 
-function importExcelFile(args: Record<string, unknown>): Record<string, unknown> {
-  const fileId = String(args.file_id ?? '').trim();
-  if (!fileId) throw new ToolError('缺少 file_id，请先上传文件', { code: 'invalid_arguments', retryable: true });
-
-  const module = String(args.module ?? '').trim();
-  if (module && !SUPPORTED_MODULES.includes(module as typeof SUPPORTED_MODULES[number])) {
-    throw new ToolError(`不支持的导入模块：${module}，可选值：${SUPPORTED_MODULES.join(', ')}`, { code: 'invalid_arguments', retryable: true });
-  }
-
+function accessFor(context?: ToolExecutionContext): ArtifactAccess {
+  const scope = getCurrentScope();
+  const actor = currentActor();
   return {
-    file_id: fileId,
-    module: module || null,
-    hint: module ? '调用 import_excel_preview 生成预览' : '请确认导入模块后调用 import_excel_preview',
+    ownerId: context?.actorId || actor.actorId,
+    channel: context?.channel || actor.channel,
+    sessionId: context?.sessionId || '',
+    classId: scope.class_id,
+    termId: scope.term_id,
   };
 }
 
-function importExcelPreview(args: Record<string, unknown>): Record<string, unknown> {
-  const fileId = String(args.file_id ?? '').trim();
-  if (!fileId) throw new ToolError('缺少 file_id', { code: 'invalid_arguments', retryable: true });
-
-  const module = String(args.module ?? '').trim();
-  if (!module) throw new ToolError('缺少 module，请指定导入模块', { code: 'invalid_arguments', retryable: true });
-  if (!SUPPORTED_MODULES.includes(module as typeof SUPPORTED_MODULES[number])) {
-    throw new ToolError(`不支持的导入模块：${module}`, { code: 'invalid_arguments', retryable: true });
-  }
-
-  throw new ToolError(
-    `Excel 预览暂不能通过 Agent 工具直接执行，请在工作台的“Excel 导入”面板中打开 ${fileId} 并选择“${module}”生成预览。`,
-    { code: 'execution_failed', retryable: false },
-  );
+function artifactId(args: Record<string, unknown>): string {
+  const id = String(args.artifact_id ?? '').trim();
+  if (!id) throw new ToolError('缺少 artifact_id', { code: 'invalid_arguments', retryable: true });
+  return id;
 }
 
-function confirmExcelImport(args: Record<string, unknown>): Record<string, unknown> {
-  const fileId = String(args.file_id ?? '').trim();
-  const module = String(args.module ?? '').trim();
-  const previewHash = String(args.preview_hash ?? '').trim();
-
-  if (!fileId || !module || !previewHash) {
-    throw new ToolError('缺少 file_id、module 或 preview_hash', { code: 'invalid_arguments', retryable: true });
-  }
-
-  throw new ToolError(
-    `Excel 导入写入必须在网页导入面板中确认，Agent 工具不会直接写入业务数据（文件 ${fileId}，预览 ${previewHash}）。`,
-    { code: 'permission_denied', retryable: false },
-  );
+async function inspectWorkbook(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<Record<string, unknown>> {
+  const artifact = await inspectArtifact(artifactId(args), accessFor(context));
+  return {
+    artifact_id: artifact.id,
+    filename: artifact.filename,
+    sha256: artifact.sha256,
+    status: artifact.status,
+    blueprint: artifact.blueprint,
+    exposure_policy: 'structure_only',
+  };
 }
 
-function cancelExcelImport(args: Record<string, unknown>): Record<string, unknown> {
-  const fileId = String(args.file_id ?? '').trim();
-  if (!fileId) throw new ToolError('缺少 file_id', { code: 'invalid_arguments', retryable: true });
-  throw new ToolError(
-    `请在工作台的“Excel 导入”面板中取消文件 ${fileId}；Agent 工具不会直接管理上传文件。`,
-    { code: 'execution_failed', retryable: false },
-  );
+async function listRegions(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<Record<string, unknown>> {
+  const artifact = await inspectArtifact(artifactId(args), accessFor(context));
+  const sheetIndex = args.sheet_index === undefined ? null : Number(args.sheet_index);
+  if (sheetIndex !== null && (!Number.isInteger(sheetIndex) || sheetIndex < 0)) {
+    throw new ToolError('sheet_index 必须是非负整数', { code: 'invalid_arguments', retryable: true });
+  }
+  const sheets = (artifact.blueprint?.sheets ?? [])
+    .filter(sheet => sheetIndex === null || sheet.index === sheetIndex)
+    .map(sheet => ({ index: sheet.index, name: sheet.name, regions: sheet.regions }));
+  return { artifact_id: artifact.id, sheets, exposure_policy: 'structure_only' };
+}
+
+async function readRange(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<Record<string, unknown>> {
+  const id = artifactId(args);
+  const sheetIndex = Number(args.sheet_index ?? 0);
+  const range = String(args.range ?? '').trim();
+  const policy = String(args.exposure_policy ?? 'structure_only') as ExposurePolicy;
+  if (!Number.isInteger(sheetIndex) || sheetIndex < 0) {
+    throw new ToolError('sheet_index 必须是非负整数', { code: 'invalid_arguments', retryable: true });
+  }
+  if (!range) throw new ToolError('缺少 range', { code: 'invalid_arguments', retryable: true });
+  if (!EXPOSURE_POLICIES.includes(policy)) {
+    throw new ToolError('exposure_policy 不受支持', { code: 'invalid_arguments', retryable: true });
+  }
+  const access = accessFor(context);
+  const artifact = getStoredArtifact(id, access);
+  const result = await readWorkbookRange({
+    filePath: getStoredArtifactPath(id, access), sheetIndex, range, exposurePolicy: policy,
+  });
+  return { artifact_id: artifact.id, ...result };
+}
+
+async function profileRegion(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<Record<string, unknown>> {
+  const id = artifactId(args);
+  const sheetIndex = Number(args.sheet_index ?? 0);
+  const regionId = String(args.region_id ?? '').trim();
+  if (!Number.isInteger(sheetIndex) || sheetIndex < 0 || !regionId) {
+    throw new ToolError('需要有效的 sheet_index 和 region_id', { code: 'invalid_arguments', retryable: true });
+  }
+  const access = accessFor(context);
+  const artifact = await inspectArtifact(id, access);
+  const region = artifact.blueprint?.sheets.find(sheet => sheet.index === sheetIndex)?.regions
+    .find(item => item.id === regionId) as TableRegion | undefined;
+  if (!region) throw new ToolError('指定的数据区域不存在', { code: 'not_found', retryable: false });
+  const result = await profileWorkbookRegion({
+    filePath: getStoredArtifactPath(id, access), sheetIndex, region,
+  });
+  return { artifact_id: artifact.id, exposure_policy: 'structure_only', ...result };
+}
+
+function mappingInput(value: unknown): FieldMapping[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ToolError('mappings 必须是数组', { code: 'invalid_arguments', retryable: true });
+  }
+  return value as FieldMapping[];
+}
+
+function optionsInput(value: unknown): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ToolError('options 必须是对象', { code: 'invalid_arguments', retryable: true });
+  }
+  return value as Record<string, unknown>;
+}
+
+function createPlan(args: Record<string, unknown>, context?: ToolExecutionContext): Record<string, unknown> {
+  const id = artifactId(args);
+  const adapterId = String(args.adapter_id ?? '').trim();
+  const regionId = String(args.region_id ?? '').trim();
+  const sheetIndex = Number(args.sheet_index ?? 0);
+  if (!adapterId || !regionId || !Number.isInteger(sheetIndex) || sheetIndex < 0) {
+    throw new ToolError('需要有效的 adapter_id、sheet_index 和 region_id', { code: 'invalid_arguments', retryable: true });
+  }
+  const plan = createImportPlan({
+    id: String(args.plan_id ?? randomUUID()), artifactId: id, adapterId,
+    adapterVersion: args.adapter_version ? String(args.adapter_version) : undefined,
+    sheetIndex, regionId, mappings: mappingInput(args.mappings), options: optionsInput(args.options),
+    access: accessFor(context),
+  });
+  return { plan, confirmation_required: false, hint: '导入计划已创建；下一步需要生成业务预览，预览后才能请求确认写入。' };
+}
+
+function updatePlan(args: Record<string, unknown>, context?: ToolExecutionContext): Record<string, unknown> {
+  const id = String(args.plan_id ?? '').trim();
+  if (!id) throw new ToolError('缺少 plan_id', { code: 'invalid_arguments', retryable: true });
+  const existing = getImportPlan(id, accessFor(context));
+  if (!existing) throw new ToolError('导入计划不存在或不属于当前会话', { code: 'not_found', retryable: false });
+  const plan = updateImportPlan({
+    id, mappings: args.mappings === undefined ? undefined : mappingInput(args.mappings),
+    options: args.options === undefined ? undefined : optionsInput(args.options), access: accessFor(context),
+  });
+  return { plan, confirmation_required: false, hint: '导入计划已更新；任何变更都会使旧预览失效。' };
+}
+
+async function previewPlan(args: Record<string, unknown>, context?: ToolExecutionContext): Promise<Record<string, unknown>> {
+  const id = String(args.plan_id ?? '').trim();
+  if (!id) throw new ToolError('缺少 plan_id', { code: 'invalid_arguments', retryable: true });
+  const plan = await previewImportPlan(id, accessFor(context));
+  return {
+    plan,
+    confirmation_required: true,
+    hint: '业务预览已生成；确认后才会备份并写入业务数据。',
+  };
 }
 
 export function buildExcelImportTools(): ToolDefinition[] {
   return [
     new ToolDefinition({
-      name: 'import_excel_file',
-      description: '接收用户上传的Excel文件，返回文件标识和推荐的导入模块。不执行任何写入操作。需要用户先通过网页上传文件获得file_id。',
+      name: 'excel_inspect_workbook',
+      description: '检查已上传 Excel 的工作簿结构、工作表、区域、表头和类型。只返回结构信息，不返回单元格值。',
       parameters: {
-        type: 'object',
-        properties: {
-          file_id: { type: 'string', description: '网页上传返回的文件标识' },
-          module: { type: 'string', description: '用户指定的导入模块，可选值：students、scores、calendar、timetable。可为空，由系统根据表头自动推荐。' },
-        },
-        required: ['file_id'],
-        additionalProperties: false,
-      },
-      handler: importExcelFile,
-      readOnly: true,
-      sensitive: false,
-      allowChannels: ALL_CHANNELS,
+        type: 'object', properties: { artifact_id: { type: 'string' } },
+        required: ['artifact_id'], additionalProperties: false,
+      }, handler: inspectWorkbook, readOnly: true, allowChannels: ALL_CHANNELS,
     }),
     new ToolDefinition({
-      name: 'import_excel_preview',
-      description: 'Excel 预览入口提示工具。实际预览必须通过网页“Excel 导入”面板调用 HTTP 导入服务；本工具不会伪造预览结果。',
+      name: 'excel_list_regions',
+      description: '列出 Excel 中可识别的数据区域。先检查结构、再选择区域进行读取或分析。',
       parameters: {
-        type: 'object',
-        properties: {
-          file_id: { type: 'string', description: '上传文件标识' },
-          module: { type: 'string', enum: ['students', 'scores', 'calendar', 'timetable'], description: '导入模块' },
-          sheet_index: { type: 'integer', minimum: 0, description: '工作表索引（多工作表文件时指定），默认0' },
-          duplicate_strategy: { type: 'string', enum: ['update', 'skip'], description: '重复记录策略，默认update' },
-        },
-        required: ['file_id', 'module'],
-        additionalProperties: false,
-      },
-      handler: importExcelPreview,
-      readOnly: true,
-      sensitive: false,
-      allowChannels: ALL_CHANNELS,
+        type: 'object', properties: {
+          artifact_id: { type: 'string' }, sheet_index: { type: 'integer', minimum: 0 },
+        }, required: ['artifact_id'], additionalProperties: false,
+      }, handler: listRegions, readOnly: true, allowChannels: ALL_CHANNELS,
     }),
     new ToolDefinition({
-      name: 'confirm_excel_import',
-      description: '兼容保留的 Excel 确认工具。Agent 不直接写入 Excel 导入；请在网页“Excel 导入”面板确认，避免绕过预览和权限校验。',
+      name: 'excel_read_range',
+      description: '读取 Excel 指定范围的结构化结果。默认 structure_only，不向模型暴露单元格值；需要值时必须显式选择受限 exposure_policy。',
       parameters: {
-        type: 'object',
-        properties: {
-          file_id: { type: 'string', description: '上传文件标识' },
-          module: { type: 'string', enum: ['students', 'scores', 'calendar', 'timetable'], description: '导入模块' },
-          preview_hash: { type: 'string', description: '预览返回的hash，用于校验预览未被篡改' },
-        },
-        required: ['file_id', 'module', 'preview_hash'],
-        additionalProperties: false,
-      },
-      handler: confirmExcelImport,
-      readOnly: true,
-      writeAction: false,
-      sensitive: false,
-      allowChannels: ALL_CHANNELS,
+        type: 'object', properties: {
+          artifact_id: { type: 'string' }, sheet_index: { type: 'integer', minimum: 0 },
+          range: { type: 'string', description: '例如 A1:D20，最多200行、50列' },
+          exposure_policy: { type: 'string', enum: EXPOSURE_POLICIES, default: 'structure_only' },
+        }, required: ['artifact_id', 'range'], additionalProperties: false,
+      }, handler: readRange, readOnly: true, sensitive: true, allowChannels: ['web', 'local', 'lan'],
     }),
     new ToolDefinition({
-      name: 'cancel_excel_import',
-      description: 'Excel 取消入口提示工具。实际取消必须通过网页“Excel 导入”面板调用 HTTP 导入服务。',
+      name: 'excel_profile_region',
+      description: '统计 Excel 数据区域的行列数量、非空数、去重数和推断类型，不返回单元格值。',
       parameters: {
-        type: 'object',
-        properties: {
-          file_id: { type: 'string', description: '要取消的文件标识' },
-        },
-        required: ['file_id'],
-        additionalProperties: false,
-      },
-      handler: cancelExcelImport,
-      readOnly: true,
-      sensitive: false,
-      allowChannels: ALL_CHANNELS,
+        type: 'object', properties: {
+          artifact_id: { type: 'string' }, sheet_index: { type: 'integer', minimum: 0 },
+          region_id: { type: 'string' },
+        }, required: ['artifact_id', 'region_id'], additionalProperties: false,
+      }, handler: profileRegion, readOnly: true, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'excel_create_import_plan',
+      description: '根据 Artifact 的工作表区域和字段映射创建导入草稿计划。只保存计划，不写入业务数据；预览和确认仍是后续步骤。',
+      parameters: {
+        type: 'object', properties: {
+          artifact_id: { type: 'string' }, plan_id: { type: 'string' },
+          adapter_id: { type: 'string', enum: ['students', 'scores', 'calendar', 'timetable'] },
+          adapter_version: { type: 'string' }, sheet_index: { type: 'integer', minimum: 0 },
+          region_id: { type: 'string' }, mappings: { type: 'array' }, options: { type: 'object' },
+        }, required: ['artifact_id', 'adapter_id', 'region_id'], additionalProperties: false,
+      }, handler: createPlan, readOnly: false, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'excel_update_import_plan',
+      description: '修改导入草稿的字段映射或适配器选项。只更新计划，不写入业务数据；修改后旧预览自动失效。',
+      parameters: {
+        type: 'object', properties: {
+          plan_id: { type: 'string' }, mappings: { type: 'array' }, options: { type: 'object' },
+        }, required: ['plan_id'], additionalProperties: false,
+      }, handler: updatePlan, readOnly: false, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'excel_preview_import',
+      description: '根据导入计划生成真实业务预览，包括新增、更新、跳过、错误行和字段映射；不会写入业务数据。',
+      parameters: {
+        type: 'object', properties: { plan_id: { type: 'string' } },
+        required: ['plan_id'], additionalProperties: false,
+      }, handler: previewPlan, readOnly: false, allowChannels: ALL_CHANNELS,
+    }),
+    new ToolDefinition({
+      name: 'execute_excel_import',
+      description: '确认并执行已生成预览的 Excel 导入。系统会复核预览哈希、创建备份、执行适配器写入并验证结果。必须经过用户确认。',
+      parameters: {
+        type: 'object', properties: {
+          plan_id: { type: 'string' }, preview_hash: { type: 'string' }, request_id: { type: 'string' },
+        }, required: ['plan_id', 'preview_hash'], additionalProperties: false,
+      }, handler: () => ({ confirmation_required: true }), readOnly: false, writeAction: true,
+      allowChannels: ['web', 'local', 'lan'],
     }),
   ];
 }

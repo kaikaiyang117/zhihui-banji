@@ -265,6 +265,29 @@ function sessionHeaders(sessionId) {
   return sessionId ? { 'X-Workbench-Session': sessionId } : {}
 }
 
+export async function uploadExcelArtifact(file, sessionId = '') {
+  const formData = new FormData()
+  formData.append('file', file)
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 120000)
+  try {
+    return await request('/excel-artifacts/upload', {
+      method: 'POST', body: formData, headers: sessionHeaders(sessionId), signal: controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('读取 Excel 超时，请检查文件是否损坏或过大后重试。')
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+export async function discardExcelArtifact(artifactId, sessionId = '') {
+  return request(`/excel-artifacts/${encodeURIComponent(artifactId)}/discard`, {
+    method: 'POST', headers: sessionHeaders(sessionId),
+  })
+}
+
 export async function analyzeExcelImport(formData, sessionId = '') {
   return request('/excel-import/upload', { method: 'POST', body: formData, headers: sessionHeaders(sessionId) })
 }

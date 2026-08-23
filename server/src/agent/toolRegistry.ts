@@ -35,7 +35,17 @@ export class ToolError extends Error {
   }
 }
 
-export type ToolHandler = (args: Record<string, unknown>) => Record<string, unknown>;
+export interface ToolExecutionContext {
+  channel: string;
+  actorId: string;
+  sessionId: string;
+}
+
+export type ToolHandlerResult = Record<string, unknown> | Promise<Record<string, unknown>>;
+
+export type ToolHandler = (
+  args: Record<string, unknown>, context?: ToolExecutionContext,
+) => ToolHandlerResult;
 
 export class ToolDefinition {
   readonly name: string;
@@ -125,7 +135,10 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  execute(name: string, argumentsValue?: Record<string, unknown> | null): Record<string, unknown> {
+  private validate(
+    name: string,
+    argumentsValue?: Record<string, unknown> | null,
+  ): { tool: ToolDefinition; args: Record<string, unknown> } {
     const tool = this.tools.get(name);
     if (!tool) throw new ToolError(`工具不存在：${name}`, { code: 'unknown_tool', retryable: true });
     const raw = argumentsValue || {};
@@ -147,8 +160,36 @@ export class ToolRegistry {
     if (missing.length > 0) {
       throw new ToolError(`缺少工具参数：${missing.join(', ')}`, { code: 'invalid_arguments', retryable: true });
     }
+    return { tool, args };
+  }
+
+  execute(
+    name: string,
+    argumentsValue?: Record<string, unknown> | null,
+    context?: ToolExecutionContext,
+  ): Record<string, unknown> {
+    const { tool, args } = this.validate(name, argumentsValue);
     try {
-      return tool.handler(args);
+      const result = tool.handler(args, context);
+      if (result instanceof Promise) {
+        throw new ToolError('该工具需要异步执行', { code: 'execution_failed', retryable: false });
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ToolError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ToolError(message, { code: 'invalid_arguments', retryable: true });
+    }
+  }
+
+  async executeAsync(
+    name: string,
+    argumentsValue?: Record<string, unknown> | null,
+    context?: ToolExecutionContext,
+  ): Promise<Record<string, unknown>> {
+    const { tool, args } = this.validate(name, argumentsValue);
+    try {
+      return await tool.handler(args, context);
     } catch (error) {
       if (error instanceof ToolError) throw error;
       const message = error instanceof Error ? error.message : String(error);

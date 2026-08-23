@@ -131,6 +131,30 @@ describe('Excel 混合识别与安全执行', () => {
     discardUpload(analysis.file_id, { session: 'rules' });
   });
 
+  it('低置信度 AI 映射只能进入待确认状态，不能直接写入', async () => {
+    const buffer = await workbookBuffer({ headers: ['编号代码', '学生全名'], rows: [['LOW001', '待确认同学']] });
+    const analysis = await analyzeUpload({
+      buffer, originalName: '低置信度.xlsx', sessionId: 'low-confidence',
+      semanticAnalyzer: async () => ({
+        candidates: [{ module: 'students', sheet_index: 0, confidence: 0.8, reason: '可能是学生资料' }],
+        mappings: [
+          { module: 'students', sheet_index: 0, source: '编号代码', target: '学号', confidence: 0.7, reason: '编号可能代表学号' },
+          { module: 'students', sheet_index: 0, source: '学生全名', target: '姓名', confidence: 0.7, reason: '名称可能代表姓名' },
+        ],
+        model: 'test-model', warning: '',
+      }),
+    });
+    const preview = await generateImportPreview({
+      fileId: analysis.file_id, module: 'students', session: 'low-confidence',
+    });
+    expect(preview.field_mapping.every(item => item.mapping_status === 'needs_confirmation')).toBe(true);
+    await expect(executeImport({
+      fileId: analysis.file_id, module: 'students', previewHash: preview.preview_hash,
+      requestId: 'low-confidence-request', session: 'low-confidence',
+    })).rejects.toThrow(/置信度不足/);
+    discardUpload(analysis.file_id, { session: 'low-confidence' });
+  });
+
   it('多个来源列指向同一目标字段时拒绝生成含糊预览', async () => {
     const buffer = await workbookBuffer({
       headers: ['学号', '学生编号', '姓名'], rows: [['A001', 'B001', '冲突同学']],

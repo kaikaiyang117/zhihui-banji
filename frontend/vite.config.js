@@ -114,6 +114,9 @@ function workbenchApiMiddleware() {
        * 导致转发路径错误；这里手动判断前缀以保留完整 URL。 */
       server.middlewares.use((req, res, next) => {
         if (!req.url || !req.url.startsWith('/api')) return next()
+        // 后端端口探测是异步的；上传请求必须在探测期间保持暂停，
+        // 否则 multipart body 可能在上游建立前就被消费，Fastify 会一直等待文件结束。
+        req.pause()
         backendPort().then((port) => {
           if (port) forward(req, res, port, false)
           else fail(res, 502, '工作台后端未启动，请先启动桌面工作台')

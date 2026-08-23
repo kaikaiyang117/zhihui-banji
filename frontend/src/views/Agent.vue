@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, BarChart3, Brain, CheckCircle, CircleAlert, Copy, Download, FileSpreadsheet, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, Upload, UserPlus, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import { del, get, post, put, analyzeExcelImport, previewExcelImport, executeExcelImport, discardExcelImport, downloadExcelImportErrors } from '../api'
+import { del, get, post, put, analyzeExcelImport, previewExcelImport, discardExcelImport, downloadExcelImportErrors } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 
 const router = useRouter()
@@ -437,17 +437,7 @@ async function doImportPreview() {
 
 async function doImportExecute() {
   if (!importPreview.value) return
-  importBusy.value = true
-  importError.value = ''
-  try {
-    const result = await executeExcelImport(importFileId.value, importModule.value, importPreview.value.preview_hash, `web-${Date.now()}`)
-    importResult.value = result
-    importStep.value = 'result'
-  } catch (e) {
-    importError.value = e.detail?.message || e.message || '导入执行失败'
-  } finally {
-    importBusy.value = false
-  }
+  importError.value = '旧版导入入口仅保留预览；请在班小助中上传文件并通过统一确认链写入。'
 }
 
 async function doImportDiscard() {
@@ -685,6 +675,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <div v-if="importPreview.field_mapping?.some(m => m.mapping_status === 'needs_confirmation')" class="import-mapping-warning">
+            存在置信度不足的 AI 字段建议，本次不能直接导入；请修改原文件中的列名后重新上传。
+          </div>
+
           <details class="import-mapping-details" :open="importMappingExpanded" @toggle="importMappingExpanded = $event.currentTarget.open">
             <summary>
               <span>字段映射 ({{ importPreview.field_mapping.filter(m => m.matched).length }}/{{ importPreview.field_mapping.length }})</span>
@@ -697,15 +691,15 @@ onBeforeUnmount(() => {
                 <tr v-for="(mapping, idx) in importPreview.field_mapping" :key="idx">
                   <td>{{ mapping.source }}</td>
                   <td>{{ mapping.target || '—' }}</td>
-                  <td><span :class="mapping.matched ? 'status-ok' : 'status-off'">{{ mapping.matched ? (mapping.source_kind === 'ai' ? 'AI 建议，已校验' : '规则匹配') : '未匹配' }}</span></td>
+                  <td><span :class="mapping.mapping_status === 'needs_confirmation' ? 'status-warn' : (mapping.matched ? 'status-ok' : 'status-off')">{{ mapping.mapping_status === 'needs_confirmation' ? '待人工确认' : (mapping.matched ? (mapping.source_kind === 'ai' ? 'AI 建议，已校验' : '规则匹配') : '未匹配') }}</span></td>
                 </tr>
               </tbody>
             </table>
           </details>
 
           <div class="import-actions">
-            <button class="btn btn-primary" type="button" :disabled="importBusy" @click="doImportExecute">
-              确认导入
+            <button class="btn btn-primary" type="button" disabled title="请在班小助中使用统一确认链写入" @click="doImportExecute">
+              请在班小助中确认写入
             </button>
             <button class="btn btn-outline" type="button" :disabled="importBusy" @click="doImportDiscard">
               取消
@@ -844,6 +838,7 @@ onBeforeUnmount(() => {
 .agent-status-grid strong { font-size:14px; }
 .status-ok { color:var(--success); }
 .status-off { color:var(--text-secondary); }
+.status-warn { color:#a56a12; }
 .status-error { color:#c83b32; }
 .wechat-card { margin-top:18px; }
 .agent-session-card, .agent-usage-card { margin-top:18px; }
@@ -922,6 +917,7 @@ onBeforeUnmount(() => {
 .import-count-item span { color:var(--text-secondary); font-size:11px; }
 .import-count-item strong { font-size:16px; }
 .import-error-preview { margin-bottom:14px; }
+.import-mapping-warning { margin-bottom:14px; padding:9px 11px; border:1px solid #f0d59b; border-radius:8px; background:#fff8e8; color:#8a5b0a; font-size:12px; line-height:1.5; }
 .import-error-list { display:grid; gap:4px; max-height:160px; overflow:auto; }
 .import-error-row { display:flex; gap:8px; padding:5px 8px; border-radius:6px; background:var(--bg); font-size:12px; }
 .import-error-line { color:#c83b32; font-weight:600; white-space:nowrap; min-width:60px; }

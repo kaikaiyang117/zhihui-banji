@@ -39,7 +39,7 @@ describe('schema 与启动迁移', () => {
   it('新库完成全部迁移并创建默认上下文', () => {
     const db = makeDb();
     db.open();
-    expect(db.schemaVersion()).toBe(36);
+    expect(db.schemaVersion()).toBe(37);
     const counts = rowCounts(db.connInstance);
     expect(counts.classes).toBe(1);
     expect(counts.terms).toBe(1);
@@ -58,7 +58,7 @@ describe('schema 与启动迁移', () => {
     const first = rowCounts(db.connInstance);
     db.close();
     db.open();
-    expect(db.schemaVersion()).toBe(36);
+    expect(db.schemaVersion()).toBe(37);
     expect(rowCounts(db.connInstance)).toEqual(first);
     expect(db.connInstance.pragma('integrity_check', { simple: true })).toBe('ok');
   });
@@ -131,8 +131,10 @@ describe('备份与恢复', () => {
 describe('迁移中断恢复', () => {
   it('迁移失败后版本停留在失败前，修复后重启成功', () => {
     const original36 = schemaModule.MIGRATIONS[36];
+    const original37 = schemaModule.MIGRATIONS[37];
     try {
       delete schemaModule.MIGRATIONS[36];
+      delete schemaModule.MIGRATIONS[37];
       const partial = makeDb();
       partial.open();
       expect(partial.schemaVersion()).toBe(35);
@@ -150,11 +152,13 @@ describe('迁移中断恢复', () => {
       probe.close();
 
       schemaModule.MIGRATIONS[36] = original36;
+      schemaModule.MIGRATIONS[37] = original37;
       const fixed = makeDb();
       fixed.open();
-      expect(fixed.schemaVersion()).toBe(36);
+      expect(fixed.schemaVersion()).toBe(37);
     } finally {
       schemaModule.MIGRATIONS[36] = original36;
+      schemaModule.MIGRATIONS[37] = original37;
     }
   });
 });

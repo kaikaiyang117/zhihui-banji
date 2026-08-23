@@ -18,6 +18,7 @@ import {
   getEvent, getFocus, saveDailyAttendance,
 } from '../services/p0Service.js';
 import { buildRollCallRecords, getSession, deleteSession } from './tools/fieldOperations.js';
+import { executeImportPlan } from '../excel/imports/importPlanService.js';
 
 export { ActionError };
 
@@ -251,6 +252,23 @@ function executeOperation(
   throw new ActionError('写入工具不存在');
 }
 
+async function executeOperationAsync(
+  toolName: string, args: Record<string, unknown>, actionId: number, conn: Database,
+  action: Record<string, unknown>, sessionId: string, actorId: string,
+): Promise<Record<string, unknown>> {
+  if (toolName !== 'execute_excel_import') return executeOperation(toolName, args, actionId, conn);
+  const classId = Number(action.class_id);
+  const termId = Number(action.term_id);
+  const result = await executeImportPlan({
+    id: String(args.plan_id), previewHash: String(args.preview_hash),
+    requestId: String(args.request_id ?? `excel-action-${actionId}`),
+    access: {
+      ownerId: actorId, channel: String(action.channel ?? 'web'), sessionId, classId, termId,
+    }, conn,
+  });
+  return result;
+}
+
 function verifyOperation(
   toolName: string, args: Record<string, unknown>, outcome: Record<string, unknown>, conn: Database,
 ): Record<string, unknown> {
@@ -407,6 +425,37 @@ export function executeConfirmed(
   };
 }
 
+/** 异步确认执行入口，供 Excel Artifact 适配器使用；普通 Agent 写工具继续复用同步入口。 */
+export async function executeConfirmedAsync(
+  actionId: number, options: { sessionId: string; actorId: string; conn?: Database },
+): Promise<Record<string, unknown>> {
+  const conn = connOf(options.conn);
+  const { item } = getPending(actionId, options.sessionId, options.actorId, conn);
+  if (String(item.status) === 'executed') {
+    const result = JSON.parse(String(item.result_json ?? '{}')) as Record<string, unknown>;
+    return { id: item.id, status: 'executed', result, verification: result.verification ?? null, duplicate: true };
+  }
+  if (String(item.status) !== 'confirmed') throw new ActionError('操作尚未确认或已失效');
+  const backupFile = getDb().createBackupSync(`agent-action-${item.id}`);
+  const args = argsOf(item);
+  try {
+    const result = await executeOperationAsync(
+      String(item.tool_name), args, Number(item.id), conn, item, options.sessionId, options.actorId,
+    );
+    conn.prepare(
+      "UPDATE agent_actions SET status='executed', backup_file=?, result_json=?, executed_at=? WHERE id=?",
+    ).run(backupFile, JSON.stringify(result), nowStamp(), item.id);
+    return { id: item.id, status: 'executed', result, verification: result.verification ?? null, backup_file: backupFile, duplicate: false };
+  } catch (error) {
+    try {
+      conn.prepare(
+        "UPDATE agent_actions SET status='failed', backup_file=?, result_json=?, executed_at=? WHERE id=?",
+      ).run(backupFile, JSON.stringify({ error: String((error as Error).message) }), nowStamp(), item.id);
+    } catch { /* 状态落库失败不掩盖原始错误 */ }
+    throw new ActionError(`写入失败，已保留备份：${(error as Error).message}`);
+  }
+}
+
 /** 确认（可选 token 复核）；已执行时幂等返回。 */
 export function confirmAction(
   actionId: number, options: { sessionId: string; actorId: string; token?: string; conn?: Database },
@@ -432,6 +481,44 @@ export function confirmAction(
     "UPDATE agent_actions SET status='confirmed', confirmed_at=? WHERE id=? AND status='pending'",
   ).run(nowStamp(), item.id);
   return executeConfirmed(Number(item.id), { sessionId: options.sessionId, actorId: options.actorId, conn });
+}
+
+export async function confirmActionAsync(
+  actionId: number, options: { sessionId: string; actorId: string; token?: string; conn?: Database },
+): Promise<Record<string, unknown>> {
+  const conn = connOf(options.conn);
+  const { item } = getPending(actionId, options.sessionId, options.actorId, conn);
+  markExpired(item, conn);
+  if (String(item.status) !== 'pending') {
+    if (String(item.status) === 'executed') {
+      const result = JSON.parse(String(item.result_json ?? '{}')) as Record<string, unknown>;
+      return { id: item.id, status: 'executed', result, verification: result.verification ?? null, duplicate: true };
+    }
+    throw new ActionError('该操作已失效，请重新发起');
+  }
+  const token = String(options.token ?? '').trim().toUpperCase();
+  if (token && tokenHash(token, String(item.arguments_hash)) !== String(item.confirmation_hash)) {
+    throw new ActionError('确认码不正确，实际参数未被执行');
+  }
+  const transitioned = conn.prepare(
+    "UPDATE agent_actions SET status='confirmed', confirmed_at=? WHERE id=? AND status='pending'",
+  ).run(nowStamp(), item.id);
+  if (transitioned.changes !== 1) {
+    const current = conn.prepare('SELECT status, result_json FROM agent_actions WHERE id=?').get(item.id) as Record<string, unknown> | undefined;
+    if (String(current?.status) === 'executed') {
+      const result = JSON.parse(String(current?.result_json ?? '{}')) as Record<string, unknown>;
+      return { id: item.id, status: 'executed', result, verification: result.verification ?? null, duplicate: true };
+    }
+    throw new ActionError('该操作正在处理中，请稍后查看结果');
+  }
+  if (String(item.tool_name) === 'execute_excel_import') {
+    return executeConfirmedAsync(Number(item.id), {
+      sessionId: options.sessionId, actorId: options.actorId, conn,
+    });
+  }
+  return executeConfirmed(Number(item.id), {
+    sessionId: options.sessionId, actorId: options.actorId, conn,
+  });
 }
 
 export function cancelAction(
@@ -476,6 +563,34 @@ export function handleConfirmation(
   if (CONFIRM_WORDS.has(normalized)) {
     try {
       const result = confirmAction(Number(pending.id), {
+        sessionId: options.sessionId, actorId: options.actorId, conn,
+      });
+      return [true, successMessage(String(pending.tool_name), result)];
+    } catch (error) {
+      if (error instanceof ActionError) {
+        return [true, `班小助没有执行这次操作：${error.message}`];
+      }
+      throw error;
+    }
+  }
+  if (CANCEL_WORDS.has(normalized)) {
+    cancelAction(Number(pending.id), { sessionId: options.sessionId, actorId: options.actorId, conn });
+    return [true, '已取消这次待确认操作，没有修改业务数据。'];
+  }
+  return [true, `${String(pending.preview ?? '')} 请先回复“确认”或“取消”。`];
+}
+
+/** 异步聊天确认入口：Excel 导入需要等待 Artifact 读取、适配器执行和写后验证。 */
+export async function handleConfirmationAsync(
+  text: string, options: { sessionId: string; actorId: string; channel: string; conn?: Database },
+): Promise<[boolean, string]> {
+  const conn = connOf(options.conn);
+  const pending = pendingForSession(options.sessionId, options.actorId, conn);
+  if (!pending) return [false, ''];
+  const normalized = stripTrailingPunctuation(String(text ?? '').replace(/\s+/g, '').trim().toLowerCase());
+  if (CONFIRM_WORDS.has(normalized)) {
+    try {
+      const result = await confirmActionAsync(Number(pending.id), {
         sessionId: options.sessionId, actorId: options.actorId, conn,
       });
       return [true, successMessage(String(pending.tool_name), result)];
