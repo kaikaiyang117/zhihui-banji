@@ -1,4 +1,4 @@
-/* AGENT-01 凯凯 Runner：以 LangGraph 状态图表达模型+工具循环。
+/* AGENT-01 班小助 Runner：以 LangGraph 状态图表达模型+工具循环。
  * 公开 API（chat/chatStream）遵循统一 Agent 执行契约，
  * 内部节点复刻：确定性直接工具、计划（确定性/模型）、执行（条件/引用/一次重试）、
  * 空批量恢复一次、失败重建一次、重试熔断、最终回答流式。
@@ -835,7 +835,7 @@ function planFailureAnswer(
 }
 
 function toolFailureMessage(): string {
-  return '凯凯尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。';
+  return '班小助尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。';
 }
 
 function assistantToolMessage(response: ModelResponse): Record<string, unknown> {

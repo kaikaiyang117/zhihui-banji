@@ -5,6 +5,7 @@ import { getDb } from './context.js';
 import { getRows } from './sheets.js';
 import { todayString } from './clock.js';
 import { pyRound } from './scores.js';
+import { scopeFilenamePrefix } from './filename.js';
 
 export const SHEETS: readonly string[] = ['体重体脂追踪', '运动记录', '睡眠记录', '饮食记录'];
 
@@ -409,7 +410,7 @@ export async function exportSummary(
   const buffer = await wb.xlsx.writeBuffer();
   return {
     buffer: Buffer.from(buffer),
-    filename: `个人健康汇总-${data.period_start}-${data.period_end}.xlsx`,
+    filename: `${scopeFilenamePrefix()}-个人健康汇总-${data.period_start}-${data.period_end}.xlsx`,
   };
 }
 

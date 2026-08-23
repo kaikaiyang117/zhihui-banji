@@ -60,7 +60,7 @@ async function saveReview() { await post('/api/health/reviews', reviewForm.value
 async function saveReminder() { await post('/api/health/reminders', reminderForm.value); message.value = '健康提醒设置已保存'; await load() }
 async function exportSummary() {
   const params = new URLSearchParams({ period_type: reviewForm.value.period_type })
-  await download(`/api/health/summary/export?${params}`, '个人健康汇总.xlsx')
+  await download(`/api/health/summary/export?${params}`)
 }
 
 onMounted(load)

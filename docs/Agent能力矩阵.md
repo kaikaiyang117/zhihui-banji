@@ -51,7 +51,7 @@
 | 登记学生选科 | `scores.apply_sichuan_312_preset`、`save_student_subjects_batch` | 无 | 是 | 否 | 否 | 网页教师主动写入；支持批量操作并记录审计，不开放给Agent | 系统已接入 |
 | 查询统一工作项 | `work_items.list_work_items` → `get_tasks_list` | `tasks_list` | 是 | 是 | 是 | 只读；默认返回未关闭事项 | 已接入 |
 | 查询家校沟通 | `get_communications_list` | `communications_list` | 是 | 是 | 是 | 只读，隐藏家长电话 | 已接入 |
-| 查询校历 | `get_school_calendar` → `school_calendar.query_calendar` | `school_calendar_query` | 是 | 是 | 是 | 只读；按当前班级/学期返回日期安排 | 已接入 |
+| 查询校历 | `get_school_calendar` → `school_calendar.query_calendar` | `school_calendar_query` | 是 | 是 | 是 | 只读；按当前学校学期返回日期安排，班级/学期上下文用于权限校验 | 已接入 |
 | 查询课程表与指定日期课程 | `timetable.listTimetable`、`timetable.daySchedule` | 无 | 是 | 否 | 否 | 只读；按当前班级/学期返回课程、教师、教室和临时变更 | 已接入 |
 | 现场课堂点名预览 | `fieldOperations.startRollCall` | `start_roll_call` | 是 | 是 | 是 | 只读；自动绑定单一教师班级，日期/场景需校验 | 开发中 |
 | 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
@@ -93,7 +93,7 @@
 | `scores_summary` | 无 | `student_id`, `exam_name`, `limit` | 使用结构化成绩服务 |
 | `tasks_list` | 无 | `status`, `student_id`, `limit` | 默认查询未关闭事项 |
 | `communications_list` | 无 | `status`, `student_id`, `limit` | 隐藏家长电话 |
-| `school_calendar_query` | 无 | `date_from`, `date_to`, `day_type`, `limit` | 使用当前班级/学期校历，不返回学生隐私 |
+| `school_calendar_query` | 无 | `date_from`, `date_to`, `day_type`, `limit` | 使用当前学校学期共享校历，班级/学期上下文用于权限校验，不返回学生隐私 |
 | `create_task` | `title` | `student_id`, `owner`, `scheduled_at`, `due_at`, `priority`, `notes` | `student_id` 兼容数据库 ID 或学生学号；单条，先预览再确认，执行后验证落库 |
 | `record_communication` | `student_id`, `communicated_at`, `method`, `reason`, `summary` | `feedback`, `agreement`, `followup_at`, `status`, `event_id` | 单条，先预览再确认 |
 | `save_attendance` | `student_id`, `date`, `status` | `scene`, `reason`, `arrive`, `leave`, `note` | 单条，先预览再确认 |

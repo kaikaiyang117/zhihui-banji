@@ -1,3 +1,5 @@
+export const DEFAULT_SCHOOL_NAME = '汶川县七一映秀中学'
+
 // 各工作表「添加记录」弹窗的字段配置
 export const SHEET_FIELDS = {
   '考勤管理': [
@@ -164,7 +166,7 @@ export const SHEET_FIELDS = {
 // 顶部 Tab / 侧边导航路由配置
 export const NAV = [
   {
-    key: 'teacher', icon: 'School', title: '教师工作台', school: '汶川县七一映秀中学',
+    key: 'teacher', icon: 'School', title: '教师工作台', school: DEFAULT_SCHOOL_NAME,
     groups: [
       { title: '工作台', items: [
         { page: 'dashboard', icon: 'LayoutDashboard', label: '今日工作台' },

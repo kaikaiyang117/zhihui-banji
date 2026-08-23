@@ -7,6 +7,9 @@ import {
   DeviceError, DEVICE_TTL_DAYS,
 } from '../../services/devices.js';
 import { listAudits } from '../../services/audit.js';
+import {
+  getSystemSettings, SystemSettingsError, updateSystemSettings,
+} from '../../services/systemSettings.js';
 
 function requireLocal(request: FastifyRequest, reply: FastifyReply): boolean {
   if (!isLocalHost(request.ip)) {
@@ -17,6 +20,35 @@ function requireLocal(request: FastifyRequest, reply: FastifyReply): boolean {
 }
 
 export function registerSystemSecurityRoutes(app: FastifyInstance): void {
+  app.get('/api/system/settings', {
+    schema: { tags: ['system'] },
+  }, async () => getSystemSettings());
+
+  app.put('/api/system/settings', {
+    schema: {
+      tags: ['system'],
+      body: {
+        type: 'object',
+        required: ['school_name'],
+        additionalProperties: false,
+        properties: {
+          school_name: { type: 'string', minLength: 1, maxLength: 120 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!requireLocal(request, reply)) return reply;
+    try {
+      const body = request.body as { school_name?: unknown };
+      return updateSystemSettings({ schoolName: body.school_name });
+    } catch (error) {
+      if (error instanceof SystemSettingsError) {
+        return reply.status(400).send({ detail: error.message });
+      }
+      throw error;
+    }
+  });
+
   app.get('/api/system/access-info', {
     schema: { tags: ['system'] },
   }, async (request) => {

@@ -160,8 +160,10 @@ export function daySchedule(dateValue: string, options: ScopeOptions = {}): Reco
   const week = weekNumber(date, current);
   const weekday = dayOfDate(date);
   const calendar = conn.prepare(
-    'SELECT * FROM school_calendar_days WHERE class_id=? AND term_id=? AND calendar_date=?',
-  ).get(classId, termId, date) as Record<string, unknown> | undefined;
+    `SELECT d.* FROM school_calendar_days d
+     JOIN terms t ON t.academic_term_id=d.academic_term_id
+     WHERE t.id=? AND t.class_id=? AND d.calendar_date=?`,
+  ).get(termId, classId, date) as Record<string, unknown> | undefined;
   const periods = periodRows(conn, classId, termId);
   const base = entryRows(conn, classId, termId)
     .filter(row => Number(row.weekday) === weekday && matchesWeek(row, week));

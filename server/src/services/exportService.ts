@@ -9,6 +9,7 @@ import * as funds from './funds.js';
 import * as comments from './comments.js';
 import * as health from './health.js';
 import { scoreSummary, ScoreError } from './scores.js';
+import { filenamePart, scopedExportFilename } from './filename.js';
 
 export interface ExportResult {
   buffer: Buffer;
@@ -25,7 +26,7 @@ export async function exportStudents(): Promise<ExportResult> {
   ).all(classId, termId) as Array<Record<string, unknown>>;
   const data = rows.map((row) => STUDENT_COLUMNS.map((key) => row[key] ?? ''));
   const buffer = await sheetBytes('学生信息', STUDENT_COLUMNS, data);
-  return { buffer, filename: '学生信息总表.xlsx' };
+  return { buffer, filename: scopedExportFilename('学生信息总表', 'xlsx', conn) };
 }
 
 export async function exportSheet(
@@ -37,7 +38,7 @@ export async function exportSheet(
     const headers = ['日期', '星期', '学号', '姓名', '状态', '到校时间', '离校时间',
       '原因', '备注', '考勤场景'];
     const buffer = await sheetBytes(sheet, headers, rows.map((row) => row['data'] as unknown[]));
-    return { buffer, filename: `${sheet}.xlsx` };
+    return { buffer, filename: scopedExportFilename(sheet) };
   }
   if (sheet === '日常行为积分') return exportPoints(options);
   if (sheet === '班费管理') return exportFunds();
@@ -46,7 +47,7 @@ export async function exportSheet(
   const headers = meta ? meta.headers : [];
   const rows = derive(sheet, getRows(sheet));
   const buffer = await sheetBytes(sheet, headers, rows.map((row) => row.data));
-  return { buffer, filename: `${sheet}.xlsx` };
+  return { buffer, filename: scopedExportFilename(sheet) };
 }
 
 export async function exportPoints(options: { academicYear?: string } = {}): Promise<ExportResult> {
@@ -60,7 +61,7 @@ export async function exportPoints(options: { academicYear?: string } = {}): Pro
     item['reversal_reason'] ?? '', item['source_label'] ?? '', item['rule_name'] ?? '',
   ]);
   const buffer = await sheetBytes('行为积分流水', headers, rows);
-  return { buffer, filename: '行为积分流水.xlsx' };
+  return { buffer, filename: scopedExportFilename('行为积分流水') };
 }
 
 export async function exportFunds(): Promise<ExportResult> {
@@ -68,7 +69,7 @@ export async function exportFunds(): Promise<ExportResult> {
     '备注', '状态', '结算期间', '处理原因', '来源', '凭证数'];
   const rows = funds.exportRows();
   const buffer = await sheetBytes('班费分类账', headers, rows);
-  return { buffer, filename: '班费分类账.xlsx' };
+  return { buffer, filename: scopedExportFilename('班费分类账') };
 }
 
 export async function exportComments(): Promise<ExportResult> {
@@ -76,7 +77,7 @@ export async function exportComments(): Promise<ExportResult> {
     '审核时间', '审核人', '审核意见', '发送时间', '交付方式', '备注', '来源'];
   const rows = comments.exportRows();
   const buffer = await sheetBytes('学生评语', headers, rows);
-  return { buffer, filename: '学生评语.xlsx' };
+  return { buffer, filename: scopedExportFilename('学生评语') };
 }
 
 export async function exportSeating(): Promise<ExportResult> {
@@ -99,7 +100,7 @@ export async function exportSeating(): Promise<ExportResult> {
   }
   const headers = Array.from({ length: cols }, (_, index) => `第${index + 1}列`);
   const buffer = await sheetBytes('座位表', headers, grid);
-  return { buffer, filename: '座位表.xlsx' };
+  return { buffer, filename: scopedExportFilename('座位表', 'xlsx', conn) };
 }
 
 export async function exportScoreReport(exam: string): Promise<ExportResult> {
@@ -141,7 +142,7 @@ export async function exportScoreReport(exam: string): Promise<ExportResult> {
   }
   const name = String(selected['name'] ?? '');
   const buffer = await sheetBytes(`成绩汇总-${name}`, headers, data);
-  return { buffer, filename: `成绩汇总_${name}.xlsx` };
+  return { buffer, filename: scopedExportFilename(`成绩汇总-${filenamePart(name, '未命名考试')}`) };
 }
 
 export async function exportAttendanceReport(
@@ -180,7 +181,7 @@ export async function exportAttendanceReport(
   data.push(['合计', '全部场景', total['出勤'], total['迟到'], total['请假'],
     total['早退'], total['缺勤'], total['总记录']]);
   const buffer = await sheetBytes('考勤汇总', headers, data);
-  return { buffer, filename: '考勤汇总.xlsx' };
+  return { buffer, filename: scopedExportFilename('考勤汇总') };
 }
 
 export async function exportHealthSummary(

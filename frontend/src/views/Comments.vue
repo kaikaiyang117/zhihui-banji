@@ -176,7 +176,7 @@ async function openVersions(item) {
     versions.value = (await get(`/api/comments/entries/${item.id}/versions`)).versions || []
   } catch (error) { message.value = `版本加载失败：${error.message}` }
 }
-function exportComments() { download('/api/export/sheet/评语管理', '学生评语.xlsx') }
+function exportComments() { download('/api/export/sheet/评语管理') }
 onMounted(() => {
   if (route.query.student_id) filters.value.student_id = String(route.query.student_id)
   load()

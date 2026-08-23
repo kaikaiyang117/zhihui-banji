@@ -33,6 +33,8 @@ const count = (sql, ...params) => Number(db.prepare(sql).get(...params).count ??
 const checks = [
   ['进行中班级', count(`SELECT COUNT(*) AS count FROM classes WHERE status='使用中'`), 1],
   ['进行中学期', count(`SELECT COUNT(*) AS count FROM terms WHERE status='进行中'`), 1],
+  ['学校学期', count(`SELECT COUNT(*) AS count FROM academic_terms`), 1],
+  ['共享校历日期', count(`SELECT COUNT(*) AS count FROM school_calendar_days`), 2],
   ['学生', count(`SELECT COUNT(*) AS count FROM students WHERE deleted_at=''`), profile === 'minimal' || profile === 'edge' ? 8 : 1],
   ['课程节次', count(`SELECT COUNT(*) AS count FROM timetable_periods WHERE enabled=1`), profile === 'minimal' || profile === 'edge' ? 9 : 18],
   ['课程记录', count(`SELECT COUNT(*) AS count FROM timetable_entries WHERE status='启用'`), profile === 'minimal' || profile === 'edge' ? 48 : 96],
@@ -43,6 +45,23 @@ const checks = [
 ];
 if (profile === 'demo') {
   checks.push(['教师关联班级', count(`SELECT COUNT(*) AS count FROM teacher_classes WHERE teacher_name='default' AND enabled=1`), 2]);
+  checks.push(['高二1班在读人数', count(`
+    SELECT COUNT(*) AS count
+    FROM student_enrollments e
+    JOIN students s ON s.id=e.student_id
+    JOIN classes c ON c.id=e.class_id
+    WHERE c.name='高二1班' AND e.status='在读' AND s.deleted_at=''
+  `), 50]);
+  checks.push(['高二2班在读人数', count(`
+    SELECT COUNT(*) AS count
+    FROM student_enrollments e
+    JOIN students s ON s.id=e.student_id
+    JOIN classes c ON c.id=e.class_id
+    WHERE c.name='高二2班' AND e.status='在读' AND s.deleted_at=''
+  `), 50]);
+  checks.push(['班级共享学校学期', count(`SELECT COUNT(*) AS count FROM (
+    SELECT academic_term_id FROM terms GROUP BY academic_term_id HAVING COUNT(*) >= 2
+  )`), 1]);
   checks.push(['工作入口', count(`SELECT COUNT(*) AS count FROM tool_links WHERE deleted_at=''`), 1]);
 }
 if (profile === 'edge') {

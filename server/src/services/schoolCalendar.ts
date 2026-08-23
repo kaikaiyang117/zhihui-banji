@@ -127,9 +127,9 @@ function boolValue(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
-function scopeOf(options: { write?: boolean; conn?: Database } = {}): [number, number, ScopeInfo] {
+function scopeOf(options: { write?: boolean; conn?: Database } = {}): [number, number, number, ScopeInfo] {
   const scope = getCurrentScope(options);
-  return [Number(scope.class_id), Number(scope.term_id), scope];
+  return [Number(scope.class_id), Number(scope.term_id), Number(scope.academic_term_id), scope];
 }
 
 function termBound(value: unknown): string | null {
@@ -321,7 +321,7 @@ export interface CalendarImportPreviewResult {
 
 export async function previewImport(fileBytes: Buffer, filename = ''): Promise<CalendarImportPreviewResult> {
   const conn = getDb().connInstance;
-  const [classId, termId, scope] = scopeOf({ conn });
+  const [, , academicTermId, scope] = scopeOf({ conn });
   const result: CalendarImportPreviewResult = {
     filename,
     format: '',
@@ -347,8 +347,8 @@ export async function previewImport(fileBytes: Buffer, filename = ''): Promise<C
   const [start, end] = termBounds(scope);
   const existing = new Map<string, Record<string, unknown>>();
   for (const row of conn.prepare(
-    'SELECT * FROM school_calendar_days WHERE class_id=? AND term_id=? ORDER BY calendar_date',
-  ).all(classId, termId) as Array<Record<string, unknown>>) {
+    'SELECT * FROM school_calendar_days WHERE academic_term_id=? ORDER BY calendar_date',
+  ).all(academicTermId) as Array<Record<string, unknown>>) {
     existing.set(String(row.calendar_date), row);
   }
   const seen = new Map<string, Record<string, unknown>>();
@@ -418,11 +418,14 @@ export function commitImport(
 ): Record<string, unknown> {
   const conn = getDb().connInstance;
   const [classId, termId] = scopeIds({ write: true, conn });
+  const academicTermId = Number((conn.prepare(
+    'SELECT academic_term_id FROM terms WHERE id=? AND class_id=?',
+  ).get(termId, classId) as { academic_term_id: number }).academic_term_id);
   const normalizedRequestId = text(requestId) || calendarRequestId();
   const previous = conn.prepare(
     `SELECT imported, updated, skipped, conflict_count, error_count
-     FROM school_calendar_import_runs WHERE class_id=? AND term_id=? AND request_id=?`,
-  ).get(classId, termId, normalizedRequestId) as Record<string, unknown> | undefined;
+     FROM school_calendar_import_runs WHERE academic_term_id=? AND request_id=?`,
+  ).get(academicTermId, normalizedRequestId) as Record<string, unknown> | undefined;
   if (previous) {
     return {
       idempotent: true,
@@ -467,8 +470,8 @@ export function commitImport(
       seen.add(item.date);
       const current = conn.prepare(
         `SELECT id, day_type, title, is_school_day, note FROM school_calendar_days
-         WHERE class_id=? AND term_id=? AND calendar_date=?`,
-      ).get(classId, termId, item.date) as Record<string, unknown> | undefined;
+         WHERE academic_term_id=? AND calendar_date=?`,
+      ).get(academicTermId, item.date) as Record<string, unknown> | undefined;
       if (current && ['day_type', 'title', 'is_school_day', 'note']
         .every((key) => String(current[key] || '') === String((item as unknown as Record<string, unknown>)[key] || ''))) {
         result.skipped += 1;
@@ -484,10 +487,10 @@ export function commitImport(
       } else {
         conn.prepare(
           `INSERT INTO school_calendar_days
-           (class_id, term_id, calendar_date, day_type, title, is_school_day, note, source, source_filename, source_row)
-           VALUES(?,?,?,?,?,?,?,?,?,?)`,
+           (academic_term_id, calendar_date, day_type, title, is_school_day, note, source, source_filename, source_row)
+           VALUES(?,?,?,?,?,?,?,?,?)`,
         ).run(
-          classId, termId, item.date, item.day_type, item.title, item.is_school_day, item.note,
+          academicTermId, item.date, item.day_type, item.title, item.is_school_day, item.note,
           'import', filename || '', item.row,
         );
         result.imported += 1;
@@ -495,10 +498,10 @@ export function commitImport(
     }
     conn.prepare(
       `INSERT INTO school_calendar_import_runs
-       (class_id, term_id, request_id, filename, imported, updated, skipped, conflict_count, error_count)
-       VALUES(?,?,?,?,?,?,?,?,?)`,
+       (academic_term_id, request_id, filename, imported, updated, skipped, conflict_count, error_count)
+       VALUES(?,?,?,?,?,?,?,?)`,
     ).run(
-      classId, termId, normalizedRequestId, filename || '',
+      academicTermId, normalizedRequestId, filename || '',
       result.imported, result.updated, result.skipped, result.conflict_count, result.error_count,
     );
     audit.record('school_calendar', normalizedRequestId, 'import', {
@@ -515,7 +518,7 @@ export function commitImport(
 
 export function listCalendar(dateFrom = '', dateTo = '', month = ''): Record<string, unknown> {
   const conn = getDb().connInstance;
-  const [classId, termId, scope] = scopeOf({ conn });
+  const [classId, termId, academicTermId, scope] = scopeOf({ conn });
   let from = text(dateFrom).slice(0, 10);
   let to = text(dateTo).slice(0, 10);
   if (month && /^20\d{2}-\d{2}$/.test(month)) {
@@ -530,8 +533,8 @@ export function listCalendar(dateFrom = '', dateTo = '', month = ''): Record<str
     date28.setUTCDate(date28.getUTCDate() - 1);
     to = isoString(date28);
   }
-  const where = ['class_id=?', 'term_id=?'];
-  const params: unknown[] = [classId, termId];
+  const where = ['academic_term_id=?'];
+  const params: unknown[] = [academicTermId];
   if (from) {
     where.push('calendar_date>=?');
     params.push(from);
@@ -561,10 +564,10 @@ export function listCalendar(dateFrom = '', dateTo = '', month = ''): Record<str
 
 export function termCalendar(): Record<string, unknown> {
   const conn = getDb().connInstance;
-  const [classId, termId, scope] = scopeOf({ conn });
+  const [classId, termId, academicTermId, scope] = scopeOf({ conn });
   const rows = conn.prepare(
-    'SELECT * FROM school_calendar_days WHERE class_id=? AND term_id=? ORDER BY calendar_date',
-  ).all(classId, termId) as Array<Record<string, unknown>>;
+    'SELECT * FROM school_calendar_days WHERE academic_term_id=? ORDER BY calendar_date',
+  ).all(academicTermId) as Array<Record<string, unknown>>;
   for (const row of rows) row.is_school_day = Boolean(row.is_school_day);
 
   const [scopeStart, scopeEnd] = termBounds(scope);
@@ -667,6 +670,9 @@ function saveEntry(
 ): { id: number } {
   const conn = getDb().connInstance;
   const [classId, termId] = scopeIds({ write: true, conn });
+  const academicTermId = Number((conn.prepare(
+    'SELECT academic_term_id FROM terms WHERE id=? AND class_id=?',
+  ).get(termId, classId) as { academic_term_id: number }).academic_term_id);
   const item = validateEntry({
     date: calendarDate, day_type: dayType, title, is_school_day: isSchoolDay, note,
   });
@@ -674,8 +680,8 @@ function saveEntry(
     let resultId: number;
     if (entryId) {
       const current = conn.prepare(
-        'SELECT id FROM school_calendar_days WHERE id=? AND class_id=? AND term_id=?',
-      ).get(entryId, classId, termId) as { id: number } | undefined;
+        'SELECT id FROM school_calendar_days WHERE id=? AND academic_term_id=?',
+      ).get(entryId, academicTermId) as { id: number } | undefined;
       if (!current) throw new CalendarError('校历记录不存在');
       conn.prepare(
         `UPDATE school_calendar_days SET calendar_date=?, day_type=?, title=?, is_school_day=?, note=?,
@@ -685,9 +691,9 @@ function saveEntry(
       resultId = entryId;
     } else {
       const inserted = conn.prepare(
-        `INSERT INTO school_calendar_days(class_id, term_id, calendar_date, day_type, title, is_school_day, note, source)
-         VALUES(?,?,?,?,?,?,?,'manual')`,
-      ).run(classId, termId, item.date, item.day_type, item.title, item.is_school_day, item.note);
+        `INSERT INTO school_calendar_days(academic_term_id, calendar_date, day_type, title, is_school_day, note, source)
+         VALUES(?,?,?,?,?,?, 'manual')`,
+      ).run(academicTermId, item.date, item.day_type, item.title, item.is_school_day, item.note);
       resultId = Number(inserted.lastInsertRowid);
     }
     audit.record('school_calendar', resultId, entryId ? 'update' : 'create', {

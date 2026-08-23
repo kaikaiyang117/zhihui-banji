@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="school-calendar-page">
     <div class="page-title-bar">
-      <div><div class="page-title">校历管理</div><div class="page-subtitle">{{ scope.term_name || '当前学期' }} · {{ scope.start_date || '未设置' }} 至 {{ scope.end_date || '未设置' }} · 按完整学期管理校历</div></div>
+      <div><div class="page-title">校历管理</div><div class="page-subtitle">{{ scope.term_name || '当前学期' }} · {{ scope.start_date || '未设置' }} 至 {{ scope.end_date || '未设置' }} · 同一学校学期的班级共享校历</div></div>
       <div class="toolbar" style="margin-bottom:0">
         <input ref="fileInput" type="file" accept=".xlsx,.xlsm" hidden @change="previewFile">
         <button class="btn btn-outline" :disabled="importing" @click="pickFile"><FileUp :size="14" /> {{ importing ? '解析中…' : '导入校历' }}</button>
@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
             <div class="term-week-header"><span>周次</span><span v-for="label in ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']" :key="label">{{ label }}</span></div>
             <div v-for="week in weeks" :key="week.week_no" class="term-week-row" :class="{ 'is-current-week': week.is_current }">
               <div class="term-week-label"><strong>第{{ week.week_no }}周</strong><small>{{ week.start_date.slice(5) }}–{{ week.end_date.slice(5) }}</small></div>
-              <button v-for="day in week.days" :key="day.date" type="button" class="term-day" :class="{ 'is-outside': !day.in_term, 'is-today': day.is_today, 'is-school': day.recorded && day.is_school_day, 'is-holiday': day.recorded && !day.is_school_day, 'is-special': day.recorded && (day.title || !['上课日', '放假日'].includes(day.day_type)) }" :disabled="!day.in_term" :title="day.in_term ? `${day.date} · ${day.title || day.day_type}` : '不在当前学期'" @click="openTermDay(day)">
+              <button v-for="day in week.days" :key="day.date" type="button" class="term-day" :class="{ 'is-outside': !day.in_term, 'is-today': day.is_today, 'is-school': day.recorded && day.is_school_day, 'is-holiday': day.recorded && !day.is_school_day, 'is-special': day.recorded && (day.title || !['上课日', '放假日'].includes(day.day_type)) }" :disabled="!day.in_term" :aria-label="day.in_term ? `${day.date} · ${day.title || day.day_type}` : '不在当前学期'" @click="openTermDay(day)">
                 <span class="term-day-number">{{ day.day }}</span>
                 <strong v-if="day.in_term">{{ day.title || day.day_type }}</strong>
                 <small v-if="day.in_term && day.note">{{ day.note }}</small>
@@ -170,7 +170,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <section class="card calendar-import-help"><div class="card-title"><FileUp :size="16" /> 导入说明</div><p>支持参考学校常见的“月份 / 周次 / 星期一至星期日”矩阵，也支持包含“日期、类型、事项、是否上课”的明细表。导入会先预览，不会直接修改数据库；当前学期范围外的日期会单独提示。</p></section>
+    <section class="card calendar-import-help"><div class="card-title"><FileUp :size="16" /> 导入说明</div><p>支持参考学校常见的“月份 / 周次 / 星期一至星期日”矩阵，也支持包含“日期、类型、事项、是否上课”的明细表。导入会先预览，不会直接修改数据库；当前学期范围外的日期会单独提示。校历按学校学期保存，同一学期下的不同班级会看到同一份校历。</p></section>
 
     <div v-if="showEditor" class="modal-overlay show" @click.self="showEditor = false"><section class="modal calendar-entry-modal"><div class="modal-title-row"><div><div class="modal-kicker">{{ editingId ? '修改校历日期' : '添加校历日期' }}</div><h3>{{ form.calendar_date || '选择日期' }}</h3></div><button type="button" class="calendar-modal-close" aria-label="关闭" @click="showEditor = false"><X :size="18" /></button></div><div class="form-grid"><label>日期<input v-model="form.calendar_date" type="date" class="form-input"></label><label>日期类型<select v-model="form.day_type" class="form-select"><option v-for="item in dayTypes" :key="item">{{ item }}</option></select></label><label class="form-grid-wide">事项<input v-model.trim="form.title" class="form-input" placeholder="例如：端午节、期中考试、班级活动"></label><label class="calendar-school-day"><input v-model="form.is_school_day" type="checkbox"> 计为上课/行课日</label><label class="form-grid-wide">备注<textarea v-model="form.note" class="form-textarea" rows="3" placeholder="可选"></textarea></label></div><div class="modal-actions"><button class="btn btn-outline" @click="showEditor = false">取消</button><button class="btn btn-primary" :disabled="saving" @click="saveEntry">{{ saving ? '保存中…' : '保存' }}</button></div></section></div>
 
@@ -197,13 +197,13 @@ onBeforeUnmount(() => {
 .term-week-header { background: var(--surface-subtle, #f8f8fa); color: var(--text-tertiary); font-size: 11px; font-weight: 600; }
 .term-week-header > span { padding: 9px 7px; text-align: center; }
 .term-week-header > span:first-child { text-align: left; }
-.term-week-row { border-top: 1px solid var(--border-light); }
+.term-week-row { min-width: 0; border-top: 1px solid var(--border-light); }
 .term-week-row.is-current-week { background: rgba(91, 106, 191, .035); }
 .term-week-label { display: grid; align-content: center; gap: 3px; padding: 7px; border-right: 1px solid var(--border-light); }
 .term-week-label strong { color: var(--text); font-size: 11px; }.term-week-label small { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
-.term-day { display: grid; align-content: center; justify-items: center; gap: 4px; min-height: 76px; padding: 7px; border: 0; border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: center; cursor: pointer; }
+.term-day { display: grid; align-content: center; justify-items: center; gap: 4px; min-width: 0; min-height: 76px; padding: 7px; border: 0; border-right: 1px solid var(--border-light); background: var(--surface); color: var(--text); text-align: center; cursor: pointer; }
 .term-day:last-child { border-right: 0; }.term-day:hover:not(:disabled) { background: var(--primary-bg); }.term-day.is-outside { background: var(--bg); color: var(--text-tertiary); cursor: default; }.term-day.is-today { box-shadow: inset 0 0 0 2px var(--primary); }.term-day.is-school { background: rgba(45, 180, 95, .065); }.term-day.is-holiday { background: rgba(235, 90, 105, .06); }.term-day.is-special { background: var(--primary-bg); }
-.term-day-number { color: var(--text-secondary); font-size: 11px; font-weight: 700; }.term-day.is-today .term-day-number { color: var(--primary); }.term-day strong { overflow: hidden; color: var(--text); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.term-day small { overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.term-day-number { color: var(--text-secondary); font-size: 11px; font-weight: 700; }.term-day.is-today .term-day-number { color: var(--primary); }.term-day strong, .term-day small { display: block; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.term-day strong { color: var(--text); font-size: 11px; font-weight: 600; }.term-day small { color: var(--text-secondary); font-size: 10px; }
 .calendar-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; color: var(--text-secondary); font-size: 11px; }
 .legend-dot { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; background: var(--success); }
 .holiday-dot { background: var(--danger); }.event-dot { background: var(--primary); }.unset-dot { background: var(--border); }

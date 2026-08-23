@@ -130,7 +130,7 @@ export function registerMig11Routes(app: FastifyInstance): void {
     ];
     const buffer = await workbook.xlsx.writeBuffer();
     reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    reply.header('Content-Disposition', "attachment; filename*=UTF-8''timetable-template.xlsx");
+    reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('课程表导入模板.xlsx')}`);
     return reply.send(Buffer.from(buffer));
   });
 }

@@ -152,7 +152,7 @@ onMounted(load)
       <div>
         <button class="btn btn-outline agent-back-button" type="button" @click="goBack"><ArrowLeft :size="14" /> 配置档案</button>
         <div class="page-title">{{ isNew ? '新建配置' : '编辑配置' }}</div>
-        <div class="page-subtitle">配置模型服务和 API Key，保存后供凯凯使用</div>
+        <div class="page-subtitle">配置模型服务和 API Key，保存后供班小助使用</div>
       </div>
     </div>
 

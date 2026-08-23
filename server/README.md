@@ -130,7 +130,7 @@ server/
 - `modelClient.ts`：`complete`/`iter_complete`（fetch + SSE 流式、reasoning/DSML、
   tool_calls、usage、超时与 401/429/5xx 单次重试退避）。
 - `sessionStore.ts`：会话 CRUD/重命名/消息压缩。
-- `prompt.ts`：凯凯小兵系统提示（业务日期注入）。
+- `prompt.ts`：班小助系统提示（业务日期注入）。
 - `toolRegistry.ts`：16 个工具（12 只读 + 4 写入确认），渠道过滤（wechat 排除敏感）、
   参数校验（invalid_arguments）、错误码体系；与 TS 业务服务逐项映射。
 - `agentService.ts`：invokeTool（渠道→确认→校验→执行→脱敏审计）、listTools/listAudits/

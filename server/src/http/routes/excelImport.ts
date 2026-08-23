@@ -131,9 +131,10 @@ export function registerExcelImportRoutes(app: FastifyInstance): void {
 
     try {
       const buffer = await buildErrorExcel(fileId, module, { owner: actor.actorId, session: sessionId, channel: actor.channel });
+      const filename = `导入错误报告-${fileId.slice(0, 8)}.xlsx`;
       return reply
         .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        .header('content-disposition', `attachment; filename="import-errors-${fileId}.xlsx"`)
+        .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`)
         .send(buffer);
     } catch (error) {
       if (error instanceof ExcelImportError) {

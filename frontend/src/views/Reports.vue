@@ -257,7 +257,7 @@ onMounted(load)
           <button class="link-button" @click="openArchive(item.id)"><span class="archive-file-icon"><FileText :size="15" /></span><span class="archive-copy"><strong>{{ item.title }}</strong><small>查看只读档案</small></span></button>
           <span class="archive-period"><small>覆盖周期</small>{{ item.period_start }} 至 {{ item.period_end }}</span>
           <span class="archive-date"><small>保存时间</small>{{ item.archived_at }}</span>
-          <button class="btn btn-sm btn-outline archive-export" @click="download(`/api/reports/archives/${item.id}/export`, `${item.title}.xlsx`)" aria-label="导出档案"><Download :size="13" /> 导出</button>
+          <button class="btn btn-sm btn-outline archive-export" @click="download(`/api/reports/archives/${item.id}/export`)" aria-label="导出档案"><Download :size="13" /> 导出</button>
         </div>
       </div>
     </section>

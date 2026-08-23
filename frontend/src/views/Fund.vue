@@ -154,7 +154,7 @@ function renderChart() {
   })
 }
 function applyFilters() { load() }
-function exportLedger() { download('/api/export/sheet/班费管理', '班费分类账.xlsx') }
+function exportLedger() { download('/api/export/sheet/班费管理') }
 function resizeChart() { if (chart) chart.resize() }
 onMounted(() => { load(); window.addEventListener('resize', resizeChart) })
 onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); if (chart) chart.dispose() })

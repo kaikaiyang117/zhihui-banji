@@ -1,4 +1,4 @@
-/* AGENT-01 LangGraph 状态定义（凯凯 KaikaiState）。
+/* AGENT-01 LangGraph 状态定义（班小助 KaikaiState）。
  * 可序列化、可版本化；不保存 API Key、微信 Token、敏感字段或隐式思维链。
  */
 import { Annotation } from '@langchain/langgraph';

@@ -131,7 +131,7 @@ export async function download(url, filename) {
   await ensureDevicePairing()
   const a = document.createElement('a')
   a.href = scopedUrl(url)
-  a.download = filename || ''
+  if (filename) a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -309,7 +309,7 @@ export async function downloadExcelImportErrors(fileId, module, sessionId = '') 
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `导入错误-${fileId.slice(0, 8)}.xlsx`
+  link.download = `导入错误报告-${fileId.slice(0, 8)}.xlsx`
   document.body.appendChild(link)
   link.click()
   link.remove()

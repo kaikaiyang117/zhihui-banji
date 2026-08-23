@@ -34,7 +34,10 @@ beforeEach(() => {
   db.open();
   setDatabase(db);
   db.connInstance.prepare("UPDATE terms SET start_date='2026-04-13', end_date='2026-07-10' WHERE id=1").run();
-  db.connInstance.prepare("INSERT INTO school_calendar_days(class_id, term_id, calendar_date, day_type, is_school_day) VALUES(1,1,'2026-04-15','上课日',1)").run();
+  db.connInstance.prepare(
+    "INSERT INTO school_calendar_days(academic_term_id, calendar_date, day_type, is_school_day) "
+      + "SELECT academic_term_id, '2026-04-15', '上课日', 1 FROM terms WHERE id=1",
+  ).run();
 });
 
 afterEach(() => {
@@ -44,8 +47,8 @@ afterEach(() => {
 });
 
 describe('课程表服务', () => {
-  it('迁移到 v29，支持固定周课表和按日解析', () => {
-    expect(schemaVersion(db.connInstance)).toBe(34);
+  it('迁移到 v36，支持固定周课表和按日解析', () => {
+    expect(schemaVersion(db.connInstance)).toBe(36);
     createPeriod({ periodNo: 1, label: '第1节', startTime: '08:00', endTime: '08:45' });
     createPeriod({ periodNo: 2, label: '第2节', startTime: '08:55', endTime: '09:40' });
     createEntry({ weekday: 3, periodNo: 1, subject: '数学', teacherName: '王老师', room: '高一1班' });

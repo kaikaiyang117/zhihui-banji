@@ -8,6 +8,7 @@ import { sheetBytes } from './exportXlsx.js';
 import * as points from './points.js';
 import * as scores from './scores.js';
 import * as workItems from './workItems.js';
+import { filenamePart, scopeFilenamePrefix } from './filename.js';
 
 export const REPORT_TYPES: Record<string, string> = {
   weekly: '班级周报',
@@ -532,5 +533,8 @@ export async function exportArchive(archiveId: number, options: { conn?: Databas
     }
   }
   const buffer = await sheetBytes('报告摘要', ['指标', '数值'], rows);
-  return { buffer, filename: `${report.title}_${report.period_start}_${report.period_end}.xlsx` };
+  return {
+    buffer,
+    filename: `${scopeFilenamePrefix(conn)}-${filenamePart(report.title, '报告')}-${filenamePart(report.period_start)}-${filenamePart(report.period_end)}.xlsx`,
+  };
 }

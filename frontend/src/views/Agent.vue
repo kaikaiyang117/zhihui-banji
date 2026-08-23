@@ -1,7 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { BarChart3, Brain, CheckCircle, CircleAlert, Copy, Download, FileSpreadsheet, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, Upload, UserPlus, X } from 'lucide-vue-next'
+import { ArrowLeft, BarChart3, Brain, CheckCircle, CircleAlert, Copy, Download, FileSpreadsheet, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, Upload, UserPlus, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { del, get, post, put, analyzeExcelImport, previewExcelImport, executeExcelImport, discardExcelImport, downloadExcelImportErrors } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
@@ -489,8 +489,9 @@ onBeforeUnmount(() => {
   <div>
     <div class="page-title-bar">
       <div>
+        <button class="btn btn-outline agent-back-button" type="button" @click="router.push('/settings')"><ArrowLeft :size="14" /> 返回系统设置</button>
         <div class="page-title">AI 设置</div>
-        <div class="page-subtitle">配置模型，让凯凯能够查询智汇·班记数据</div>
+        <div class="page-subtitle">配置模型，让班小助能够查询智汇·班记数据</div>
       </div>
     </div>
 
@@ -817,6 +818,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.agent-back-button { margin-bottom:12px; }
 .agent-profile-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; max-width:900px; margin-bottom:12px; }
 .agent-profile-heading > div { display:grid; gap:4px; }
 .agent-profile-heading strong { font-size:14px; }

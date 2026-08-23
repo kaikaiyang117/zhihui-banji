@@ -20,6 +20,7 @@ export interface ScopeInfo {
   grade: string;
   class_status: string;
   term_id: number;
+  academic_term_id: number;
   term_name: string;
   start_date: string;
   end_date: string;
@@ -46,6 +47,19 @@ export function resetRequestScope(): void {
 
 function connOf(conn?: Database): Database {
   return conn ?? getDb().connInstance;
+}
+
+function ensureAcademicTerm(
+  name: string, startDate: string, endDate: string, conn: Database,
+): number {
+  const existing = conn.prepare(
+    'SELECT id FROM academic_terms WHERE name=? AND start_date=? AND end_date=?',
+  ).get(name, startDate, endDate) as { id: number } | undefined;
+  if (existing) return Number(existing.id);
+  const inserted = conn.prepare(
+    'INSERT INTO academic_terms(name, start_date, end_date) VALUES(?,?,?)',
+  ).run(name, startDate, endDate);
+  return Number(inserted.lastInsertRowid);
 }
 
 let database: WorkbenchDb | null = null;
@@ -79,7 +93,7 @@ export function getCurrentScope(options: { write?: boolean; conn?: Database } = 
   }
   const sqlBase = [
     'SELECT c.id AS class_id, c.name AS class_name, c.grade, c.status AS class_status, ',
-    't.id AS term_id, t.name AS term_name, t.start_date, t.end_date, t.status AS term_status ',
+    't.id AS term_id, t.academic_term_id, t.name AS term_name, t.start_date, t.end_date, t.status AS term_status ',
     'FROM terms t JOIN classes c ON c.id=t.class_id',
   ].join('');
   let sql = sqlBase;
@@ -175,9 +189,12 @@ export function createClass(
     const inserted = db.prepare('INSERT INTO classes(name, grade) VALUES(?,?)')
       .run(cleanName, String(grade ?? '').trim());
     const classId = Number(inserted.lastInsertRowid);
+    const cleanStart = String(startDate ?? '').trim();
+    const cleanEnd = String(endDate ?? '').trim();
+    const academicTermId = ensureAcademicTerm(cleanTerm, cleanStart, cleanEnd, db);
     const termInserted = db.prepare(
-      'INSERT INTO terms(class_id, name, start_date, end_date) VALUES(?,?,?,?)',
-    ).run(classId, cleanTerm, String(startDate ?? '').trim(), String(endDate ?? '').trim());
+      'INSERT INTO terms(class_id, academic_term_id, name, start_date, end_date) VALUES(?,?,?,?,?)',
+    ).run(classId, academicTermId, cleanTerm, cleanStart, cleanEnd);
     return { class_id: classId, term_id: Number(termInserted.lastInsertRowid) };
   })();
 }
@@ -234,9 +251,13 @@ export function createTerm(
   }
   if (!String(name ?? '').trim()) throw new ScopeError('学期名称不能为空');
   try {
+    const cleanName = String(name).trim();
+    const cleanStart = String(startDate ?? '').trim();
+    const cleanEnd = String(endDate ?? '').trim();
+    const academicTermId = ensureAcademicTerm(cleanName, cleanStart, cleanEnd, db);
     const inserted = db.prepare(
-      'INSERT INTO terms(class_id, name, start_date, end_date) VALUES(?,?,?,?)',
-    ).run(classId, String(name).trim(), String(startDate ?? '').trim(), String(endDate ?? '').trim());
+      'INSERT INTO terms(class_id, academic_term_id, name, start_date, end_date) VALUES(?,?,?,?,?)',
+    ).run(classId, academicTermId, cleanName, cleanStart, cleanEnd);
     return Number(inserted.lastInsertRowid);
   } catch (error) {
     throw error;
@@ -274,8 +295,24 @@ export function updateTerm(
     `UPDATE terms SET ${fields.join(', ')}, updated_at=datetime('now','localtime') WHERE id=?`,
   ).run(...params);
   if (result.changes === 0) throw new ScopeError('学期不存在');
-  const term = db.prepare('SELECT class_id FROM terms WHERE id=?').get(termId) as
-    { class_id: number } | undefined;
+  const term = db.prepare('SELECT class_id, academic_term_id FROM terms WHERE id=?').get(termId) as
+    { class_id: number; academic_term_id: number } | undefined;
+  const identityChanged = options.name !== undefined
+    || options.startDate !== undefined || options.endDate !== undefined;
+  if (term && identityChanged) {
+    db.prepare(
+      `UPDATE academic_terms
+       SET name=COALESCE(?, name), start_date=COALESCE(?, start_date), end_date=COALESCE(?, end_date),
+           updated_at=datetime('now','localtime')
+       WHERE id=?`,
+    ).run(options.name, options.startDate, options.endDate, term.academic_term_id);
+    db.prepare(
+      `UPDATE terms
+       SET name=COALESCE(?, name), start_date=COALESCE(?, start_date), end_date=COALESCE(?, end_date),
+           updated_at=datetime('now','localtime')
+       WHERE academic_term_id=?`,
+    ).run(options.name, options.startDate, options.endDate, term.academic_term_id);
+  }
   void auditRecord('term', termId, options.status === '已归档' ? 'archive' : 'update', {
     summary: options.status === '已归档' ? '归档学期' : '更新学期',
     params: { name: options.name, start_date: options.startDate, end_date: options.endDate, status: options.status },
@@ -410,9 +447,17 @@ export function rolloverTerm(
     Record<string, unknown> | undefined;
   if (!source) throw new ScopeError('原学期不存在');
   if (source.status === '已归档') throw new ArchivedScopeError('原学期已经归档，不能重复结转');
+  const cleanStart = String(startDate ?? '').trim();
+  const cleanEnd = String(endDate ?? '').trim();
   const termInserted = db.prepare(
-    'INSERT INTO terms(class_id, name, start_date, end_date) VALUES(?,?,?,?)',
-  ).run(source.class_id, cleanName, String(startDate ?? '').trim(), String(endDate ?? '').trim());
+    'INSERT INTO terms(class_id, academic_term_id, name, start_date, end_date) VALUES(?,?,?,?,?)',
+  ).run(
+    source.class_id,
+    ensureAcademicTerm(cleanName, cleanStart, cleanEnd, db),
+    cleanName,
+    cleanStart,
+    cleanEnd,
+  );
   const termId = Number(termInserted.lastInsertRowid);
   db.prepare(
     `INSERT INTO student_enrollments(student_id, class_id, term_id, status, joined_at)

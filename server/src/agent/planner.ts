@@ -378,7 +378,7 @@ function _planner_prompt(registry: ToolRegistry): string {
       },
     ],
   };
-  return '你是“凯凯”的任务规划器，不直接回答用户。\n'
+  return '你是“班小助”的任务规划器，不直接回答用户。\n'
     + '请把用户请求拆成最多 6 个只读工具步骤，并且只输出 JSON，不要 Markdown、解释或思维过程。\n'
     + '步骤必须按依赖顺序排列；涉及具体学生时先 students_search，再使用搜索结果中的 student_id。\n'
     + 'students_search 的学生标识字段是 students[].student_id（同时兼容 id）；后续步骤优先引用 $搜索步骤.students[0].student_id。\n'

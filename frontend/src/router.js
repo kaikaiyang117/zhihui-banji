@@ -5,6 +5,7 @@ const routes = [
   { path: '/dashboard', component: () => import('./views/Dashboard.vue') },
   { path: '/agent', component: () => import('./views/Agent.vue') },
   { path: '/agent/config/:profileId', component: () => import('./views/AgentConfig.vue') },
+  { path: '/settings', component: () => import('./views/SystemSettings.vue') },
   { path: '/reports', component: () => import('./views/Reports.vue') },
   { path: '/recycle', component: () => import('./views/RecycleBin.vue') },
   { path: '/students', component: () => import('./views/Students.vue') },

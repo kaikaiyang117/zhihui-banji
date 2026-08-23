@@ -5,7 +5,7 @@ import { FileSpreadsheet, MessageCircle, Paperclip, RefreshCw, Send, Settings } 
 import { useChat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import QRCode from 'qrcode'
-import { NAV } from './sheets'
+import { DEFAULT_SCHOOL_NAME, NAV } from './sheets'
 import { getIcon } from './icons'
 import {
   analyzeExcelImport,
@@ -26,7 +26,9 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
+const mainEl = ref(null)
 const activeNav = NAV[0]
+const schoolName = ref(DEFAULT_SCHOOL_NAME)
 const searchText = ref('')
 const searchResults = ref([])
 const searchOpen = ref(false)
@@ -157,6 +159,11 @@ function itemTo(item) {
 function isActive(item) {
   return route.path === '/' + item.page
 }
+
+watch(() => route.fullPath, async () => {
+  await nextTick()
+  if (mainEl.value) mainEl.value.scrollTop = 0
+}, { flush: 'post' })
 
 function handleContextChange() {
   contextVersion.value += 1
@@ -719,9 +726,25 @@ async function switchAgentSession(event) {
   await loadAgentHistory()
 }
 
+async function loadSystemSettings() {
+  try {
+    const settings = await get('/api/system/settings')
+    if (String(settings.school_name || '').trim()) schoolName.value = String(settings.school_name).trim()
+  } catch {
+    // 使用前端默认名称，保证设置接口不可用时侧栏仍可渲染。
+  }
+}
+
+function handleSystemSettingsUpdated(event) {
+  const name = String(event.detail?.school_name || '').trim()
+  if (name) schoolName.value = name
+}
+
 onMounted(async () => {
   window.addEventListener('meimei-agent-session-change', switchAgentSession)
   window.addEventListener('workbench-context-change', handleContextChange)
+  window.addEventListener('workbench-system-settings-updated', handleSystemSettingsUpdated)
+  await loadSystemSettings()
   await loadAccessInfo()
   await loadAgentHistory()
 })
@@ -729,6 +752,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('meimei-agent-session-change', switchAgentSession)
   window.removeEventListener('workbench-context-change', handleContextChange)
+  window.removeEventListener('workbench-system-settings-updated', handleSystemSettingsUpdated)
 })
 </script>
 
@@ -764,7 +788,7 @@ onBeforeUnmount(() => {
           <component :is="renderIcon('LogOut')" :size="16" />
           <span>退出设备</span>
         </button>
-        <button class="ai-settings-button" type="button" aria-label="打开 AI 设置" title="AI 设置" @click="router.push('/agent')">
+        <button class="settings-button" type="button" aria-label="打开系统设置" title="系统设置" @click="router.push('/settings')">
           <Settings :size="16" />
         </button>
         <button class="update-button" type="button" aria-label="检查软件更新" title="检查更新" @click="updateOpen = true">
@@ -829,7 +853,7 @@ onBeforeUnmount(() => {
         <header class="agent-chat-head">
           <div class="agent-chat-identity">
             <div>
-              <div id="agent-chat-title" class="agent-chat-title">凯凯</div>
+              <div id="agent-chat-title" class="agent-chat-title">班小助</div>
               <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>智汇·班记智能助手</div>
             </div>
           </div>
@@ -837,14 +861,14 @@ onBeforeUnmount(() => {
             <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话" @click="resetAgentSession">
               <RefreshCw :size="16" />
             </button>
-            <button class="agent-icon-button" type="button" aria-label="收起凯凯" title="收起" @click="closeAgentChat">
+            <button class="agent-icon-button" type="button" aria-label="收起班小助" title="收起" @click="closeAgentChat">
               <component :is="renderIcon('X')" :size="17" />
             </button>
           </div>
         </header>
         <div ref="agentBody" class="agent-chat-body" aria-live="polite">
           <div v-if="!agentMessages.length" class="agent-chat-welcome">
-            <div class="agent-welcome-title">你好，我是凯凯</div>
+            <div class="agent-welcome-title">你好，我是班小助</div>
             <span>我可以帮你查询和整理工作台里的学生数据。</span>
             <div class="agent-suggestion-list">
               <button v-for="suggestion in agentSuggestions" :key="suggestion" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
@@ -953,7 +977,7 @@ onBeforeUnmount(() => {
               </template>
               <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
             </div>
-            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给凯凯发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
+            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给班小助发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
             <div class="agent-composer-bottom">
               <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>工作台数据已连接</div>
               <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="(!agentInput.trim() && !agentExcel.fileId) || agentSending" @click="sendAgentMessage">
@@ -965,9 +989,9 @@ onBeforeUnmount(() => {
         </footer>
         </section>
       </transition>
-      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开凯凯对话" @click="openAgentChat">
+      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开班小助对话" @click="openAgentChat">
         <MessageCircle :size="19" :stroke-width="2.2" />
-        <span>凯凯</span>
+        <span>班小助</span>
       </button>
     </div>
     <div class="app-body">
@@ -981,7 +1005,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="sidebar-context">
-            <div class="sidebar-school">{{ activeNav.school }}</div>
+            <div class="sidebar-school">{{ schoolName }}</div>
           </div>
         </div>
         <nav class="sidebar-nav" aria-label="功能导航">
@@ -998,7 +1022,7 @@ onBeforeUnmount(() => {
           <span class="sidebar-footer-slogan">把时间还给老师，把精力留给教育</span>
         </div>
       </aside>
-      <main class="main">
+      <main ref="mainEl" class="main">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
           <component :is="Component" :key="`${route.fullPath}:${contextVersion}`" />
@@ -1057,12 +1081,12 @@ onBeforeUnmount(() => {
 .search-empty { padding: 18px 10px; text-align: center; color: var(--ds-color-ink-secondary); font: var(--ds-type-body); }
 
 .topbar-actions { display: flex; align-items: center; justify-self: end; gap: 2px; padding: 2px; border: 1px solid var(--ds-color-border); border-radius: 12px; background: rgba(255,255,255,.72); box-shadow: 0 1px 2px rgba(28,31,41,.04); }
-.access-button, .device-logout-button, .ai-settings-button, .update-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: transform 100ms ease-out, color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }
+.access-button, .device-logout-button, .settings-button, .update-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: transform 100ms ease-out, color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }
 .access-button, .device-logout-button { padding: 0 10px; }
-.ai-settings-button, .update-button { width: 32px; padding: 0; }
-.access-button:hover, .device-logout-button:hover, .ai-settings-button:hover, .update-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
-.access-button:active, .device-logout-button:active, .ai-settings-button:active, .update-button:active { transform: scale(.94); }
-.access-button:focus-visible, .device-logout-button:focus-visible, .ai-settings-button:focus-visible, .update-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
+.settings-button, .update-button { width: 32px; padding: 0; }
+.access-button:hover, .device-logout-button:hover, .settings-button:hover, .update-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
+.access-button:active, .device-logout-button:active, .settings-button:active, .update-button:active { transform: scale(.94); }
+.access-button:focus-visible, .device-logout-button:focus-visible, .settings-button:focus-visible, .update-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 
 .access-scrim {
   position: fixed;
@@ -1310,10 +1334,10 @@ onBeforeUnmount(() => {
   .global-search input { height: 40px; min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
   .search-popover { position: fixed; top: 104px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
   .topbar-actions { flex: 0 0 auto; }
-  .access-button, .device-logout-button, .ai-settings-button, .update-button { min-height: 36px; }
+  .access-button, .device-logout-button, .settings-button, .update-button { min-height: 36px; }
   .access-button span { display: none; }
   .device-logout-button span { display: none; }
-  .access-button, .device-logout-button, .ai-settings-button, .update-button { width: 36px; padding: 0; }
+  .access-button, .device-logout-button, .settings-button, .update-button { width: 36px; padding: 0; }
   .access-scrim { align-items: end; padding: 0; }
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); }

@@ -8,7 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { buildApp } from '../../src/app.js';
 import { loadConfig } from '../../src/config/index.js';
 import { WorkbenchDb } from '../../src/db/connection.js';
-import { setDatabase } from '../../src/services/context.js';
+import {
+  bindRequestScope,
+  createClass,
+  resetRequestScope,
+  setDatabase,
+} from '../../src/services/context.js';
 import * as attendance from '../../src/services/attendance.js';
 import * as scores from '../../src/services/scores.js';
 import * as classTasks from '../../src/services/classTasks.js';
@@ -286,6 +291,24 @@ describe('学期校历', () => {
       { calendar_date: '2026-04-06', day_type: '上课日', title: '', is_school_day: true, note: '' },
     ], 'a.xlsx', 'req-cal-1');
     expect(second.idempotent).toBe(true);
+  });
+
+  it('同一学校学期下的不同班级共享校历', () => {
+    const second = createClass('共享校历二班', '', '当前学期', '', '') as {
+      class_id: number;
+      term_id: number;
+    };
+    const first = calendar.createEntry('2026-04-16', '调休上课', '跨班级共享', true, '');
+
+    bindRequestScope(second.class_id, second.term_id);
+    try {
+      const shared = calendar.listCalendar('2026-04-16', '2026-04-16');
+      const entry = (shared.entries as Array<Record<string, unknown>>)[0];
+      expect(entry.id).toBe(first.id);
+      expect(entry.title).toBe('跨班级共享');
+    } finally {
+      resetRequestScope();
+    }
   });
 });
 

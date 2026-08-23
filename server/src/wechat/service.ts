@@ -136,7 +136,7 @@ export class WeChatService {
       await this.client.sendMessage(
         message.from_user_id,
         message.context_token,
-        '已清空当前对话上下文，凯凯准备开始新的对话。',
+        '已清空当前对话上下文，班小助准备开始新的对话。',
       );
       return;
     }
@@ -151,7 +151,7 @@ export class WeChatService {
       );
     } catch (error) {
       if (!(error instanceof ModelError)) throw error;
-      answer = `凯凯暂时无法回答：${error.message}`;
+      answer = `班小助暂时无法回答：${error.message}`;
     } finally {
       await this.stopTyping(message, typingTicket);
     }
@@ -232,7 +232,7 @@ export class WeChatService {
           continue;
         }
         const timing = String(item.timing_state || '待处理');
-        let text = `凯凯提醒：${timing}有待处理事项——${String(item.title)}`;
+        let text = `班小助提醒：${timing}有待处理事项——${String(item.title)}`;
         const webUrl = process.env.MEIMEI_WORKBENCH_WEB_URL ?? '';
         if (webUrl) {
           text += `\n网页处理：${webUrl.replace(/\/+$/, '')}/#/tasks`;

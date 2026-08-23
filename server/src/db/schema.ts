@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v34）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v36）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。
@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 34;
+export const CURRENT_SCHEMA_VERSION = 36;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -1905,6 +1905,103 @@ function migration34(conn: Database): void {
   addColumn(conn, 'students', '监护人2职业', "TEXT DEFAULT ''");
 }
 
+function migration35(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS academic_terms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        start_date TEXT NOT NULL DEFAULT '',
+        end_date TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(name, start_date, end_date)
+    );
+  `);
+  addColumn(conn, 'terms', 'academic_term_id', 'INTEGER REFERENCES academic_terms(id)');
+  conn.exec(`
+    INSERT OR IGNORE INTO academic_terms(name, start_date, end_date)
+      SELECT name, start_date, end_date FROM terms GROUP BY name, start_date, end_date;
+    UPDATE terms
+       SET academic_term_id=(
+         SELECT a.id FROM academic_terms a
+         WHERE a.name=terms.name AND a.start_date=terms.start_date AND a.end_date=terms.end_date
+       )
+     WHERE academic_term_id IS NULL;
+
+    ALTER TABLE school_calendar_days RENAME TO school_calendar_days_legacy_v35;
+    CREATE TABLE school_calendar_days (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        academic_term_id INTEGER NOT NULL REFERENCES academic_terms(id) ON DELETE CASCADE,
+        calendar_date TEXT NOT NULL,
+        day_type TEXT NOT NULL DEFAULT '上课日',
+        title TEXT NOT NULL DEFAULT '',
+        is_school_day INTEGER NOT NULL DEFAULT 1,
+        note TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'manual',
+        source_filename TEXT NOT NULL DEFAULT '',
+        source_row INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(academic_term_id, calendar_date)
+    );
+    INSERT INTO school_calendar_days
+      (id, academic_term_id, calendar_date, day_type, title, is_school_day, note,
+       source, source_filename, source_row, created_at, updated_at)
+    SELECT MIN(d.id), t.academic_term_id, d.calendar_date, d.day_type, d.title,
+           d.is_school_day, d.note, d.source, d.source_filename, d.source_row,
+           MIN(d.created_at), MAX(d.updated_at)
+      FROM school_calendar_days_legacy_v35 d
+      JOIN terms t ON t.id=d.term_id AND t.class_id=d.class_id
+     GROUP BY t.academic_term_id, d.calendar_date;
+    DROP TABLE school_calendar_days_legacy_v35;
+
+    ALTER TABLE school_calendar_import_runs RENAME TO school_calendar_import_runs_legacy_v35;
+    CREATE TABLE school_calendar_import_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        academic_term_id INTEGER NOT NULL REFERENCES academic_terms(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL DEFAULT '',
+        filename TEXT NOT NULL DEFAULT '',
+        imported INTEGER NOT NULL DEFAULT 0,
+        updated INTEGER NOT NULL DEFAULT 0,
+        skipped INTEGER NOT NULL DEFAULT 0,
+        conflict_count INTEGER NOT NULL DEFAULT 0,
+        error_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(academic_term_id, request_id)
+    );
+    INSERT INTO school_calendar_import_runs
+      (id, academic_term_id, request_id, filename, imported, updated, skipped,
+       conflict_count, error_count, created_at)
+    SELECT MIN(r.id), t.academic_term_id, r.request_id, r.filename, r.imported, r.updated,
+           r.skipped, r.conflict_count, r.error_count, MIN(r.created_at)
+      FROM school_calendar_import_runs_legacy_v35 r
+      JOIN terms t ON t.id=r.term_id AND t.class_id=r.class_id
+     GROUP BY t.academic_term_id, r.request_id;
+    DROP TABLE school_calendar_import_runs_legacy_v35;
+
+    CREATE INDEX IF NOT EXISTS idx_academic_terms_dates
+        ON academic_terms(start_date, end_date);
+    CREATE INDEX IF NOT EXISTS idx_terms_academic_term
+        ON terms(academic_term_id, status, id);
+    CREATE INDEX IF NOT EXISTS idx_school_calendar_academic_date
+        ON school_calendar_days(academic_term_id, calendar_date);
+    CREATE INDEX IF NOT EXISTS idx_school_calendar_import_academic
+        ON school_calendar_import_runs(academic_term_id, created_at);
+  `);
+}
+
+function migration36(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    INSERT OR IGNORE INTO system_settings(key, value)
+      VALUES ('school_name', '汶川县七一映秀中学');
+  `);
+}
+
 function migration32(conn: Database): void {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notification_templates (
@@ -1964,6 +2061,8 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   32: migration32,
   33: migration33,
   34: migration34,
+  35: migration35,
+  36: migration36,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */
