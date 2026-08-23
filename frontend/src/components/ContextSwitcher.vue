@@ -66,7 +66,7 @@ async function load() {
     if (selectedClassId.value && selectedTermId.value) {
       setStoredScope(selectedClassId.value, selectedTermId.value)
     }
-    emit('ready', current)
+    emit('ready', { ...current, label: currentLabel.value })
   } catch (err) {
     error.value = err.message || '班级信息加载失败'
   } finally {
@@ -82,7 +82,11 @@ function chooseClass(event) {
 
 function notifyContextChanged(classId = selectedClassId.value, termId = selectedTermId.value) {
   window.dispatchEvent(new CustomEvent('workbench-context-change', {
-    detail: { classId, termId },
+    detail: {
+      classId, termId,
+      label: selectedClass.value && selectedTerm.value
+        ? `${selectedClass.value.name} · ${selectedTerm.value.name}` : '',
+    },
   }))
 }
 

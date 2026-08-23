@@ -37,3 +37,13 @@ export function hashPlan(input: {
 export function hashPreview(planHash: string, preview: unknown): string {
   return sha256(stableJson({ planHash, preview }));
 }
+
+/**
+ * Hash the concrete business effect selected by a preview.  The rows are
+ * intentionally kept out of the public plan payload; only their stable hash
+ * is persisted so a database change between preview and confirmation can be
+ * detected without exposing row values in the action record.
+ */
+export function hashBusinessEffect(input: { module: string; rows: unknown[] }): string {
+  return sha256(stableJson({ module: input.module, rows: input.rows }));
+}

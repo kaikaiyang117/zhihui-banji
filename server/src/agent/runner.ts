@@ -61,7 +61,8 @@ export class AgentRunner {
         // Raw workbook values are never model-authorized by tool arguments.
         // A future consent flow can replace this server-side capability.
         allowSensitiveExcelValues: false,
-        allowManualExcelMapping: explicitExcelMappingTurn(userText),
+        allowManualExcelMapping: explicitExcelMappings(userText).length > 0,
+        approvedExcelMappings: explicitExcelMappings(userText),
       }) as Record<string, unknown>;
     } catch (error) {
       if (error instanceof ToolError) {
@@ -189,13 +190,15 @@ export class AgentRunner {
         const sessionMessages = self.sessionStore.loadOwned(
           state.sessionId, state.actorId, state.channel);
         const currentAttachment = state.attachment;
-        // The latest workbook is active session context. Do not make its
-        // availability depend on a keyword regex (“继续”“多少人”等短问句
-        // must still be able to refer to the attached workbook).
+        // Keep the latest workbook available for explicit Excel follow-ups,
+        // while unrelated class/database questions use the normal tools.
         const carriedAttachment = !currentAttachment?.artifact_id
           ? latestExcelAttachment(sessionMessages) : null;
         const attachment = currentAttachment?.artifact_id ? currentAttachment : carriedAttachment;
         const resolvedReference = resolveFollowupStudentReference(state.text, sessionMessages);
+        const activeExcelAttachment = attachment?.artifact_id
+          && (state.text.trim() === '' || looksLikeExcelIntent(state.text) || isExcelFollowup(state.text))
+          ? attachment : null;
         const systemMessage = { role: 'system', content: systemPrompt() };
         let messages: Array<Record<string, unknown>>;
         if (!sessionMessages.length || String(sessionMessages[0]?.role) !== 'system') {
@@ -211,9 +214,9 @@ export class AgentRunner {
             student_context_reference: true,
           });
         }
-        if (attachment?.file_id || attachment?.artifact_id) {
-          const candidates = Array.isArray(attachment.candidate_modules)
-            ? attachment.candidate_modules
+        if (activeExcelAttachment?.file_id || activeExcelAttachment?.artifact_id) {
+          const candidates = Array.isArray(activeExcelAttachment.candidate_modules)
+            ? activeExcelAttachment.candidate_modules
               .slice(0, 4)
               .map((item) => {
                 const candidate = item as Record<string, unknown>;
@@ -221,16 +224,16 @@ export class AgentRunner {
               })
               .filter(Boolean)
             : [];
-          const sheets = Array.isArray(attachment.sheets)
-            ? attachment.sheets.slice(0, 10).map(String).join('、')
+          const sheets = Array.isArray(activeExcelAttachment.sheets)
+            ? activeExcelAttachment.sheets.slice(0, 10).map(String).join('、')
             : '';
           messages.push({
             role: 'system',
             content: [
               '当前会话有一个用户刚上传的 Excel 附件。',
-              attachment.file_id ? `旧上传文件标识：${String(attachment.file_id)}` : '',
-              attachment.artifact_id ? `WorkbookArtifact 标识：${String(attachment.artifact_id)}` : '',
-              attachment.filename ? `文件名：${String(attachment.filename).slice(0, 120)}` : '',
+              activeExcelAttachment.file_id ? `旧上传文件标识：${String(activeExcelAttachment.file_id)}` : '',
+              activeExcelAttachment.artifact_id ? `WorkbookArtifact 标识：${String(activeExcelAttachment.artifact_id)}` : '',
+              activeExcelAttachment.filename ? `文件名：${String(activeExcelAttachment.filename).slice(0, 120)}` : '',
               sheets ? `工作表：${sheets}` : '',
               candidates.length ? `系统识别的可能模块：${candidates.join('、')}` : '',
               '如需继续处理，先调用 excel_inspect_workbook 或 excel_list_regions；WorkbookArtifact 使用 artifact_id 参数。可以创建/修改导入草稿计划，并调用 excel_preview_import 生成真实业务预览；写入必须经过 execute_excel_import 和确认链，不能绕过确认直接写入。',
@@ -252,8 +255,8 @@ export class AgentRunner {
         return {
           messages,
           text: resolvedReference.text,
-          directTool: attachment?.artifact_id ? null : inferDirectTool(resolvedReference.text),
-          attachment,
+          directTool: activeExcelAttachment ? null : inferDirectTool(resolvedReference.text),
+          attachment: activeExcelAttachment,
         };
       },
       route: (state) => (state.directTool ? 'direct'
@@ -406,6 +409,16 @@ export class AgentRunner {
               emit, call.id || `tool-${turn}`, call.name,
               result.error ? 'error' : 'completed', parseToolInput(call.arguments), result,
             );
+            if (result.needs_input === true) {
+              haltMessage = '这份 Excel 预览还缺少字段信息，请补充后我再继续。';
+              break;
+            }
+            if (result.confirmation_required === true && result.action_id) {
+              haltMessage = call.name === 'execute_excel_import'
+                ? '导入预览已经准备好，请查看下方业务卡片并决定是否导入。'
+                : '操作预览已经准备好，请查看下方卡片并决定是否写入。';
+              break;
+            }
             if ((result.error as Record<string, unknown> | undefined)?.code === 'retry_exhausted') {
               haltMessage = toolFailureMessage();
               break;
@@ -596,9 +609,24 @@ function shouldAttemptModelPlan(text: string): boolean {
   ].some((term) => text.includes(term));
 }
 
-function explicitExcelMappingTurn(text: string): boolean {
-  return /(列|字段|成绩\s*\d+|成绩[一二三四五六七八九十]).{0,16}(是|对应|代表|指的是|映射为)/.test(text)
-    || /(是|对应|代表|映射为).{0,16}(列|字段|成绩\s*\d+)/.test(text);
+function looksLikeExcelIntent(text: string): boolean {
+  return /(excel|工作簿|工作表|表格|附件|文件|导入|表头|列名|单元格|这份表|这个表|表里|文件中)/i.test(String(text ?? ''));
+}
+
+function isExcelFollowup(text: string): boolean {
+  return /^(继续|继续处理|继续导入|下一步|刚才那个|这个|它|确认预览|重新预览|再看看)[。！!？?]*$/i.test(String(text ?? '').trim());
+}
+
+function explicitExcelMappings(text: string): Array<{ sourceColumn: string; targetField: string }> {
+  const result: Array<{ sourceColumn: string; targetField: string }> = [];
+  const normalized = String(text ?? '').replace(/[“”"']/g, '').trim();
+  const pattern = /(?:列|字段)?\s*([^，,。；;\s]{1,40})\s*(?:是|对应|代表|指的是|映射为)\s*([^，,。；;\s]{1,40})/g;
+  for (const match of normalized.matchAll(pattern)) {
+    const sourceColumn = String(match[1] ?? '').trim();
+    const targetField = String(match[2] ?? '').trim();
+    if (sourceColumn && targetField) result.push({ sourceColumn, targetField });
+  }
+  return result;
 }
 
 function latestExcelAttachment(messages: Array<Record<string, unknown>>): Record<string, unknown> | null {

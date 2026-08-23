@@ -255,6 +255,10 @@ export async function queryWorkbookRegion(options: {
     const byLetter = headers.findIndex((_, index) => columnName(ref.startColumn + index).toLowerCase() === normalized);
     return byLetter;
   };
+  const resolveColumnKey = (key: string): string | null => {
+    const index = keyIndex(key);
+    return index >= 0 ? headers[index] : null;
+  };
   const records: Array<Record<string, unknown>> = [];
   const dataStart = Math.max(headerRow + 1, ref.startRow + options.region.headerRows.length);
   for (let rowNumber = dataStart; rowNumber <= ref.endRow; rowNumber += 1) {
@@ -269,15 +273,19 @@ export async function queryWorkbookRegion(options: {
     if (matches) records.push(record);
   }
   if (options.sort) {
+    const sortColumn = resolveColumnKey(options.sort.column);
+    if (!sortColumn) throw new WorkbookQueryError(`排序列不存在：${options.sort.column}`);
     const direction = options.sort.direction === 'desc' ? -1 : 1;
     records.sort((left, right) => {
-      const result = compareQueryValue(left[options.sort!.column], right[options.sort!.column], 'lt') ? -1 :
-        compareQueryValue(left[options.sort!.column], right[options.sort!.column], 'gt') ? 1 : 0;
+      const result = compareQueryValue(left[sortColumn], right[sortColumn], 'lt') ? -1 :
+        compareQueryValue(left[sortColumn], right[sortColumn], 'gt') ? 1 : 0;
       return result * direction;
     });
   }
   const aggregates = (options.aggregate ?? []).map(item => {
-    const values = item.column ? records.map(record => Number(record[item.column!])).filter(Number.isFinite) : [];
+    const aggregateColumn = item.column ? resolveColumnKey(item.column) : null;
+    if (item.column && !aggregateColumn) throw new WorkbookQueryError(`聚合列不存在：${item.column}`);
+    const values = aggregateColumn ? records.map(record => Number(record[aggregateColumn])).filter(Number.isFinite) : [];
     let value: number;
     if (item.function === 'count') value = item.column ? values.length : records.length;
     else if (item.function === 'sum') value = values.reduce((sum, current) => sum + current, 0);
@@ -287,7 +295,9 @@ export async function queryWorkbookRegion(options: {
     return { as: item.as ?? `${item.function}_${item.column ?? 'rows'}`, value };
   });
   const policy = options.exposurePolicy ?? 'structure_only';
-  const selected = (options.select?.length ? options.select : headers).filter(key => keyIndex(key) >= 0);
+  const selected = (options.select?.length ? options.select : headers)
+    .map(key => resolveColumnKey(key))
+    .filter((key): key is string => Boolean(key));
   const limit = Math.max(1, Math.min(Number(options.limit ?? 50), MAX_QUERY_ROWS));
   const result: Record<string, unknown> = {
     sheet_index: options.sheetIndex, sheet_name: sheet.name, region_id: options.region.id,

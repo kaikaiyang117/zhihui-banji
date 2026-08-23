@@ -18,7 +18,7 @@ import {
   getEvent, getFocus, saveDailyAttendance,
 } from '../services/p0Service.js';
 import { buildRollCallRecords, getSession, deleteSession } from './tools/fieldOperations.js';
-import { executeImportPlan } from '../excel/imports/importPlanService.js';
+import { executeImportPlan, getPlanForAccess } from '../excel/imports/importPlanService.js';
 
 export { ActionError };
 
@@ -91,6 +91,47 @@ export function pendingForSession(sessionId: string, actorId: string, conn?: Dat
     + 'ORDER BY id DESC LIMIT 1',
   ).get(sessionId, actorId) as Record<string, unknown> | undefined;
   return row ? { ...row } : null;
+}
+
+/** Return durable action state for rebuilding conversation cards after reload. */
+export function listSessionActions(
+  sessionId: string, actorId: string, channel: string, conn?: Database,
+): Array<Record<string, unknown>> {
+  const db = connOf(conn);
+  expireActions(db);
+  const [classId, termId] = scopeIds({ conn: db });
+  const rows = db.prepare(
+    'SELECT id, class_id, term_id, session_id, channel, actor_id, tool_name, arguments_json, preview, status, '
+    + 'expires_at, result_json, created_at, confirmed_at, executed_at '
+    + 'FROM agent_actions WHERE session_id=? AND actor_id=? AND channel=? AND class_id=? AND term_id=? '
+    + 'ORDER BY id ASC',
+  ).all(sessionId, actorId, channel, classId, termId) as Array<Record<string, unknown>>;
+  return rows.map((row) => {
+    let result: Record<string, unknown> | null = null;
+    try {
+      const parsed = JSON.parse(String(row.result_json ?? '{}'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) result = parsed as Record<string, unknown>;
+    } catch { /* ignore malformed historical result */ }
+    let businessPreview: Record<string, unknown> | null = null;
+    if (String(row.tool_name) === 'execute_excel_import') {
+      try {
+        const args = JSON.parse(String(row.arguments_json ?? '{}')) as Record<string, unknown>;
+        const plan = getPlanForAccess(String(args.plan_id ?? ''), {
+          ownerId: actorId, channel, sessionId, classId, termId,
+        }, db);
+        businessPreview = {
+          plan_id: plan.id, adapter_id: plan.adapterId, artifact_id: plan.artifactId,
+          preview_hash: plan.previewHash, preview: plan.preview,
+        };
+      } catch { /* the plan may have expired; the action status remains useful */ }
+    }
+    return {
+      action_id: Number(row.id), tool_name: String(row.tool_name), status: String(row.status),
+      preview: String(row.preview ?? ''), expires_at: String(row.expires_at ?? ''),
+      created_at: String(row.created_at ?? ''), confirmed_at: String(row.confirmed_at ?? ''),
+      executed_at: String(row.executed_at ?? ''), result, business_preview: businessPreview,
+    };
+  });
 }
 
 function argsOf(item: Record<string, unknown>): Record<string, unknown> {

@@ -374,7 +374,7 @@ export function createPendingAction(options: {
 export function invokeTool(
   name: string,
   argsValue?: Record<string, unknown> | null,
-  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean } = {},
+  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean; approvedExcelMappings?: Array<{ sourceColumn: string; targetField: string }> } = {},
 ): Record<string, unknown> {
   const channel = options.channel ?? 'local';
   const actorId = options.actorId ?? '';
@@ -420,6 +420,7 @@ export function invokeTool(
     result = registry.execute(name, args, {
       channel, actorId, sessionId, allowSensitiveExcelValues: options.allowSensitiveExcelValues,
       allowManualExcelMapping: options.allowManualExcelMapping,
+      approvedExcelMappings: options.approvedExcelMappings,
     });
   } catch (error) {
     if (error instanceof ToolError) {
@@ -436,7 +437,7 @@ export function invokeTool(
 export async function invokeToolAsync(
   name: string,
   argsValue?: Record<string, unknown> | null,
-  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean } = {},
+  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean; approvedExcelMappings?: Array<{ sourceColumn: string; targetField: string }> } = {},
 ): Promise<Record<string, unknown>> {
   const channel = options.channel ?? 'local';
   const actorId = options.actorId ?? '';
@@ -479,6 +480,7 @@ export async function invokeToolAsync(
     const result = await registry.executeAsync(name, args, {
       channel, actorId, sessionId, allowSensitiveExcelValues: options.allowSensitiveExcelValues,
       allowManualExcelMapping: options.allowManualExcelMapping,
+      approvedExcelMappings: options.approvedExcelMappings,
     });
     recordAudit(channel, actorId, name, args, 'success', summaryText(result));
     return result;

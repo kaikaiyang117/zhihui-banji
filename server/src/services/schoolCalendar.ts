@@ -455,6 +455,10 @@ export function commitImport(
   const seen = new Set<string>();
   conn.transaction(() => {
     for (const raw of rows ?? []) {
+      if (raw.action === '跳过') {
+        result.skipped += 1;
+        continue;
+      }
       if (!(raw.valid ?? true) || raw.action === '冲突') {
         result.conflict_count += 1;
         continue;

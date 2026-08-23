@@ -11,6 +11,7 @@ import * as timetable from './timetable.js';
 import * as calendar from './schoolCalendar.js';
 import { getCurrentScope } from './context.js';
 import { decideMapping } from '../excel/semantics/mappingPolicy.js';
+import { hashBusinessEffect } from '../excel/domain/hash.js';
 
 export class ExcelImportError extends Error {}
 
@@ -951,7 +952,7 @@ export async function generateImportPreview(options: {
     }
   } else if (module === 'calendar') {
     try {
-      const preview = await calendar.previewImport(normalizedBuffer, meta.filename);
+      const preview = await calendar.previewImport(normalizedBuffer, meta.filename, duplicateStrategy ?? 'merge');
       totalRows = preview.summary.parsed;
       validRows = preview.summary.valid;
       newCount = preview.summary.new;
@@ -1071,8 +1072,8 @@ async function doImport(
   }
 
   if (module === 'calendar') {
-    const preview = await calendar.previewImport(buffer, filename);
-    const validRows = preview.rows.filter(r => (r.valid ?? true) && r.action !== '冲突');
+    const preview = await calendar.previewImport(buffer, filename, duplicateStrategy);
+    const validRows = preview.rows.filter(r => (r.valid ?? true) && r.action !== '冲突' && r.action !== '跳过');
     const commitResult = calendar.commitImport(validRows, filename, requestId || `excel-import-${randomUUID().replace(/-/g, '')}`);
     return {
       imported: Number(commitResult.imported ?? 0),
@@ -1228,6 +1229,7 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
   let newCount = 0;
   let updateCount = 0;
   let skipCount = 0;
+  let businessEffectHash = '';
   const errors: Array<{ row: number; reason: string }> = [];
   let commit: (requestId: string) => Record<string, unknown>;
   if (options.module === 'students') {
@@ -1237,6 +1239,7 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
     newCount = preview.summary.imported;
     updateCount = preview.summary.updated;
     skipCount = preview.summary.skipped;
+    businessEffectHash = hashBusinessEffect({ module: options.module, rows: preview.rows });
     errorRows = preview.errors.length;
     errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.msg })));
     commit = (requestId) => {
@@ -1262,6 +1265,7 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
     newCount = preview.summary.new;
     updateCount = preview.summary.update;
     skipCount = preview.summary.skip;
+    businessEffectHash = hashBusinessEffect({ module: options.module, rows: preview.rows });
     errorRows = preview.summary.error;
     errors.push(...preview.errors.map(error => ({ row: originalRow(error.row, options.headerRow), reason: error.message })));
     commit = (requestId) => {
@@ -1283,10 +1287,11 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
     newCount = preview.summary.new;
     updateCount = preview.summary.update;
     skipCount = preview.summary.skip;
+    businessEffectHash = hashBusinessEffect({ module: options.module, rows: preview.rows });
     errorRows = preview.summary.error + preview.summary.conflict;
     errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.message })));
     commit = (requestId) => {
-      const validRows = preview.rows.filter(row => (row.valid ?? true) && row.action !== '冲突');
+      const validRows = preview.rows.filter(row => (row.valid ?? true) && row.action !== '冲突' && row.action !== '跳过');
       const result = calendar.commitImport(validRows, options.filename, requestId);
       return {
         ...result, imported: Number(result.imported ?? 0), updated: Number(result.updated ?? 0),
@@ -1304,6 +1309,7 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
     newCount = previewRows.filter(row => row.action === '新增').length;
     updateCount = previewRows.filter(row => row.action === '更新').length;
     skipCount = previewRows.filter(row => row.action === '跳过').length;
+    businessEffectHash = hashBusinessEffect({ module: options.module, rows: previewRows });
     errorRows = (preview.summary as { invalid: number }).invalid;
     errors.push(...previewRows.filter(row => row.error).map(row => ({
       row: originalRow(Number(row.row ?? 0), options.headerRow), reason: String(row.error),
@@ -1333,6 +1339,7 @@ export async function prepareImportBuffer(options: ArtifactImportOptions): Promi
     new_count: newCount,
     update_count: updateCount,
     skip_count: skipCount,
+    business_effect_hash: businessEffectHash,
     errors,
     duplicate_strategy: options.duplicateStrategy ?? 'update',
   };

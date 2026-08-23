@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { AgentRunner } from '../../agent/runner.js';
-import { pendingForSession, confirmActionAsync, cancelAction, ActionError } from '../../agent/actions.js';
+import { pendingForSession, listSessionActions, confirmActionAsync, cancelAction, ActionError } from '../../agent/actions.js';
 import { SessionError, SessionStore } from '../../agent/sessionStore.js';
 import { listTools, invokeToolAsync, listAudits, usageStats } from '../../agent/agentService.js';
 import { ToolError } from '../../agent/toolRegistry.js';
@@ -432,7 +432,7 @@ export function registerAgentRoutes(app: FastifyInstance): void {
       return reply.status(404).send({ detail: '会话不存在' });
     }
     const messages = store.loadOwned(sessionId, actorId, channel);
-    return { messages };
+    return { messages, actions: listSessionActions(sessionId, actorId, channel) };
   });
 
   app.put('/api/agent/sessions/:sessionId', async (request, reply) => {

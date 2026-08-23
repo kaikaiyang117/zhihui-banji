@@ -87,7 +87,7 @@ async function readRange(args: Record<string, unknown>, context?: ToolExecutionC
   if (!EXPOSURE_POLICIES.includes(policy)) {
     throw new ToolError('exposure_policy 不受支持', { code: 'invalid_arguments', retryable: true });
   }
-  if (policy === 'allowed_values' && context && context.allowSensitiveExcelValues === false) {
+  if (policy === 'allowed_values' && context?.allowSensitiveExcelValues !== true) {
     throw new ToolError('读取原始 Excel 单元格值需要用户明确授权；当前对话只允许结构或脱敏分析', {
       code: 'permission_denied', retryable: false,
     });
@@ -127,7 +127,7 @@ async function queryRegion(args: Record<string, unknown>, context?: ToolExecutio
     throw new ToolError('需要有效的 sheet_index 和 region_id', { code: 'invalid_arguments', retryable: true });
   }
   if (!EXPOSURE_POLICIES.includes(policy)) throw new ToolError('exposure_policy 不受支持', { code: 'invalid_arguments', retryable: true });
-  if (policy === 'allowed_values' && context && context.allowSensitiveExcelValues === false) {
+  if (policy === 'allowed_values' && context?.allowSensitiveExcelValues !== true) {
     throw new ToolError('读取原始 Excel 单元格值需要用户明确授权；当前对话只允许结构或脱敏分析', {
       code: 'permission_denied', retryable: false,
     });
@@ -156,19 +156,29 @@ function mappingInput(value: unknown, context?: ToolExecutionContext): FieldMapp
   if (!Array.isArray(value)) {
     throw new ToolError('mappings 必须是数组', { code: 'invalid_arguments', retryable: true });
   }
+  const approvedMappings = context?.approvedExcelMappings ?? [];
   return value.map(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new ToolError('mappings 中包含无效字段', { code: 'invalid_arguments', retryable: true });
     }
     const raw = item as Record<string, unknown>;
+    const sourceColumn = String(raw.sourceColumn ?? '');
+    const targetField = raw.targetField == null ? null : String(raw.targetField);
+    const explicitlyApproved = raw.source === 'manual'
+      && Boolean(context?.allowManualExcelMapping)
+      && targetField !== null
+      && approvedMappings.some(mapping => (
+        mapping.sourceColumn.trim() === sourceColumn.trim()
+        && mapping.targetField.trim() === targetField.trim()
+      ));
     return {
-      sourceColumn: String(raw.sourceColumn ?? ''), targetField: raw.targetField == null ? null : String(raw.targetField),
+      sourceColumn, targetField,
       source: raw.source === 'rule' ? 'rule' : raw.source === 'manual' ? 'manual' : 'ai',
       confidence: Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : 0,
-      status: raw.status === 'ignored' ? 'ignored' : raw.status === 'needs_confirmation' ? 'needs_confirmation' : 'accepted',
+      status: raw.status === 'ignored' ? 'ignored' : explicitlyApproved ? 'accepted' : 'needs_confirmation',
       reason: raw.reason == null ? undefined : String(raw.reason),
       // Explicitly strip the user-only approval bit from model tool input.
-      confirmedByUser: context?.allowManualExcelMapping === true && raw.source === 'manual',
+      confirmedByUser: explicitlyApproved,
     };
   });
 }
@@ -214,10 +224,14 @@ async function previewPlan(args: Record<string, unknown>, context?: ToolExecutio
   const id = String(args.plan_id ?? '').trim();
   if (!id) throw new ToolError('缺少 plan_id', { code: 'invalid_arguments', retryable: true });
   const plan = await previewImportPlan(id, accessFor(context));
+  const needsInput = plan.status === 'needs_input' || plan.preview?.needs_input === true;
   return {
     plan,
-    confirmation_required: true,
-    hint: '业务预览已生成；确认后才会备份并写入业务数据。',
+    needs_input: needsInput,
+    ready_for_authorization: !needsInput,
+    hint: needsInput
+      ? '业务预览发现字段信息不足，请先补充映射后再继续。'
+      : '业务预览已生成；下一步将创建一次待授权的导入操作。',
   };
 }
 

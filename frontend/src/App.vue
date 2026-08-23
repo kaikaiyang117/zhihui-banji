@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileSpreadsheet, MessageCircle, Paperclip, RefreshCw, Send, Settings } from 'lucide-vue-next'
+import { FileSpreadsheet, Maximize2, Minimize2, Paperclip, RefreshCw, Send, Settings, Sparkles } from 'lucide-vue-next'
 import { useChat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import QRCode from 'qrcode'
@@ -13,6 +13,7 @@ import {
   del,
   fetchWithAccess,
   get,
+  downloadExcelImportPlanErrors,
   post,
   uploadExcelArtifact,
 } from './api'
@@ -42,6 +43,8 @@ const accessBlocked = ref(false)
 const updateOpen = ref(false)
 const contextVersion = ref(0)
 const agentOpen = ref(false)
+const agentExpanded = ref(false)
+const agentScopeLabel = ref('当前班级 · 当前学期')
 const agentInput = ref('')
 const agentError = ref('')
 const agentBody = ref(null)
@@ -62,9 +65,15 @@ const accessCloseEl = ref(null)
 const accessTriggerEl = ref(null)
 let accessPreviousActiveEl = null
 const agentSuggestions = [
-  '我们班有多少名学生？',
-  '查询张三的基本信息',
-  '最近有哪些学生需要跟进？',
+  '今天谁缺勤？',
+  '分析这个 Excel',
+  '查看本周待办',
+]
+const agentCapabilities = [
+  '查询班级数据',
+  '分析学生情况',
+  '处理 Excel 表格',
+  '记录待办和家校沟通',
 ]
 
 function getWebAgentSessionId() {
@@ -114,7 +123,7 @@ const agentChat = useChat({
   onError: error => {
     petAgentHadError = true
     sendPetState('failed')
-    agentError.value = error.message || 'Agent 流式响应失败，请稍后重试。'
+    agentError.value = friendlyAgentError(error.message || '这次没有完成，请稍后重试。')
     scrollAgentToBottom()
   },
 })
@@ -123,6 +132,8 @@ const agentStatus = agentChat.status
 const agentSending = computed(() => ['submitted', 'streaming'].includes(agentStatus.value))
 let petAgentWasRunning = false
 let petAgentHadError = false
+let agentScrollFrame = 0
+let agentBodyPinned = true
 
 function sendPetState(state) {
   if (!window.workbenchDesktop?.sendPetState) return
@@ -139,6 +150,16 @@ watch(agentStatus, status => {
     sendPetState(petAgentHadError || status === 'error' ? 'failed' : 'success')
   }
 })
+
+function queueAgentAutoScroll() {
+  if (!agentBodyPinned || agentScrollFrame) return
+  agentScrollFrame = window.requestAnimationFrame(() => {
+    agentScrollFrame = 0
+    scrollAgentToBottom({ instant: true, onlyIfPinned: true })
+  })
+}
+
+watch([agentMessages, agentStatus], queueAgentAutoScroll, { deep: true, flush: 'post' })
 
 async function createAgentSession() {
   const created = await post('/api/agent/sessions', {})
@@ -161,8 +182,15 @@ watch(() => route.fullPath, async () => {
   if (mainEl.value) mainEl.value.scrollTop = 0
 }, { flush: 'post' })
 
-function handleContextChange() {
+function handleContextChange(event) {
   contextVersion.value += 1
+  const label = String(event.detail?.label || '').trim()
+  if (label) agentScopeLabel.value = label
+}
+
+function handleContextReady(detail) {
+  const label = String(detail?.label || '').trim()
+  if (label) agentScopeLabel.value = label
 }
 
 async function runSearch() {
@@ -333,9 +361,57 @@ const agentToolLabels = {
   execute_excel_import: '写入 Excel 导入',
 }
 
+const excelModuleLabels = {
+  students: '学生信息',
+  scores: '成绩记录',
+  calendar: '校历安排',
+  timetable: '课程表',
+}
+
+const excelDuplicateLabels = {
+  update: '更新已有记录',
+  skip: '跳过已有记录',
+  merge: '合并已有安排',
+  replace: '替换已有课程表',
+  conflict: '遇到冲突时保留原记录',
+}
+
 function agentToolName(part) {
   const toolName = part.toolName || String(part.type || '').replace(/^tool-/, '')
   return agentToolLabels[toolName] || '执行工具'
+}
+
+function excelModuleName(module) {
+  return excelModuleLabels[String(module || '')] || 'Excel 数据'
+}
+
+function excelDuplicateName(part) {
+  const preview = excelPreviewModel(part)
+  return excelDuplicateLabels[String(preview?.duplicateStrategy || '')] || '按系统规则处理重复记录'
+}
+
+function excelMappingStatusKey(mapping) {
+  const status = String(mapping?.mapping_status || mapping?.status || '')
+  if (status === 'needs_confirmation') return 'needs-confirmation'
+  if (status === 'ignored' || !mapping?.target) return 'ignored'
+  if (String(mapping?.source_kind || mapping?.source || '') === 'ai') return 'ai-suggestion'
+  return 'confirmed'
+}
+
+function excelMappingStatus(mapping) {
+  return ({
+    'needs-confirmation': '需要确认',
+    ignored: '已忽略',
+    'ai-suggestion': 'AI 建议',
+    confirmed: '已确认',
+  })[excelMappingStatusKey(mapping)] || '已确认'
+}
+
+function excelMappingSymbol(mapping) {
+  const status = String(mapping?.mapping_status || mapping?.status || '')
+  if (status === 'needs_confirmation') return '?'
+  if (status === 'ignored' || !mapping?.target) return '—'
+  return '✓'
 }
 
 function agentToolOutputText(output) {
@@ -372,19 +448,49 @@ function excelPreviewModel(part) {
     updated: preview.update_count ?? 0,
     skipped: preview.skip_count ?? 0,
     errors: preview.error_rows ?? 0,
-    mappings: mappings.slice(0, 8),
+    mappings,
+    duplicateStrategy: preview.duplicate_strategy || preview.options?.duplicateStrategy || '',
   }
 }
 
 function isExcelImportAction(part) {
-  return String(part?.toolName || '').includes('excel_import') || Boolean(part?.output?.business_preview)
+  const toolName = String(part?.toolName || '')
+  return toolName.startsWith('excel_') || toolName === 'execute_excel_import' || Boolean(part?.output?.business_preview)
+}
+
+function agentExcelPreviewPart(message) {
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  const previews = parts.filter(part => isAgentToolPart(part) && excelPreviewModel(part))
+  return previews[previews.length - 1] || null
+}
+
+function requestExcelMapping(part) {
+  const preview = excelPreviewModel(part)
+  const columns = preview?.needsInputMappings?.map(item => item.source).filter(Boolean) || []
+  if (!columns.length) return
+  agentInput.value = `请帮我补充字段映射：${columns.join('、')}。`
+  nextTick(() => agentInputEl.value?.focus())
 }
 
 function excelImportButtonLabel(part) {
   const preview = excelPreviewModel(part)
   if (!preview) return '导入'
-  const count = Number(preview.valid || preview.added + preview.updated)
+  const count = Number(preview.added) + Number(preview.updated)
   return count > 0 ? `导入 ${count} 条` : '导入'
+}
+
+function excelImportPlanId(part) {
+  return String(part?.output?.business_preview?.plan_id || part?.output?.plan?.id || '').trim()
+}
+
+async function downloadExcelPlanErrors(part) {
+  const planId = excelImportPlanId(part)
+  if (!planId) return
+  try {
+    await downloadExcelImportPlanErrors(planId, agentSessionId.value)
+  } catch (error) {
+    agentError.value = error.message || '错误报告下载失败。'
+  }
 }
 
 function isPendingAgentAction(part) {
@@ -449,9 +555,17 @@ function agentTraceStepStatusText(step) {
 
 function agentTraceStepDetail(step) {
   const toolPart = step.toolPart
-  if (toolPart?.state === 'output-error') return toolPart.errorText || '工具执行失败'
+  if (toolPart?.state === 'output-error') return friendlyAgentError(toolPart.errorText || '工具执行失败')
   if (toolPart?.state === 'output-available') return agentToolOutputText(toolPart.output)
   return step.message || ''
+}
+
+function friendlyAgentError(message) {
+  const text = String(message || '').trim()
+  if (!text) return '这一步没有完成，请重试。'
+  if (/no tool invocation found|tool call id|invalid tool/i.test(text)) return '这一步没有完成，请重试。'
+  if (/timeout|timed out|超时/i.test(text)) return '处理时间较长，暂时没有完成，请稍后重试。'
+  return text
 }
 
 function agentTraceStatus(message) {
@@ -464,9 +578,13 @@ function agentTraceStatus(message) {
 }
 
 function agentTraceStatusText(message) {
-  if (agentTraceStatus(message) === 'waiting'
-    && agentTraceSteps(message).some(step => isExcelImportAction(step.toolPart))) return '等待导入'
-  return ({ running: '执行中', waiting: '等待确认', error: '执行失败', completed: '已完成' })[agentTraceStatus(message)]
+  const status = agentTraceStatus(message)
+  if (status === 'running') {
+    const active = agentTraceSteps(message).find(step => agentTraceStepStatus(step) === 'running')
+    return active ? `正在${active.label}…` : '正在处理…'
+  }
+  if (status === 'waiting') return '等待你确认'
+  return ({ error: '处理未完成', completed: '已完成检查' })[status]
 }
 
 function agentTraceOpen(message) {
@@ -474,7 +592,8 @@ function agentTraceOpen(message) {
   if (Object.prototype.hasOwnProperty.call(agentTraceOpenStates.value, messageId)) {
     return agentTraceOpenStates.value[messageId]
   }
-  return true
+  const status = agentTraceStatus(message)
+  return status === 'running' || status === 'error'
 }
 
 function handleAgentTraceToggle(message, event) {
@@ -494,6 +613,55 @@ function setAgentActionState(actionId, state) {
   agentActionStates.value = { ...agentActionStates.value, [String(actionId)]: state }
 }
 
+function actionResultSummary(part) {
+  const state = agentActionState(part)
+  const raw = state.result
+  const outcome = raw?.result && typeof raw.result === 'object' && raw.result.result
+    ? raw.result : raw
+  const result = outcome?.result && typeof outcome.result === 'object' ? outcome.result : outcome
+  if (isExcelImportAction(part) && result && typeof result === 'object'
+    && ['imported', 'updated', 'skipped', 'error_count'].some(key => key in result)) {
+    return `导入完成：新增 ${result.imported ?? 0}，更新 ${result.updated ?? 0}，跳过 ${result.skipped ?? 0}，错误 ${result.error_count ?? 0}；写入校验已通过。`
+  }
+  return state.status === 'executed' ? `已确认写入：${agentToolName(part)}。写入校验已通过。` : ''
+}
+
+function actionHistoryMessage(action) {
+  const actionId = String(action.action_id || '')
+  if (!actionId) return null
+  const output = {
+    confirmation_required: true,
+    action_id: Number(action.action_id),
+    preview: action.preview || '',
+    ...(action.business_preview ? { business_preview: action.business_preview } : {}),
+  }
+  return {
+    id: `history-action-${actionId}`,
+    role: 'assistant',
+    parts: [{
+      type: 'dynamic-tool', toolName: action.tool_name, toolCallId: `action-${actionId}`,
+      state: 'output-available', output,
+    }],
+  }
+}
+
+function hydrateAgentActions(actions) {
+  const states = {}
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const actionId = String(action.action_id || '')
+    if (!actionId) continue
+    const status = String(action.status || '')
+    states[actionId] = {
+      status: status === 'executed' ? 'executed'
+        : status === 'cancelled' ? 'cancelled'
+          : ['failed', 'expired'].includes(status) ? 'error' : 'pending',
+      error: status === 'expired' ? '确认已过期，请重新生成预览。' : '',
+      result: action.result || null,
+    }
+  }
+  agentActionStates.value = states
+}
+
 function appendAgentAssistantMessage(text) {
   agentMessages.value.push({
     id: `local-agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -509,11 +677,11 @@ async function confirmAgentAction(part) {
   if (['confirming', 'executed', 'cancelled'].includes(agentActionState(part).status)) return
   setAgentActionState(actionId, { status: 'confirming', error: '' })
   try {
-    await post(`/api/agent/actions/${encodeURIComponent(actionId)}/confirm`, {
+    const result = await post(`/api/agent/actions/${encodeURIComponent(actionId)}/confirm`, {
       session_id: agentSessionId.value,
     })
-    setAgentActionState(actionId, { status: 'executed', error: '' })
-    appendAgentAssistantMessage(`已确认写入：${agentToolName(part)}。写入校验已通过。`)
+    setAgentActionState(actionId, { status: 'executed', error: '', result })
+    appendAgentAssistantMessage(actionResultSummary(part))
   } catch (error) {
     setAgentActionState(actionId, { status: 'error', error: error.message || '写入失败，请稍后重试。' })
   }
@@ -559,22 +727,30 @@ function historyMessage(item, index) {
   }
 }
 
+function handleAgentBodyScroll(event) {
+  const body = event.currentTarget
+  agentBodyPinned = body.scrollHeight - body.scrollTop - body.clientHeight <= 48
+}
+
 function scrollAgentToBottom(options = {}) {
   nextTick(() => {
     const body = agentBody.value
     if (!body) return
+    if (options.onlyIfPinned && !agentBodyPinned) return
     const instant = options.instant ?? !agentOpen.value
     if (instant) {
       const previousScrollBehavior = body.style.scrollBehavior
       body.style.scrollBehavior = 'auto'
       body.scrollTop = body.scrollHeight
       body.style.scrollBehavior = previousScrollBehavior
+      agentBodyPinned = true
       return
     }
     body.scrollTo({
       top: body.scrollHeight,
       behavior: 'smooth',
     })
+    agentBodyPinned = true
   })
 }
 
@@ -692,6 +868,28 @@ async function sendAgentMessage() {
   }
 }
 
+async function retryLastAgentMessage() {
+  if (agentSending.value) return
+  const lastUser = [...agentMessages.value].reverse().find(message => message.role === 'user')
+  if (!lastUser) return
+  const text = (lastUser.parts || [])
+    .filter(part => part.type === 'text')
+    .map(part => part.text)
+    .join('')
+    .trim()
+  const file = (lastUser.parts || []).find(part => part.type === 'file' && String(part.url || '').startsWith('artifact://'))
+  const files = file ? [{
+    type: 'file', mediaType: file.mediaType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    filename: file.filename || 'Excel 文件', url: file.url,
+  }] : undefined
+  agentError.value = ''
+  try {
+    await agentChat.sendMessage({ ...(text ? { text } : {}), ...(files ? { files } : {}) })
+  } catch (error) {
+    agentError.value = error.message || '重试失败，请稍后重试。'
+  }
+}
+
 function handleAgentKeydown(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -708,6 +906,7 @@ async function resetAgentSession() {
     }
     await createAgentSession()
     agentMessages.value = []
+    agentActionStates.value = {}
     agentTraceOpenStates.value = {}
     agentChat.clearError()
     agentError.value = ''
@@ -721,7 +920,13 @@ async function loadAgentHistory() {
   try {
     if (!agentSessionId.value) await createAgentSession()
     const data = await get(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
-    agentMessages.value = (data.messages || []).map(historyMessage).filter(Boolean)
+    const actions = Array.isArray(data.actions) ? data.actions : []
+    hydrateAgentActions(actions)
+    const messages = (data.messages || []).map(historyMessage).filter(Boolean)
+    agentMessages.value = [
+      ...messages,
+      ...actions.map(actionHistoryMessage).filter(Boolean),
+    ]
     agentChat.clearError()
     scrollAgentToBottom({ instant: true })
   } catch (error) {
@@ -746,6 +951,7 @@ async function switchAgentSession(event) {
   window.localStorage.setItem('meimei_agent_web_session_id', sessionId)
   agentSessionId.value = sessionId
   agentMessages.value = []
+  agentActionStates.value = {}
   agentTraceOpenStates.value = {}
   agentChat.clearError()
   agentError.value = ''
@@ -776,6 +982,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (agentScrollFrame) window.cancelAnimationFrame(agentScrollFrame)
   window.removeEventListener('meimei-agent-session-change', switchAgentSession)
   window.removeEventListener('workbench-context-change', handleContextChange)
   window.removeEventListener('workbench-system-settings-updated', handleSystemSettingsUpdated)
@@ -791,7 +998,7 @@ onBeforeUnmount(() => {
           <span>{{ activeNav.title }}</span>
         </router-link>
         <span class="topbar-divider" aria-hidden="true"></span>
-        <ContextSwitcher />
+        <ContextSwitcher @ready="handleContextReady" />
       </div>
       <div class="global-search">
         <input v-model="searchText" type="search" enterkeyhint="search" aria-label="全局搜索" placeholder="搜索学生、事件、成绩…" @keyup.enter="runSearch" @focus="searchOpen = !!searchResults.length" />
@@ -873,17 +1080,22 @@ onBeforeUnmount(() => {
         </transition>
       </div>
     </transition>
-    <div class="agent-float" :class="{ 'is-open': agentOpen }">
+    <div class="agent-float" :class="{ 'is-open': agentOpen, 'is-expanded': agentExpanded }">
       <transition name="agent-panel" @after-enter="handleAgentPanelEntered">
         <section v-show="agentOpen" class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title" @keydown="handleAgentDialogKeydown">
         <header class="agent-chat-head">
           <div class="agent-chat-identity">
+            <div class="agent-chat-avatar" aria-hidden="true"><Sparkles :size="17" :stroke-width="2.2" /></div>
             <div>
               <div id="agent-chat-title" class="agent-chat-title">班小助</div>
-              <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>智汇·班记智能助手</div>
+              <div class="agent-chat-subtitle"><span class="agent-status-dot"></span>教师工作台 AI 助手 · {{ agentScopeLabel }}</div>
             </div>
           </div>
           <div class="agent-chat-actions">
+            <button class="agent-icon-button" type="button" :aria-label="agentExpanded ? '收起侧栏' : '展开侧栏'" :title="agentExpanded ? '收起侧栏' : '展开侧栏'" :aria-pressed="agentExpanded" @click="agentExpanded = !agentExpanded">
+              <Minimize2 v-if="agentExpanded" :size="16" />
+              <Maximize2 v-else :size="16" />
+            </button>
             <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话" @click="resetAgentSession">
               <RefreshCw :size="16" />
             </button>
@@ -892,10 +1104,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </header>
-        <div ref="agentBody" class="agent-chat-body" aria-live="polite">
+        <div ref="agentBody" class="agent-chat-body" aria-live="polite" @scroll="handleAgentBodyScroll">
           <div v-if="!agentMessages.length" class="agent-chat-welcome">
             <div class="agent-welcome-title">你好，我是班小助</div>
-            <span>我可以帮你查询和整理工作台里的学生数据。</span>
+            <p>问班级数据、分析学生，或上传一份 Excel。</p>
+            <div class="agent-capability-list" aria-label="班小助可以做什么">
+              <span v-for="capability in agentCapabilities" :key="capability">{{ capability }}</span>
+            </div>
             <div class="agent-suggestion-list">
               <button v-for="suggestion in agentSuggestions" :key="suggestion" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
                 {{ suggestion }}
@@ -905,54 +1120,6 @@ onBeforeUnmount(() => {
           </div>
           <div v-for="message in agentMessages" :key="message.id" class="agent-message" :class="message.role">
             <template v-for="(part, partIndex) in message.parts" :key="`${message.id}-${partIndex}`">
-              <details v-if="message.role === 'assistant' && partIndex === 0 && agentTraceSteps(message).length" class="agent-trace-card" :open="agentTraceOpen(message)" @toggle="handleAgentTraceToggle(message, $event)">
-                <summary>
-                  <span class="agent-trace-mark">✦</span>
-                  <span class="agent-trace-title">执行过程</span>
-                  <span class="agent-trace-status" :class="agentTraceStatus(message)">{{ agentTraceStatusText(message) }}</span>
-                </summary>
-                <div v-if="message.parts.find(item => item.type === 'data-agent-plan')?.data?.goal" class="agent-trace-goal">
-                  {{ message.parts.find(item => item.type === 'data-agent-plan')?.data?.goal }}
-                </div>
-                <div class="agent-trace-steps">
-                  <div v-for="step in agentTraceSteps(message)" :key="step.id" class="agent-trace-step" :class="agentTraceStepStatus(step)">
-                    <span class="agent-trace-step-dot"></span>
-                    <div class="agent-trace-step-main">
-                      <div class="agent-trace-step-head">
-                        <span class="agent-trace-step-label">{{ step.label }}</span>
-                        <span class="agent-trace-step-status">{{ agentTraceStepStatusText(step) }}</span>
-                      </div>
-                      <div v-if="agentTraceStepDetail(step)" class="agent-trace-step-detail">{{ agentTraceStepDetail(step) }}</div>
-                      <div v-if="excelPreviewModel(step.toolPart)" class="agent-excel-preview-card">
-                        <div class="agent-excel-preview-title">{{ excelPreviewModel(step.toolPart).needsInput ? '需要补充字段信息' : 'Excel 业务预览' }} · {{ excelPreviewModel(step.toolPart).module }}</div>
-                        <div v-if="excelPreviewModel(step.toolPart).needsInput" class="agent-excel-preview-input-hint">有 {{ excelPreviewModel(step.toolPart).needsInputMappings.length }} 列暂时无法可靠判断，请告诉我它们对应的字段。</div>
-                        <div class="agent-excel-preview-stats">
-                          <span>共 {{ excelPreviewModel(step.toolPart).rows }} 行</span>
-                          <span class="is-success">新增 {{ excelPreviewModel(step.toolPart).added }}</span>
-                          <span>更新 {{ excelPreviewModel(step.toolPart).updated }}</span>
-                          <span>跳过 {{ excelPreviewModel(step.toolPart).skipped }}</span>
-                          <span class="is-error">错误 {{ excelPreviewModel(step.toolPart).errors }}</span>
-                        </div>
-                        <div v-if="excelPreviewModel(step.toolPart).mappings.length" class="agent-excel-preview-mappings">
-                          <span v-for="mapping in excelPreviewModel(step.toolPart).mappings" :key="`${mapping.source}-${mapping.target}`" :class="{ 'is-muted': mapping.mapping_status === 'ignored' }">
-                            {{ mapping.source }} → {{ mapping.target || '未映射' }}
-                          </span>
-                        </div>
-                      </div>
-                      <div v-if="step.toolPart && isPendingAgentAction(step.toolPart)" class="agent-action-buttons">
-                        <template v-if="agentActionState(step.toolPart).status === 'pending'">
-                          <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(step.toolPart)">{{ isExcelImportAction(step.toolPart) ? excelImportButtonLabel(step.toolPart) : '确认写入' }}</button>
-                          <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(step.toolPart)">取消</button>
-                        </template>
-                        <span v-else-if="agentActionState(step.toolPart).status === 'confirming'" class="agent-action-state">处理中…</span>
-                        <span v-else-if="agentActionState(step.toolPart).status === 'executed'" class="agent-action-state success">已写入并完成校验</span>
-                        <span v-else-if="agentActionState(step.toolPart).status === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
-                        <span v-else class="agent-action-state error">{{ agentActionState(step.toolPart).error }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </details>
               <template v-if="part.type === 'text'">
                 <div v-if="message.role === 'assistant' && (part.state !== 'streaming' || agentStatus === 'ready')" class="agent-message-bubble agent-markdown" v-html="renderAgentMarkdown(part.text)"></div>
                 <div v-else-if="message.role === 'assistant'" class="agent-message-bubble agent-streaming-text">{{ part.text }}</div>
@@ -963,11 +1130,94 @@ onBeforeUnmount(() => {
                 <span>{{ part.filename || 'Excel 文件' }}</span>
               </div>
             </template>
+            <template v-if="message.role === 'assistant' && agentExcelPreviewPart(message)">
+              <div v-for="previewPart in [agentExcelPreviewPart(message)]" :key="`result-${agentToolPartId(previewPart)}`" class="agent-result-block">
+                <div class="agent-result-heading"><Sparkles :size="14" /><span>处理结果</span></div>
+                <div class="agent-excel-preview-card agent-result-card">
+                  <div class="agent-result-card-head">
+                    <div class="agent-result-card-title"><FileSpreadsheet :size="17" /><strong>{{ excelModuleName(excelPreviewModel(previewPart).module) }}导入预览</strong></div>
+                    <span class="agent-result-status" :class="{ 'is-waiting': isPendingAgentAction(previewPart), 'is-success': agentActionState(previewPart).status === 'executed' }">
+                      {{ excelPreviewModel(previewPart).needsInput ? '需要补充' : isPendingAgentAction(previewPart) ? '待确认' : agentActionState(previewPart).status === 'executed' ? '已完成' : '已检查' }}
+                    </span>
+                  </div>
+                  <div class="agent-result-context">目标：{{ agentScopeLabel }}</div>
+                  <div class="agent-result-context">重复记录：{{ excelDuplicateName(previewPart) }}</div>
+                  <div v-if="excelPreviewModel(previewPart).needsInput" class="agent-excel-preview-input-hint">有 {{ excelPreviewModel(previewPart).needsInputMappings.length }} 列暂时无法可靠判断，请补充它们对应的字段。</div>
+                  <div class="agent-excel-preview-stats agent-result-stats">
+                    <div><strong>{{ excelPreviewModel(previewPart).added }}</strong><span>新增</span></div>
+                    <div><strong>{{ excelPreviewModel(previewPart).updated }}</strong><span>更新</span></div>
+                    <div><strong>{{ excelPreviewModel(previewPart).skipped }}</strong><span>跳过</span></div>
+                    <div class="is-error"><strong>{{ excelPreviewModel(previewPart).errors }}</strong><span>异常</span></div>
+                  </div>
+                  <details v-if="excelPreviewModel(previewPart).mappings.length" class="agent-mapping-details">
+                    <summary>查看字段映射（{{ excelPreviewModel(previewPart).mappings.length }} 列）</summary>
+                    <div class="agent-mapping-list">
+                      <div v-for="mapping in excelPreviewModel(previewPart).mappings" :key="`${mapping.source}-${mapping.target}`" class="agent-mapping-row">
+                        <span class="agent-mapping-symbol" :class="excelMappingStatusKey(mapping)">{{ excelMappingSymbol(mapping) }}</span>
+                        <span class="agent-mapping-source">{{ mapping.source }}</span><span class="agent-mapping-arrow">→</span><strong>{{ mapping.target || '未映射' }}</strong>
+                        <small>{{ excelMappingStatus(mapping) }}</small>
+                      </div>
+                    </div>
+                  </details>
+                  <div v-if="isPendingAgentAction(previewPart)" class="agent-result-consequence">将新增 {{ excelPreviewModel(previewPart).added }} 条，更新 {{ excelPreviewModel(previewPart).updated }} 条。</div>
+                  <div class="agent-action-buttons agent-result-actions">
+                    <template v-if="excelPreviewModel(previewPart).needsInput">
+                      <button class="btn btn-primary btn-sm" type="button" @click="requestExcelMapping(previewPart)">补充字段映射</button>
+                    </template>
+                    <template v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'pending'">
+                      <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(previewPart)">确认导入 {{ Number(excelPreviewModel(previewPart).added) + Number(excelPreviewModel(previewPart).updated) }} 条</button>
+                      <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(previewPart)">取消</button>
+                    </template>
+                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'confirming'" class="agent-action-state">正在写入…</span>
+                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'executed'" class="agent-action-state success">{{ actionResultSummary(previewPart) }}</span>
+                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
+                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'error'" class="agent-action-state error">{{ friendlyAgentError(agentActionState(previewPart).error) }}</span>
+                    <button v-if="excelPreviewModel(previewPart).errors > 0 && excelImportPlanId(previewPart)" class="btn btn-outline btn-sm agent-excel-error-download" type="button" @click="downloadExcelPlanErrors(previewPart)">下载错误报告</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <details v-if="message.role === 'assistant' && agentTraceSteps(message).length" class="agent-trace-card" :open="agentTraceOpen(message)" @toggle="handleAgentTraceToggle(message, $event)">
+              <summary>
+                <Sparkles :size="14" class="agent-trace-mark" />
+                <span class="agent-trace-title">查看处理过程</span>
+                <span class="agent-trace-status" :class="agentTraceStatus(message)">{{ agentTraceStatusText(message) }}</span>
+              </summary>
+              <div v-if="message.parts.find(item => item.type === 'data-agent-plan')?.data?.goal" class="agent-trace-goal">
+                {{ message.parts.find(item => item.type === 'data-agent-plan')?.data?.goal }}
+              </div>
+              <div class="agent-trace-steps">
+                <div v-for="step in agentTraceSteps(message)" :key="step.id" class="agent-trace-step" :class="agentTraceStepStatus(step)">
+                  <span class="agent-trace-step-dot"></span>
+                  <div class="agent-trace-step-main">
+                    <div class="agent-trace-step-head">
+                      <span class="agent-trace-step-label">{{ step.label }}</span>
+                      <span class="agent-trace-step-status">{{ agentTraceStepStatusText(step) }}</span>
+                    </div>
+                    <div v-if="agentTraceStepDetail(step)" class="agent-trace-step-detail">{{ agentTraceStepDetail(step) }}</div>
+                    <div v-if="step.toolPart && !isExcelImportAction(step.toolPart) && isPendingAgentAction(step.toolPart)" class="agent-action-buttons">
+                      <template v-if="agentActionState(step.toolPart).status === 'pending'">
+                        <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(step.toolPart)">确认写入</button>
+                        <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(step.toolPart)">取消</button>
+                      </template>
+                      <span v-else-if="agentActionState(step.toolPart).status === 'confirming'" class="agent-action-state">正在写入…</span>
+                      <span v-else-if="agentActionState(step.toolPart).status === 'executed'" class="agent-action-state success">{{ actionResultSummary(step.toolPart) }}</span>
+                      <span v-else-if="agentActionState(step.toolPart).status === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
+                      <span v-else class="agent-action-state error">{{ friendlyAgentError(agentActionState(step.toolPart).error) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
           <div v-if="agentSending" class="agent-message assistant">
             <div class="agent-message-bubble agent-thinking"><span></span><span></span><span></span></div>
           </div>
-          <div v-if="agentError" class="agent-chat-error">{{ agentError }}</div>
+          <div v-if="agentError" class="agent-chat-error" role="alert">
+            <strong>这次没有完成</strong>
+            <span>{{ friendlyAgentError(agentError) }}</span>
+            <button class="agent-error-retry" type="button" :disabled="agentSending" @click="retryLastAgentMessage">重试</button>
+          </div>
         </div>
         <footer class="agent-chat-foot">
           <div class="agent-composer">
@@ -981,9 +1231,9 @@ onBeforeUnmount(() => {
               <div v-else-if="agentExcel.artifact" class="agent-excel-summary">{{ formatAgentFileSize(agentExcel.artifact.sizeBytes) }} · 将随本条消息一起发送</div>
             </div>
             <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
-            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="给班小助发送消息…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
+            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="问班级数据、分析学生，或上传 Excel…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
             <div class="agent-composer-bottom">
-              <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>工作台数据已连接</div>
+              <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>可读取当前班级数据</div>
               <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="(!agentInput.trim() && !agentExcel.artifactId) || agentSending" @click="sendAgentMessage">
                 <Send :size="16" :stroke-width="2.2" />
               </button>
@@ -993,9 +1243,9 @@ onBeforeUnmount(() => {
         </footer>
         </section>
       </transition>
-      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开班小助对话" @click="openAgentChat">
-        <MessageCircle :size="19" :stroke-width="2.2" />
-        <span>班小助</span>
+      <button v-if="!agentOpen" ref="agentFabEl" class="agent-fab" type="button" aria-label="打开班小助 AI 助手" @click="openAgentChat">
+        <Sparkles :size="18" :stroke-width="2.2" />
+        <span>班小助 · AI</span>
       </button>
     </div>
     <div class="app-body">
@@ -1172,19 +1422,24 @@ onBeforeUnmount(() => {
   .agent-fab:hover { transform: translateY(-1px); box-shadow: 0 16px 34px rgba(75, 87, 162, .28); }
 }
 .agent-chat-panel { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); height: min(640px, calc(100vh - 40px)); overflow: hidden; border-radius: var(--ds-radius-dialog); background: rgba(255,255,255,.98); box-shadow: var(--ds-shadow-overlay); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.agent-float.is-expanded .agent-chat-panel { width: min(580px, calc(100vw - 32px)); }
 .agent-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, rgba(91,106,191,.11), rgba(255,255,255,.66)); }
 .agent-chat-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.agent-chat-title { color: var(--text); font-size: 14px; font-weight: 700; }
+.agent-chat-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 32px; height: 32px; border-radius: 10px; background: var(--primary-bg); color: var(--primary); }
+.agent-chat-title { color: var(--text); font-size: 15px; font-weight: 700; }
 .agent-chat-subtitle { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.agent-chat-subtitle { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #43b866; box-shadow: 0 0 0 3px rgba(67,184,102,.12); }
 .agent-chat-actions { display: flex; gap: 4px; }
 .agent-icon-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); cursor: pointer; touch-action: manipulation; }
 .agent-icon-button:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-icon-button:active { transform: scale(.94); }
 .agent-chat-body { flex: 1; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 24px 20px; background: var(--ds-color-surface-subtle); scroll-behavior: smooth; }
-.agent-chat-welcome { display: grid; justify-items: center; gap: 8px; margin: 58px 8px 30px; color: var(--text-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
-.agent-chat-welcome span { max-width: 260px; }
+.agent-chat-welcome { display: grid; justify-items: center; gap: 8px; margin: 48px 8px 30px; color: var(--text-secondary); text-align: center; font-size: 13px; line-height: 1.5; }
+.agent-chat-welcome p { max-width: 280px; margin: 0; }
 .agent-welcome-title { color: var(--text); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+.agent-capability-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 330px; margin-top: 4px; }
+.agent-capability-list span { padding: 5px 8px; border: 1px solid rgba(91,106,191,.14); border-radius: 999px; background: rgba(238,240,251,.72); color: var(--primary); font-size: 11px; }
 .agent-suggestion-list { display: grid; width: min(300px, 100%); gap: 7px; margin-top: 13px; }
 .agent-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.78); color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: border-color var(--ds-duration-fast) var(--ds-ease-out), background var(--ds-duration-fast) var(--ds-ease-out), color var(--ds-duration-fast) var(--ds-ease-out), transform var(--ds-duration-fast) var(--ds-ease-out); }
 .agent-suggestion:hover { border-color: rgba(91,106,191,.36); background: var(--primary-bg); color: var(--primary); }
@@ -1193,8 +1448,8 @@ onBeforeUnmount(() => {
 .agent-message.assistant { display: block; }
 .agent-message.user { justify-content: flex-end; }
 .agent-message.plan { display: block; margin: 7px 0 10px; }
-.agent-message-bubble { min-width: 0; max-width: 100%; box-sizing: border-box; padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.62; }
-.agent-message.assistant .agent-message-bubble { width: min(86%, 320px); }
+.agent-message-bubble { min-width: 0; max-width: 100%; box-sizing: border-box; padding: 8px 0; border-radius: 15px; background: transparent; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.62; }
+.agent-message.assistant .agent-message-bubble { width: min(94%, 500px); }
 .agent-message.user .agent-message-bubble { width: fit-content; max-width: min(78%, 290px); padding: 10px 12px; border-radius: 15px 15px 5px 15px; background: var(--primary-bg); color: var(--text); box-shadow: 0 2px 8px rgba(40, 48, 85, .06); }
 .agent-markdown { line-height: 1.52; }
 .agent-markdown p { margin: .28em 0; }
@@ -1211,7 +1466,7 @@ onBeforeUnmount(() => {
 .agent-markdown code { padding: 2px 5px; border-radius: 5px; background: rgba(91,106,191,.1); color: var(--primary); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agent-markdown pre { margin: 9px 0; padding: 11px 12px; overflow-x: auto; border: 1px solid rgba(91,106,191,.12); border-radius: 10px; background: #f5f6fb; }
 .agent-markdown pre code { padding: 0; background: transparent; color: var(--text); font-size: 12px; white-space: pre; }
-.agent-markdown blockquote { margin: 9px 0; padding: 2px 0 2px 11px; border-left: 3px solid rgba(91,106,191,.4); color: var(--text-secondary); }
+.agent-markdown blockquote { margin: 9px 0; padding: 8px 10px; border: 1px solid rgba(91,106,191,.18); border-radius: 8px; background: rgba(238,240,251,.45); color: var(--text-secondary); }
 .agent-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 .agent-markdown hr { margin: 12px 0; border: 0; border-top: 1px solid var(--border); }
 .agent-markdown { min-width: 0; max-width: 100%; }
@@ -1219,7 +1474,38 @@ onBeforeUnmount(() => {
 .agent-markdown th, .agent-markdown td { padding: 6px 8px; border: 1px solid var(--border); text-align: left; white-space: normal; overflow-wrap: anywhere; word-break: break-word; vertical-align: top; }
 .agent-markdown th { background: var(--primary-bg); color: var(--text); font-weight: 650; }
 .agent-streaming-text { white-space: pre-wrap; }
-.agent-trace-card { width: min(92%, 350px); box-sizing: border-box; margin: 5px 0 9px; padding: 9px 11px; border: 1px solid rgba(91,106,191,.16); border-radius: 12px; background: rgba(248,249,253,.94); color: var(--text-secondary); box-shadow: 0 2px 8px rgba(40,48,85,.04); }
+.agent-result-block { width: min(100%, 520px); margin: 7px 0 12px; }
+.agent-result-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--primary); font: var(--ds-type-meta); font-weight: 700; }
+.agent-excel-preview-card.agent-result-card { margin-top: 0; padding: 14px; border-color: rgba(91,106,191,.22); border-radius: 14px; background: var(--ds-color-surface); box-shadow: 0 4px 14px rgba(40,48,85,.06); }
+.agent-result-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.agent-result-card-title { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--primary); }
+.agent-result-card-title strong { color: var(--text); font-size: 14px; }
+.agent-result-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; background: var(--primary-bg); color: var(--primary); font: var(--ds-type-meta); }
+.agent-result-status.is-waiting { background: #fff5df; color: #8a5b0a; }
+.agent-result-status.is-success { background: #eaf7ee; color: var(--success); }
+.agent-result-context { margin-top: 6px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.agent-result-stats { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 7px; margin-top: 12px; }
+.agent-result-stats div { display: grid; gap: 2px; padding: 8px 7px; border-radius: 9px; background: var(--ds-color-surface-subtle); text-align: center; }
+.agent-result-stats strong { color: var(--text); font-size: 18px; line-height: 1; }
+.agent-result-stats span { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
+.agent-result-stats .is-success strong, .agent-result-stats .is-success span { color: var(--success); }
+.agent-result-stats .is-error strong, .agent-result-stats .is-error span { color: var(--danger); }
+.agent-result-consequence { margin-top: 10px; padding: 8px 10px; border-radius: 9px; background: #fff8e8; color: #8a5b0a; font: var(--ds-type-meta); }
+.agent-mapping-details { margin-top: 11px; border-top: 1px solid var(--border); }
+.agent-mapping-details summary { padding-top: 10px; color: var(--primary); font: var(--ds-type-meta); font-weight: 650; cursor: pointer; list-style: none; }
+.agent-mapping-details summary::-webkit-details-marker { display: none; }
+.agent-mapping-list { display: grid; gap: 5px; max-height: 210px; margin-top: 8px; overflow-y: auto; }
+.agent-mapping-row { display: grid; grid-template-columns: 18px minmax(0,1fr) auto minmax(0,1fr) auto; align-items: center; gap: 6px; min-width: 0; padding: 5px 0; font-size: 12px; }
+.agent-mapping-symbol { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: #eaf7ee; color: var(--success); font-size: 11px; font-weight: 700; }
+.agent-mapping-symbol.needs-confirmation { background: #fff5df; color: #a56a12; }
+.agent-mapping-symbol.ignored { background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-muted); }
+.agent-mapping-source, .agent-mapping-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-mapping-arrow { color: var(--ds-color-ink-muted); }
+.agent-mapping-row small { color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); white-space: nowrap; }
+.agent-result-actions { margin-top: 12px; }
+.agent-result-actions .btn { min-height: 36px; }
+.agent-excel-preview-card.agent-result-card .agent-excel-preview-input-hint { margin-top: 10px; font-size: 12px; }
+.agent-trace-card { width: min(100%, 520px); box-sizing: border-box; margin: 7px 0 9px; padding: 8px 10px; border: 1px solid rgba(91,106,191,.12); border-radius: 10px; background: rgba(248,249,253,.72); color: var(--text-secondary); }
 .agent-trace-card[open] { background: rgba(248,249,253,.98); }
 .agent-trace-card summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: var(--ds-type-meta); }
 .agent-trace-card summary::-webkit-details-marker { display: none; }
@@ -1249,7 +1535,7 @@ onBeforeUnmount(() => {
 .agent-excel-preview-card { margin-top: 7px; padding: 8px 9px; border: 1px solid rgba(91,106,191,.14); border-radius: 9px; background: rgba(255,255,255,.72); }
 .agent-excel-preview-title { color: var(--text); font: var(--ds-type-meta); font-weight: 700; }
 .agent-excel-preview-input-hint { margin-top: 4px; color: #9a6818; font: 11px/1.4 var(--font-sans, system-ui); }
-.agent-excel-preview-stats { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 5px; color: var(--ds-color-ink-secondary); font: 11px/1.4 var(--font-sans, system-ui); }
+.agent-excel-preview-stats { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 5px; color: var(--ds-color-ink-secondary); font: 12px/1.4 var(--font-sans, system-ui); }
 .agent-excel-preview-stats .is-success { color: var(--success); }
 .agent-excel-preview-stats .is-error { color: var(--danger, #c83b32); }
 .agent-excel-preview-mappings { display: grid; gap: 2px; margin-top: 6px; color: var(--text-secondary); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -1285,10 +1571,13 @@ onBeforeUnmount(() => {
 .agent-action-state.success { color: var(--success); }
 .agent-action-state.error { color: var(--danger, #c83b32); }
 .agent-thinking { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
-.agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-bounce 1s infinite ease-in-out; }
+.agent-thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: agent-thinking-pulse 1s infinite ease-in-out; }
 .agent-thinking span:nth-child(2) { animation-delay: .12s; }
 .agent-thinking span:nth-child(3) { animation-delay: .24s; }
-.agent-chat-error { margin: 12px 2px 0; padding: 8px 10px; border-radius: var(--ds-radius-control); background: var(--ds-color-danger-soft); color: var(--ds-color-danger); font: var(--ds-type-meta); }
+.agent-chat-error { display: grid; gap: 3px; margin: 12px 2px 0; padding: 10px 11px; border: 1px solid rgba(180,35,24,.16); border-radius: var(--ds-radius-control); background: var(--ds-color-danger-soft); color: var(--ds-color-danger); font: var(--ds-type-meta); }
+.agent-chat-error strong { font-size: 13px; }
+.agent-error-retry { width: fit-content; margin-top: 4px; padding: 3px 0; border: 0; background: transparent; color: var(--ds-color-danger); font: var(--ds-type-label); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.agent-error-retry:disabled { opacity: .5; cursor: default; }
 .agent-chat-foot { padding: 10px 14px 13px; border-top: 1px solid var(--border); background: rgba(255,255,255,.9); }
 .agent-composer { padding: 7px 9px 8px 12px; border: 1px solid rgba(126,137,194,.35); border-radius: 16px; background: #fff; box-shadow: 0 3px 12px rgba(40, 48, 85, .06); }
 .agent-excel-input { display: none; }
@@ -1302,7 +1591,7 @@ onBeforeUnmount(() => {
 .agent-excel-error { margin: 0 0 7px; color: var(--danger, #c83b32); font-size: 11px; line-height: 1.4; }
 .agent-message-attachment { display: flex; align-items: center; gap: 7px; max-width: min(82%, 320px); padding: 9px 11px; border: 1px solid rgba(255,255,255,.38); border-radius: 11px; background: rgba(255,255,255,.16); color: inherit; }
 .agent-message-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-attach-button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.agent-attach-button { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 3px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; }
 .agent-attach-button:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-attach-button:disabled { opacity: .5; cursor: default; }
 .agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; resize: none; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
@@ -1316,7 +1605,7 @@ onBeforeUnmount(() => {
 .agent-send-button:disabled { opacity: .38; cursor: default; }
 .agent-send-button:not(:disabled):active { transform: scale(.93); }
 .agent-chat-hint { margin: 7px 2px 0; color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }
-@keyframes agent-thinking-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-3px); opacity: 1; } }
+@keyframes agent-thinking-pulse { 0%, 100% { opacity: .42; } 50% { opacity: 1; } }
 
 @media (min-width: 641px) and (max-width: 1100px) {
   .topbar-leading { grid-column: 1; grid-row: 1; }
@@ -1345,8 +1634,13 @@ onBeforeUnmount(() => {
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); }
   .agent-float.is-open { right: 0; bottom: 0; width: 100%; }
-  .agent-chat-panel { width: 100%; height: min(680px, calc(100vh - 12px)); border-radius: 20px 20px 0 0; }
+  .agent-float.is-expanded .agent-chat-panel { width: 100%; }
+  .agent-chat-panel { width: 100%; height: min(760px, calc(100dvh - 8px)); max-height: calc(100dvh - 8px); border-radius: 20px 20px 0 0; }
   .agent-chat-foot { padding-bottom: calc(13px + env(safe-area-inset-bottom)); }
+  .agent-chat-foot textarea { min-height: 56px; font-size: 16px; }
+  .agent-attach-button { min-height: 44px; }
+  .agent-send-button { width: 44px; height: 44px; }
+  .agent-result-stats { gap: 5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

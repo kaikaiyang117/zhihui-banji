@@ -1,9 +1,9 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, BarChart3, Brain, CheckCircle, CircleAlert, Copy, Download, FileSpreadsheet, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, Upload, UserPlus, X } from 'lucide-vue-next'
+import { ArrowLeft, BarChart3, Brain, CheckCircle, CircleAlert, Copy, GripVertical, KeyRound, MessageCircle, Pencil, Play, Plus, QrCode, RefreshCw, ShieldCheck, Square, Trash2, UserPlus, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import { del, get, post, put, analyzeExcelImport, previewExcelImport, discardExcelImport, downloadExcelImportErrors } from '../api'
+import { del, get, post, put } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 
 const router = useRouter()
@@ -32,19 +32,6 @@ const sessionBusy = ref(false)
 const currentWebSessionId = ref(getCurrentWebSessionId())
 let loginTimer = null
 let statusTimer = null
-
-const importStep = ref('idle')
-const importBusy = ref(false)
-const importError = ref('')
-const importAnalysis = ref(null)
-const importPreview = ref(null)
-const importResult = ref(null)
-const importFileId = ref('')
-const importModule = ref('')
-const importSheetIndex = ref(0)
-const importDuplicateStrategy = ref('update')
-const importFileInput = ref(null)
-const importMappingExpanded = ref(false)
 
 function getCurrentWebSessionId() {
   try { return window.localStorage.getItem('meimei_agent_web_session_id') || '' } catch { return '' }
@@ -359,109 +346,6 @@ function loginStatusText(value) {
   return ({ waiting: '请用微信扫描二维码', scanned: '已扫码，请在微信中确认', expired: '二维码已过期，请重新生成' })[value] || '正在等待微信授权'
 }
 
-function formatFileSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function moduleName(name) {
-  return ({ students: '学生信息', scores: '成绩', calendar: '校历', timetable: '课程表' })[name] || name
-}
-
-function triggerImportFile() {
-  importFileInput.value?.click()
-}
-
-async function handleImportFile(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
-  event.target.value = ''
-  importBusy.value = true
-  importError.value = ''
-  importStep.value = 'uploading'
-  importAnalysis.value = null
-  importPreview.value = null
-  importResult.value = null
-  try {
-    const fd = new FormData()
-    fd.append('file', file)
-    const result = await analyzeExcelImport(fd)
-    importFileId.value = result.file_id
-    importAnalysis.value = result
-    if (result.candidate_modules?.length === 1) {
-      importModule.value = result.candidate_modules[0].module
-      importSheetIndex.value = result.candidate_modules[0].sheet_index ?? 0
-    } else {
-      importModule.value = ''
-      importSheetIndex.value = 0
-    }
-    importStep.value = 'analyzed'
-  } catch (e) {
-    importError.value = e.detail?.message || e.message || '文件分析失败'
-    importStep.value = 'idle'
-  } finally {
-    importBusy.value = false
-  }
-}
-
-function selectImportCandidate(candidate) {
-  importModule.value = candidate.module
-  importSheetIndex.value = candidate.sheet_index ?? 0
-}
-
-async function downloadImportErrors() {
-  importError.value = ''
-  try {
-    await downloadExcelImportErrors(importFileId.value, importModule.value)
-  } catch (e) {
-    importError.value = e.message || '错误报告下载失败'
-  }
-}
-
-async function doImportPreview() {
-  if (!importFileId.value || !importModule.value) return
-  importBusy.value = true
-  importError.value = ''
-  importMappingExpanded.value = false
-  try {
-    const result = await previewExcelImport(importFileId.value, importModule.value, importSheetIndex.value, importDuplicateStrategy.value)
-    importPreview.value = result
-    importStep.value = 'preview'
-  } catch (e) {
-    importError.value = e.detail?.message || e.message || '预览生成失败'
-  } finally {
-    importBusy.value = false
-  }
-}
-
-async function doImportExecute() {
-  if (!importPreview.value) return
-  importError.value = '旧版导入入口仅保留预览；请在班小助中上传文件并通过统一确认链写入。'
-}
-
-async function doImportDiscard() {
-  if (!importFileId.value) return
-  try {
-    await discardExcelImport(importFileId.value)
-  } catch { /* ignore */ }
-  resetImport()
-}
-
-function resetImport() {
-  importStep.value = 'idle'
-  importBusy.value = false
-  importError.value = ''
-  importAnalysis.value = null
-  importPreview.value = null
-  importResult.value = null
-  importFileId.value = ''
-  importModule.value = ''
-  importSheetIndex.value = 0
-  importDuplicateStrategy.value = 'update'
-  importMappingExpanded.value = false
-}
-
 onMounted(() => {
   load()
   loadAgentOperations()
@@ -560,178 +444,6 @@ onBeforeUnmount(() => {
           <div><span>失败率</span><strong>{{ agentUsage ? `${(agentUsage.tool_calls.failure_rate * 100).toFixed(1)}%` : '—' }}</strong></div>
         </div>
         <div class="muted">统计来自本地 Agent 审计记录；模型 Token 需模型接口返回 usage 后才会显示。</div>
-      </div>
-
-      <div class="card excel-import-card">
-        <div class="card-title"><FileSpreadsheet :size="16" /> 对话式 Excel 导入</div>
-
-        <div v-if="importError" class="agent-error"><CircleAlert :size="16" /> {{ importError }}</div>
-
-        <div v-if="importStep === 'idle'" class="import-idle">
-          <input ref="importFileInput" type="file" accept=".xlsx" style="display:none" @change="handleImportFile" />
-          <button class="btn btn-primary" type="button" :disabled="importBusy" @click="triggerImportFile">
-            <Upload :size="14" /> 选择 Excel 文件
-          </button>
-        </div>
-
-        <div v-else-if="importStep === 'uploading'" class="import-uploading">
-          <div class="import-spinner"></div>
-          <span>正在分析文件…</span>
-        </div>
-
-        <div v-else-if="importStep === 'analyzed' && importAnalysis" class="import-analyzed">
-          <div class="import-info-card">
-            <div class="import-info-row">
-              <span class="import-info-label">文件名</span>
-              <strong>{{ importAnalysis.filename }}</strong>
-            </div>
-            <div class="import-info-row">
-              <span class="import-info-label">大小</span>
-              <span>{{ formatFileSize(importAnalysis.size_bytes) }}</span>
-            </div>
-            <div class="import-info-row">
-              <span class="import-info-label">工作表</span>
-              <span>{{ importAnalysis.sheets.join('、') }}</span>
-            </div>
-            <div class="import-info-row">
-              <span class="import-info-label">识别方式</span>
-              <span>{{ importAnalysis.recognition_mode === 'hybrid' ? 'AI 语义识别 + 本地规则校验' : '本地规则识别' }}</span>
-            </div>
-            <div v-if="importAnalysis.scope" class="import-info-row">
-              <span class="import-info-label">导入范围</span>
-              <strong>{{ importAnalysis.scope.class_name }} · {{ importAnalysis.scope.term_name }}</strong>
-            </div>
-          </div>
-          <div v-if="importAnalysis.recognition_warning" class="import-recognition-warning">{{ importAnalysis.recognition_warning }}</div>
-
-          <div class="import-module-card">
-            <div class="import-section-title">识别结果</div>
-            <div v-if="importAnalysis.candidate_modules?.length" class="import-module-list">
-              <label v-for="candidate in importAnalysis.candidate_modules" :key="`${candidate.module}-${candidate.sheet_index}`" class="import-module-option" :class="{ selected: importModule === candidate.module && importSheetIndex === candidate.sheet_index }">
-                <input type="radio" :checked="importModule === candidate.module && importSheetIndex === candidate.sheet_index" :disabled="importBusy" @change="selectImportCandidate(candidate)" />
-                <div class="import-module-info">
-                  <strong>{{ moduleName(candidate.module) }} · {{ importAnalysis.sheets[candidate.sheet_index] }}</strong>
-                  <span class="import-module-reason">{{ candidate.reason }}</span>
-                </div>
-                <span class="import-module-confidence" :class="{ high: candidate.confidence >= 0.8, medium: candidate.confidence >= 0.5 && candidate.confidence < 0.8 }">
-                  {{ (candidate.confidence * 100).toFixed(0) }}%
-                </span>
-              </label>
-            </div>
-            <div v-else class="import-no-module">
-              <CircleAlert :size="14" /> 无法自动识别，请确认文件格式。
-            </div>
-
-            <div v-if="importAnalysis.sheets.length > 1" class="import-sheet-select">
-              <label class="import-info-label">选择工作表</label>
-              <select v-model="importSheetIndex" class="form-input import-sheet-dropdown" :disabled="importBusy">
-                <option v-for="(sheet, idx) in importAnalysis.sheets" :key="idx" :value="idx">{{ sheet }} ({{ importAnalysis.row_counts[idx] }} 行)</option>
-              </select>
-            </div>
-
-            <div class="import-dup-select">
-              <label class="import-info-label">重复记录策略</label>
-              <select v-model="importDuplicateStrategy" class="form-input import-sheet-dropdown" :disabled="importBusy">
-                <option value="update">按学号更新已有记录</option>
-                <option value="skip">跳过已有记录</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="import-actions">
-            <button class="btn btn-primary" type="button" :disabled="!importModule || importBusy" @click="doImportPreview">
-              预览导入
-            </button>
-            <button class="btn btn-outline" type="button" :disabled="importBusy" @click="doImportDiscard">
-              取消
-            </button>
-          </div>
-        </div>
-
-        <div v-else-if="importStep === 'preview' && importPreview" class="import-preview">
-          <div class="import-info-card">
-            <div class="import-info-row">
-              <span class="import-info-label">模块</span>
-              <strong>{{ moduleName(importModule) }}</strong>
-            </div>
-          </div>
-
-          <div class="import-counts">
-            <div class="import-count-item"><span>总行数</span><strong>{{ importPreview.total_rows }}</strong></div>
-            <div class="import-count-item"><span>有效</span><strong class="status-ok">{{ importPreview.valid_rows }}</strong></div>
-            <div class="import-count-item"><span>新增</span><strong>{{ importPreview.new_count }}</strong></div>
-            <div class="import-count-item"><span>更新</span><strong>{{ importPreview.update_count }}</strong></div>
-            <div class="import-count-item"><span>跳过</span><strong class="status-off">{{ importPreview.skip_count }}</strong></div>
-            <div class="import-count-item"><span>错误</span><strong :class="importPreview.error_rows > 0 ? 'status-error' : 'status-ok'">{{ importPreview.error_rows }}</strong></div>
-          </div>
-
-          <div v-if="importPreview.error_rows > 0 && importPreview.errors?.length" class="import-error-preview">
-            <div class="import-section-title">错误行（前 10 条）</div>
-            <div class="import-error-list">
-              <div v-for="(err, idx) in importPreview.errors.slice(0, 10)" :key="idx" class="import-error-row">
-                <span class="import-error-line">第 {{ err.row }} 行</span>
-                <span>{{ err.reason }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="importPreview.field_mapping?.some(m => m.mapping_status === 'needs_confirmation')" class="import-mapping-warning">
-            存在置信度不足的 AI 字段建议，本次不能直接导入；请修改原文件中的列名后重新上传。
-          </div>
-
-          <details class="import-mapping-details" :open="importMappingExpanded" @toggle="importMappingExpanded = $event.currentTarget.open">
-            <summary>
-              <span>字段映射 ({{ importPreview.field_mapping.filter(m => m.matched).length }}/{{ importPreview.field_mapping.length }})</span>
-            </summary>
-            <table class="import-mapping-table">
-              <thead>
-                <tr><th>Excel 列名</th><th>目标字段</th><th>状态</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="(mapping, idx) in importPreview.field_mapping" :key="idx">
-                  <td>{{ mapping.source }}</td>
-                  <td>{{ mapping.target || '—' }}</td>
-                  <td><span :class="mapping.mapping_status === 'needs_confirmation' ? 'status-warn' : (mapping.matched ? 'status-ok' : 'status-off')">{{ mapping.mapping_status === 'needs_confirmation' ? '待人工确认' : (mapping.matched ? (mapping.source_kind === 'ai' ? 'AI 建议，已校验' : '规则匹配') : '未匹配') }}</span></td>
-                </tr>
-              </tbody>
-            </table>
-          </details>
-
-          <div class="import-actions">
-            <button class="btn btn-primary" type="button" disabled title="请在班小助中使用统一确认链写入" @click="doImportExecute">
-              请在班小助中确认写入
-            </button>
-            <button class="btn btn-outline" type="button" :disabled="importBusy" @click="doImportDiscard">
-              取消
-            </button>
-          </div>
-        </div>
-
-        <div v-else-if="importStep === 'result' && importResult" class="import-result">
-          <div class="import-result-card">
-            <CheckCircle :size="28" class="import-result-icon" />
-            <div class="import-result-title">导入完成</div>
-          </div>
-
-          <div class="import-counts">
-            <div class="import-count-item"><span>新增</span><strong class="status-ok">{{ importResult.imported }}</strong></div>
-            <div class="import-count-item"><span>更新</span><strong>{{ importResult.updated }}</strong></div>
-            <div class="import-count-item"><span>跳过</span><strong class="status-off">{{ importResult.skipped }}</strong></div>
-            <div class="import-count-item"><span>错误</span><strong :class="importResult.error_count > 0 ? 'status-error' : 'status-ok'">{{ importResult.error_count }}</strong></div>
-          </div>
-
-          <div v-if="importResult.error_count > 0" class="import-error-download">
-            <button type="button" class="btn btn-outline" @click="downloadImportErrors">
-              <Download :size="14" /> 下载错误行
-            </button>
-          </div>
-
-          <div class="import-actions">
-            <button class="btn btn-outline" type="button" @click="doImportDiscard">
-              继续导入其他文件
-            </button>
-          </div>
-        </div>
       </div>
 
       <div class="card wechat-card">
@@ -887,59 +599,10 @@ onBeforeUnmount(() => {
 .wechat-save-policy { margin-top:16px; }
 .loading-inline { color:var(--text-secondary); font-size:13px; padding:12px 0; }
 
-.excel-import-card { margin-top:18px; }
-.import-idle { display:flex; gap:10px; align-items:center; }
-.import-uploading { display:flex; align-items:center; gap:10px; color:var(--text-secondary); font-size:13px; }
-.import-spinner { width:18px; height:18px; border:2px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:import-spin .6s linear infinite; }
-@keyframes import-spin { to { transform:rotate(360deg); } }
-.import-info-card { padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); display:grid; gap:8px; margin-bottom:14px; }
-.import-info-row { display:flex; align-items:center; gap:8px; font-size:13px; }
-.import-info-label { color:var(--text-secondary); font-size:12px; min-width:70px; }
-.import-recognition-warning { margin:-6px 0 14px; padding:8px 10px; border-radius:8px; background:var(--warning-bg); color:#8a5a10; font-size:12px; }
-.import-module-card { padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); margin-bottom:14px; }
-.import-section-title { font-size:13px; font-weight:600; margin-bottom:10px; }
-.import-module-list { display:grid; gap:8px; }
-.import-module-option { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid transparent; border-radius:9px; cursor:pointer; transition:border-color .15s ease, background .15s ease; }
-.import-module-option:hover { background:var(--primary-bg); }
-.import-module-option.selected { border-color:var(--primary); background:var(--primary-bg); }
-.import-module-option input[type="radio"] { accent-color:var(--primary); }
-.import-module-info { min-width:0; flex:1; display:grid; gap:2px; }
-.import-module-info strong { font-size:13px; }
-.import-module-reason { color:var(--text-secondary); font-size:12px; }
-.import-module-confidence { flex:none; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; }
-.import-module-confidence.high { background:#e6f9ed; color:#1a8c42; }
-.import-module-confidence.medium { background:#fef3e0; color:#a56a12; }
-.import-no-module { display:flex; align-items:center; gap:7px; color:var(--text-secondary); font-size:12px; }
-.import-sheet-select, .import-dup-select { margin-top:12px; display:grid; gap:4px; }
-.import-sheet-dropdown { max-width:300px; }
-.import-counts { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:14px; }
-.import-count-item { display:grid; gap:3px; padding:10px; border-radius:8px; background:var(--bg); text-align:center; }
-.import-count-item span { color:var(--text-secondary); font-size:11px; }
-.import-count-item strong { font-size:16px; }
-.import-error-preview { margin-bottom:14px; }
-.import-mapping-warning { margin-bottom:14px; padding:9px 11px; border:1px solid #f0d59b; border-radius:8px; background:#fff8e8; color:#8a5b0a; font-size:12px; line-height:1.5; }
-.import-error-list { display:grid; gap:4px; max-height:160px; overflow:auto; }
-.import-error-row { display:flex; gap:8px; padding:5px 8px; border-radius:6px; background:var(--bg); font-size:12px; }
-.import-error-line { color:#c83b32; font-weight:600; white-space:nowrap; min-width:60px; }
-.import-mapping-details { margin-bottom:14px; border:1px solid var(--border); border-radius:9px; overflow:hidden; }
-.import-mapping-details summary { padding:8px 12px; background:var(--bg); font-size:13px; font-weight:600; cursor:pointer; list-style:none; }
-.import-mapping-details summary::-webkit-details-marker { display:none; }
-.import-mapping-table { width:100%; border-collapse:collapse; font-size:12px; }
-.import-mapping-table th, .import-mapping-table td { padding:6px 10px; border-top:1px solid var(--border); text-align:left; }
-.import-mapping-table th { background:var(--bg); color:var(--text-secondary); font-weight:600; }
-.import-actions { display:flex; gap:8px; }
-.import-result-card { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-.import-result-icon { color:var(--success); }
-.import-result-title { font-size:16px; font-weight:700; }
-.import-error-download { margin-bottom:14px; }
-.import-error-download .btn { text-decoration:none; }
-
 @media (max-width: 850px) { .wechat-connection-grid { grid-template-columns:1fr; } }
 @media (max-width: 700px) {
   .agent-status-grid { grid-template-columns:1fr; }
   .session-toolbar { align-items:flex-start; flex-direction:column; }.usage-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .agent-profile-heading { align-items:flex-start; flex-direction:column; }.agent-profile-card { align-items:flex-start; }.agent-profile-actions { flex-wrap:wrap; margin-left:auto; }.agent-profile-main { padding-top:2px; }
-  .import-counts { grid-template-columns:repeat(3,minmax(0,1fr)); }
-  .import-module-option { padding:6px 8px; }
 }
 </style>

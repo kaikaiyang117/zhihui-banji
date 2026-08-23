@@ -339,6 +339,29 @@ export async function downloadExcelImportErrors(fileId, module, sessionId = '') 
   URL.revokeObjectURL(url)
 }
 
+export async function downloadExcelImportPlanErrors(planId, sessionId = '') {
+  await ensureDevicePairing()
+  const response = await fetch(`/api/excel-import-plans/${encodeURIComponent(planId)}/error-report`, {
+    headers: { ...accessHeaders(), ...sessionHeaders(sessionId) },
+  })
+  if (!response.ok) {
+    let data = null
+    try { data = await response.json() } catch { /* 非 JSON 错误响应 */ }
+    const error = new Error(typeof data?.detail === 'string' ? data.detail : `错误报告下载失败 (${response.status})`)
+    error.status = response.status
+    throw error
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `导入错误报告-${String(planId).slice(0, 8)}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function getTeacherClasses() {
   return request('/teacher/classes')
 }

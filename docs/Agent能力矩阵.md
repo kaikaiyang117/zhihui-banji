@@ -57,9 +57,9 @@
 | 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
 | 首页近期考试 | `scores.listUpcomingExams` | `query_field_info(upcoming_exams)` | 是 | 是 | 是 | 只读；排除已结束考试并按日期排序 | 开发中 |
 | 多班级教师课程/考试汇总 | `teacherClasses.getTeacherTimetable/getTeacherExams` | 无 | 是 | 否 | 否 | 只读；按教师关联班级汇总，网页专用 | 开发中 |
-| Excel Artifact 检查与只读分析 | `excel_inspect_workbook`、`excel_list_regions`、`excel_suggest_import_plan`、`excel_read_range`、`excel_profile_region`、`excel_query_region` | 结构检查、适配器推荐、范围读取、区域统计、本地筛选与聚合 | 是 | 是 | 否 | 网页选择文件只上传 Artifact，文字与附件发送后才懒解析；默认 `structure_only`；范围读取最多 200 行/50 列；查询在本地执行，默认只返回统计结果；原始值需要服务端授予本轮能力；Artifact 绑定操作者、渠道、会话、班级、学期和过期时间 | 已接入 |
+| Excel Artifact 检查与只读分析 | `excel_inspect_workbook`、`excel_list_regions`、`excel_suggest_import_plan`、`excel_read_range`、`excel_profile_region`、`excel_query_region` | 结构检查、适配器推荐、范围读取、区域统计、本地筛选与聚合 | 是 | 是 | 否 | 网页选择文件只上传 Artifact，文字与附件发送后才懒解析；默认 `structure_only`；范围读取最多 200 行/50 列；查询在本地执行，默认只返回统计结果；`allowed_values` 必须由服务端显式授予本轮能力，默认拒绝；Artifact 绑定操作者、渠道、会话、班级、学期和过期时间 | 已接入 |
 | Excel 导入草稿计划 | `excel_create_import_plan`、`excel_update_import_plan` | 保存/修改映射和导入选项 | 是 | 是 | 否 | 只保存草稿，不写业务数据；映射或选项变化会使旧预览失效；Artifact、会话和范围由服务端校验 | 已接入 |
-| Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | `excel_preview_import`、`execute_excel_import` | 是 | 是 | 否 | 附件本身不代表导入，只有明确导入意图才创建计划；真实业务预览绑定 Artifact/ImportPlan；执行前复核预览哈希，确认后创建备份，异步准备后在单一 SQLite 事务中由适配器写入、验证，验证失败回滚；错误行可下载；旧网页 `.xlsx` 入口仍保留兼容；iLink 文件未接入 | 已接入 |
+| Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | `excel_preview_import`、`execute_excel_import` | 是 | 是 | 否 | 附件本身不代表导入，只有明确导入意图才创建计划；预览只返回 `needs_input`/`ready_for_authorization`，只有执行工具创建一次 `PendingAction`；执行前复核预览哈希和业务效果哈希，确认后创建备份，异步准备后在单一 SQLite 事务中由适配器写入、验证，验证失败回滚；Action 状态和结果可随会话恢复；错误行可下载为 XLSX；设置页旧 Excel 向导和旧版直接执行接口（410）已移除；iLink 文件未接入 | 已接入 |
 | 图片/截图证据 | `evidence` | `evidence_list` | 是 | 是 | 是 | 只读元数据；文件写入走网页/业务服务，所有者、学生范围、哈希和软删除校验 | 开发中 |
 | AI 家校通知场景与内容生成 | `notificationTemplates`、`notificationDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 后端结构只校验事实底稿；网页选择通知类型并调用 AI 生成可编辑文案，不提供模板管理或自动发送 | 开发中 |
 | 家长消息回复前检查与草稿生成 | `parentReply`、`parentReplyDrafter` | 无（页面专用 AI 入口） | 是 | 否 | 否 | 敏感只读；只读取当前班级/学期脱敏事实；确定性规则匹配制度边界，模型仅可凭输入原文补充登记规则且不能降级；显示证据状态、待核实条件与投诉升级信号；机械化或越权草稿回退规则草稿；不自动发送，教师确认已发送后才复用现有沟通写入和证据服务 | 开发中 |

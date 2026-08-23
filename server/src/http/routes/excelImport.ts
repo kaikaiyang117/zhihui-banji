@@ -3,7 +3,6 @@ import type { FastifyInstance } from 'fastify';
 import {
   analyzeUpload,
   generateImportPreview,
-  executeImport,
   discardUpload,
   buildErrorExcel,
   cleanExpiredUploads,
@@ -81,29 +80,11 @@ export function registerExcelImportRoutes(app: FastifyInstance): void {
     }
   });
 
-  app.post('/api/excel-import/execute', async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
-    const fileId = String(body.file_id ?? '').trim();
-    const module = String(body.module ?? '').trim();
-    const previewHash = String(body.preview_hash ?? '').trim();
-    const requestId = String(body.request_id ?? '').trim() || `excel-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const actor = currentActor();
-    const sessionId = String((request.headers as Record<string, unknown>)['x-workbench-session'] ?? '');
-
-    if (!fileId || !module || !previewHash) {
-      return reply.status(422).send({ detail: '缺少 file_id、module 或 preview_hash' });
-    }
-
-    try {
-      const result = await executeImport({ fileId, module, previewHash, requestId, owner: actor.actorId, session: sessionId, channel: actor.channel });
-      return { ok: true, ...result, request_id: requestId };
-    } catch (error) {
-      if (error instanceof ExcelImportError) {
-        const status = /不存在|已过期|已失效/.test(error.message) ? 404 : 400;
-        return reply.status(status).send({ detail: error.message });
-      }
-      throw error;
-    }
+  app.post('/api/excel-import/execute', async (_request, reply) => {
+    return reply.status(410).send({
+      detail: '旧版 Excel 直接执行接口已停用，请通过班小助生成业务预览并确认写入。',
+      replacement: '/api/agent/tools/execute_excel_import',
+    });
   });
 
   app.post('/api/excel-import/discard', async (request, reply) => {

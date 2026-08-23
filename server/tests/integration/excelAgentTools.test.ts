@@ -70,7 +70,7 @@ describe('Excel Agent 只读工具', () => {
     expect(JSON.stringify(profile)).not.toContain('蓝同学');
   });
 
-  it('读取范围默认只返回结构，显式允许时才返回值', async () => {
+  it('读取范围默认只返回结构，服务端显式允许时才返回值', async () => {
     const current = access();
     const artifact = createArtifactFromBuffer({
       buffer: await workbookBuffer(), filename: '读取.xlsx', access: current,
@@ -84,9 +84,13 @@ describe('Excel Agent 只读工具', () => {
     expect(structure.headers).toEqual(['学号', '姓名', '分数']);
     expect(JSON.stringify(structure)).not.toContain('ST-001');
 
+    await expect(invokeToolAsync('excel_read_range', {
+      ...base, exposure_policy: 'allowed_values',
+    }, { channel: 'web', actorId: 'tool-user', sessionId: current.sessionId })).rejects.toThrow(/权限|敏感|授权/);
+
     const allowed = await invokeToolAsync('excel_read_range', {
       ...base, exposure_policy: 'allowed_values',
-    }, { channel: 'web', actorId: 'tool-user', sessionId: current.sessionId });
+    }, { channel: 'web', actorId: 'tool-user', sessionId: current.sessionId, allowSensitiveExcelValues: true });
     expect(allowed.rows).toEqual([
       ['学号', '姓名', '分数'], ['ST-001', '蓝同学', '98'], ['ST-002', '林同学', '86'],
     ]);

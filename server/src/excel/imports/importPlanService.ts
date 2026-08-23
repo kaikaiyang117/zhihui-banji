@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3';
 
 import { getDb } from '../../services/context.js';
 import type { ArtifactAccess, ExcelImportPlan } from '../domain/types.js';
+import { hashBusinessEffect } from '../domain/hash.js';
 import { requireArtifact } from '../artifacts/artifactRepository.js';
 import {
   getImportPlan, requireImportPlan, saveImportPreview, markImportPlanStatus,
@@ -31,7 +32,14 @@ export async function previewImportPlan(
   const db = connOf(conn);
   const plan = requireImportPlan(id, access, db);
   const { adapter, context } = contextOf(plan, access, db);
-  const preview = await adapter.preview(context);
+  const rawPreview = await adapter.preview(context);
+  const preview = {
+    ...rawPreview,
+    business_effect_hash: String(rawPreview.business_effect_hash ?? hashBusinessEffect({
+      module: plan.adapterId,
+      rows: Array.isArray(rawPreview.rows) ? rawPreview.rows : [],
+    })),
+  };
   return saveImportPreview(id, {
     ...preview,
     plan_id: plan.id,
@@ -66,6 +74,11 @@ export async function executeImportPlan(options: {
   // a partially trusted import behind.
   if (adapter.prepare && adapter.commitPrepared && adapter.verifySync) {
     const prepared = await adapter.prepare(context);
+    const expectedEffectHash = String(plan.preview.business_effect_hash ?? '');
+    const freshEffectHash = String(prepared.preview.business_effect_hash ?? '');
+    if (!expectedEffectHash || !freshEffectHash || expectedEffectHash !== freshEffectHash) {
+      throw new ExcelImportExecutionError('目标数据已发生变化，请重新生成导入预览后再确认');
+    }
     try {
       return db.transaction(() => {
         const result = adapter.commitPrepared!({ ...context, requestId: options.requestId }, prepared);

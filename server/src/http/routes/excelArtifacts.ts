@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import ExcelJS from 'exceljs';
 
 import { currentActor } from '../../services/audit.js';
 import { getCurrentScope } from '../../services/context.js';
@@ -128,9 +129,21 @@ export function registerExcelArtifactRoutes(app: FastifyInstance): void {
       const plan = getImportPlan(String(params.id ?? ''), access);
       if (!plan) return reply.status(404).send({ detail: '导入计划不存在或不属于当前会话' });
       const errors = Array.isArray(plan.preview?.errors) ? plan.preview.errors : [];
-      reply.header('content-type', 'application/json; charset=utf-8');
-      reply.header('content-disposition', `attachment; filename="excel-import-errors-${plan.id}.json"`);
-      return { plan_id: plan.id, artifact_id: plan.artifactId, errors };
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('导入错误');
+      sheet.columns = [
+        { header: '原始行号', key: 'row', width: 14 },
+        { header: '错误原因', key: 'reason', width: 60 },
+      ];
+      for (const error of errors) {
+        const item = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+        sheet.addRow({ row: Number(item.row ?? 0), reason: String(item.reason ?? item.message ?? '') });
+      }
+      sheet.getRow(1).font = { bold: true };
+      const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+      reply.header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      reply.header('content-disposition', `attachment; filename="excel-import-errors-${plan.id}.xlsx"`);
+      return reply.send(buffer);
     } catch (error) {
       return reply.status(errorStatus(error)).send({ detail: error instanceof Error ? error.message : '错误报告读取失败' });
     }

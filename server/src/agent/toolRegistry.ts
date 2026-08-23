@@ -42,6 +42,7 @@ export interface ToolExecutionContext {
   /** Server-granted per-turn capability; model arguments cannot set this. */
   allowSensitiveExcelValues?: boolean;
   allowManualExcelMapping?: boolean;
+  approvedExcelMappings?: Array<{ sourceColumn: string; targetField: string }>;
 }
 
 export type ToolHandlerResult = Record<string, unknown> | Promise<Record<string, unknown>>;
