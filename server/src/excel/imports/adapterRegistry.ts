@@ -4,8 +4,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { getDb } from '../../services/context.js';
 import {
-  executeImport, executeImportBuffer, generateImportPreview, previewImportBuffer,
+  executeImport, executeImportBuffer, generateImportPreview, prepareImportBuffer, previewImportBuffer,
 } from '../../services/excelImportAssistant.js';
+import type { PreparedImportBuffer } from '../../services/excelImportAssistant.js';
 
 export interface ImportFieldDefinition {
   target: string;
@@ -42,6 +43,9 @@ export interface ExcelImportAdapter {
   preview(context: ImportAdapterContext): Promise<Record<string, unknown>>;
   execute(context: ImportAdapterContext & { requestId: string }): Promise<Record<string, unknown>>;
   verify(context: ImportAdapterContext & { requestId?: string }, result: Record<string, unknown>): Promise<ImportVerificationResult>;
+  prepare?(context: ImportAdapterContext): Promise<PreparedImportBuffer>;
+  commitPrepared?(context: ImportAdapterContext & { requestId: string }, prepared: PreparedImportBuffer): Record<string, unknown>;
+  verifySync?(context: ImportAdapterContext & { requestId?: string }, result: Record<string, unknown>): ImportVerificationResult;
 }
 
 class LegacyImportAdapter implements ExcelImportAdapter {
@@ -115,7 +119,7 @@ class LegacyImportAdapter implements ExcelImportAdapter {
       mappings: context.mappings.map(mapping => ({
         sourceColumn: mapping.sourceColumn, targetField: mapping.targetField,
         source: mapping.source === 'rule' ? 'rule' : mapping.source === 'ai' ? 'ai' : 'manual',
-        confidence: mapping.confidence, status: mapping.status,
+        confidence: mapping.confidence, status: mapping.status, confirmedByUser: mapping.confirmedByUser,
       })), duplicateStrategy: String(context.options.duplicateStrategy ?? 'update'),
     });
   }
@@ -136,13 +140,33 @@ class LegacyImportAdapter implements ExcelImportAdapter {
       mappings: context.mappings.map(mapping => ({
         sourceColumn: mapping.sourceColumn, targetField: mapping.targetField,
         source: mapping.source === 'rule' ? 'rule' : mapping.source === 'ai' ? 'ai' : 'manual',
-        confidence: mapping.confidence, status: mapping.status,
+        confidence: mapping.confidence, status: mapping.status, confirmedByUser: mapping.confirmedByUser,
       })), duplicateStrategy: String(context.options.duplicateStrategy ?? 'update'),
       requestId: context.requestId,
     });
   }
 
-  async verify(context: ImportAdapterContext & { requestId?: string }, result: Record<string, unknown>): Promise<ImportVerificationResult> {
+  async prepare(context: ImportAdapterContext): Promise<PreparedImportBuffer> {
+    if (context.legacyFileId) throw new Error(`Adapter ${this.id} 的旧版上传链不支持事务准备`);
+    const region = this.region(context);
+    return prepareImportBuffer({
+      buffer: await this.artifactBuffer(context), filename: context.artifact.filename, module: this.id,
+      sheetIndex: context.plan.sheetIndex, headerRow: region.headerRows[0] ?? 1,
+      mappings: context.mappings.map(mapping => ({
+        sourceColumn: mapping.sourceColumn, targetField: mapping.targetField,
+        source: mapping.source === 'rule' ? 'rule' : mapping.source === 'ai' ? 'ai' : 'manual',
+        confidence: mapping.confidence, status: mapping.status,
+      })), duplicateStrategy: String(context.options.duplicateStrategy ?? 'update'),
+    });
+  }
+
+  commitPrepared(
+    context: ImportAdapterContext & { requestId: string }, prepared: PreparedImportBuffer,
+  ): Record<string, unknown> {
+    return { ...prepared.commit(context.requestId), field_mapping: prepared.fieldMapping };
+  }
+
+  verifySync(context: ImportAdapterContext & { requestId?: string }, result: Record<string, unknown>): ImportVerificationResult {
     const counters = ['imported', 'updated', 'skipped', 'error_count'];
     const hasResultShape = counters.every((key) => (
       typeof result[key] === 'number' && Number.isFinite(Number(result[key])) && Number(result[key]) >= 0
@@ -179,6 +203,10 @@ class LegacyImportAdapter implements ExcelImportAdapter {
       verified: matches,
       evidence: `${this.id}:import-run=${matches ? 'matched' : 'mismatch'}`,
     };
+  }
+
+  async verify(context: ImportAdapterContext & { requestId?: string }, result: Record<string, unknown>): Promise<ImportVerificationResult> {
+    return this.verifySync(context, result);
   }
 }
 

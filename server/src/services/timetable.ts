@@ -337,7 +337,7 @@ function headerIndex(headers: string[]): Record<string, number> {
   return result;
 }
 
-export function previewImport(rows: unknown[][], filename = ''): Record<string, unknown> {
+export function previewImport(rows: unknown[][], filename = '', duplicateStrategy = 'merge'): Record<string, unknown> {
   const headerRow = rows.findIndex(row => {
     const headers = row.map(value => text(value));
     return headers.some(value => ['星期', '周几', '星期几'].includes(value))
@@ -376,14 +376,17 @@ export function previewImport(rows: unknown[][], filename = ''): Record<string, 
     const existing = !error ? conn.prepare(
       `SELECT id FROM timetable_entries WHERE class_id=? AND term_id=? AND weekday=? AND period_no=? AND week_pattern=? AND week_start=? AND week_end=?`,
     ).get(classId, termId, weekday, periodNo, item.week_pattern, item.week_start, item.week_end) as { id: number } | undefined : undefined;
-    const output = { row: index + 1, valid: !error, action: error ? '跳过' : existing ? '更新' : '新增', error, ...item };
+    const output = {
+      row: index + 1, valid: !error,
+      action: error ? '跳过' : (existing && duplicateStrategy !== 'replace' ? '更新' : '新增'), error, ...item,
+    };
     if (!error) validCount += 1;
     resultRows.push(output);
   }
   return { ok: true, filename, header_row: headerRow + 1, rows: resultRows, summary: { total: resultRows.length, valid: validCount, invalid: resultRows.length - validCount } };
 }
 
-export function commitImport(rows: Array<Record<string, unknown>>, filename = '', requestId = ''): Record<string, unknown> {
+export function commitImport(rows: Array<Record<string, unknown>>, filename = '', requestId = '', duplicateStrategy = 'merge'): Record<string, unknown> {
   const conn = getDb().connInstance;
   const [classId, termId] = scope({ write: true, conn });
   const existingRun = requestId ? conn.prepare('SELECT * FROM timetable_import_runs WHERE class_id=? AND term_id=? AND request_id=?')
@@ -391,6 +394,10 @@ export function commitImport(rows: Array<Record<string, unknown>>, filename = ''
   if (existingRun) return { ok: true, duplicate: true, ...existingRun };
   let importedPeriods = 0; let importedEntries = 0; let updatedEntries = 0; let skipped = 0; let errors = 0;
   conn.transaction(() => {
+    if (duplicateStrategy === 'replace') {
+      conn.prepare('DELETE FROM timetable_entries WHERE class_id=? AND term_id=?').run(classId, termId);
+      conn.prepare('DELETE FROM timetable_periods WHERE class_id=? AND term_id=?').run(classId, termId);
+    }
     for (const row of rows) {
       if (row.valid !== true) { skipped += 1; continue; }
       try {

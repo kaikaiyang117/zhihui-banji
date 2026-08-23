@@ -321,6 +321,16 @@ const agentToolLabels = {
   create_diary: '记录班主任日志',
   create_knowledge_note: '创建知识库笔记',
   create_class_task: '创建班级任务',
+  excel_inspect_workbook: '识别 Excel 工作簿',
+  excel_list_regions: '识别数据区域',
+  excel_suggest_import_plan: '推荐导入方案',
+  excel_read_range: '读取 Excel 范围',
+  excel_profile_region: '分析 Excel 区域',
+  excel_query_region: '查询 Excel 数据',
+  excel_create_import_plan: '创建导入计划',
+  excel_update_import_plan: '更新导入计划',
+  excel_preview_import: '预览 Excel 导入',
+  execute_excel_import: '写入 Excel 导入',
 }
 
 function agentToolName(part) {
@@ -330,13 +340,51 @@ function agentToolName(part) {
 
 function agentToolOutputText(output) {
   if (output === undefined || output === null) return ''
+  const businessPreview = output?.business_preview?.preview
+  if (businessPreview && typeof businessPreview === 'object') {
+    return `准备导入：新增 ${businessPreview.new_count ?? 0}，更新 ${businessPreview.update_count ?? 0}，跳过 ${businessPreview.skip_count ?? 0}，错误 ${businessPreview.error_rows ?? 0}`
+  }
   if (output && typeof output === 'object' && output.confirmation_required) {
     return output.preview || '请确认是否写入。'
   }
   if (output && typeof output === 'object' && output.error?.message) return output.error.message
+  const preview = output?.plan?.preview || output?.preview
+  if (preview && typeof preview === 'object' && preview.module) {
+    return `Excel 导入预览：新增 ${preview.new_count ?? 0}，更新 ${preview.update_count ?? 0}，跳过 ${preview.skip_count ?? 0}，错误 ${preview.error_rows ?? 0}`
+  }
   if (Array.isArray(output)) return `返回 ${output.length} 条记录`
   if (typeof output === 'object') return `已返回 ${Object.keys(output).length} 项结果`
   return String(output)
+}
+
+function excelPreviewModel(part) {
+  const output = part?.output
+  const preview = output?.business_preview?.preview || output?.plan?.preview || output?.preview
+  if (!preview || typeof preview !== 'object' || !preview.module) return null
+  const mappings = Array.isArray(preview.field_mapping) ? preview.field_mapping : []
+  return {
+    module: preview.module,
+    needsInput: preview.needs_input === true,
+    needsInputMappings: Array.isArray(preview.needs_input_mappings) ? preview.needs_input_mappings : [],
+    rows: preview.total_rows ?? 0,
+    valid: preview.valid_rows ?? 0,
+    added: preview.new_count ?? 0,
+    updated: preview.update_count ?? 0,
+    skipped: preview.skip_count ?? 0,
+    errors: preview.error_rows ?? 0,
+    mappings: mappings.slice(0, 8),
+  }
+}
+
+function isExcelImportAction(part) {
+  return String(part?.toolName || '').includes('excel_import') || Boolean(part?.output?.business_preview)
+}
+
+function excelImportButtonLabel(part) {
+  const preview = excelPreviewModel(part)
+  if (!preview) return '导入'
+  const count = Number(preview.valid || preview.added + preview.updated)
+  return count > 0 ? `导入 ${count} 条` : '导入'
 }
 
 function isPendingAgentAction(part) {
@@ -392,6 +440,7 @@ function agentTraceStepStatus(step) {
 }
 
 function agentTraceStepStatusText(step) {
+  if (agentTraceStepStatus(step) === 'waiting' && isExcelImportAction(step.toolPart)) return '等待导入'
   return ({
     pending: '等待执行', running: '执行中', completed: '已完成', skipped: '已跳过',
     error: '失败', waiting: '等待确认',
@@ -415,6 +464,8 @@ function agentTraceStatus(message) {
 }
 
 function agentTraceStatusText(message) {
+  if (agentTraceStatus(message) === 'waiting'
+    && agentTraceSteps(message).some(step => isExcelImportAction(step.toolPart))) return '等待导入'
   return ({ running: '执行中', waiting: '等待确认', error: '执行失败', completed: '已完成' })[agentTraceStatus(message)]
 }
 
@@ -872,9 +923,25 @@ onBeforeUnmount(() => {
                         <span class="agent-trace-step-status">{{ agentTraceStepStatusText(step) }}</span>
                       </div>
                       <div v-if="agentTraceStepDetail(step)" class="agent-trace-step-detail">{{ agentTraceStepDetail(step) }}</div>
+                      <div v-if="excelPreviewModel(step.toolPart)" class="agent-excel-preview-card">
+                        <div class="agent-excel-preview-title">{{ excelPreviewModel(step.toolPart).needsInput ? '需要补充字段信息' : 'Excel 业务预览' }} · {{ excelPreviewModel(step.toolPart).module }}</div>
+                        <div v-if="excelPreviewModel(step.toolPart).needsInput" class="agent-excel-preview-input-hint">有 {{ excelPreviewModel(step.toolPart).needsInputMappings.length }} 列暂时无法可靠判断，请告诉我它们对应的字段。</div>
+                        <div class="agent-excel-preview-stats">
+                          <span>共 {{ excelPreviewModel(step.toolPart).rows }} 行</span>
+                          <span class="is-success">新增 {{ excelPreviewModel(step.toolPart).added }}</span>
+                          <span>更新 {{ excelPreviewModel(step.toolPart).updated }}</span>
+                          <span>跳过 {{ excelPreviewModel(step.toolPart).skipped }}</span>
+                          <span class="is-error">错误 {{ excelPreviewModel(step.toolPart).errors }}</span>
+                        </div>
+                        <div v-if="excelPreviewModel(step.toolPart).mappings.length" class="agent-excel-preview-mappings">
+                          <span v-for="mapping in excelPreviewModel(step.toolPart).mappings" :key="`${mapping.source}-${mapping.target}`" :class="{ 'is-muted': mapping.mapping_status === 'ignored' }">
+                            {{ mapping.source }} → {{ mapping.target || '未映射' }}
+                          </span>
+                        </div>
+                      </div>
                       <div v-if="step.toolPart && isPendingAgentAction(step.toolPart)" class="agent-action-buttons">
                         <template v-if="agentActionState(step.toolPart).status === 'pending'">
-                          <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(step.toolPart)">确认写入</button>
+                          <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(step.toolPart)">{{ isExcelImportAction(step.toolPart) ? excelImportButtonLabel(step.toolPart) : '确认写入' }}</button>
                           <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(step.toolPart)">取消</button>
                         </template>
                         <span v-else-if="agentActionState(step.toolPart).status === 'confirming'" class="agent-action-state">处理中…</span>
@@ -1179,6 +1246,14 @@ onBeforeUnmount(() => {
 .agent-trace-step.waiting .agent-trace-step-status { color: #a56a12; }
 .agent-trace-step.error .agent-trace-step-status { color: var(--danger, #c83b32); }
 .agent-trace-step-detail { margin-top: 3px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); line-height: 1.45; overflow-wrap: anywhere; }
+.agent-excel-preview-card { margin-top: 7px; padding: 8px 9px; border: 1px solid rgba(91,106,191,.14); border-radius: 9px; background: rgba(255,255,255,.72); }
+.agent-excel-preview-title { color: var(--text); font: var(--ds-type-meta); font-weight: 700; }
+.agent-excel-preview-input-hint { margin-top: 4px; color: #9a6818; font: 11px/1.4 var(--font-sans, system-ui); }
+.agent-excel-preview-stats { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 5px; color: var(--ds-color-ink-secondary); font: 11px/1.4 var(--font-sans, system-ui); }
+.agent-excel-preview-stats .is-success { color: var(--success); }
+.agent-excel-preview-stats .is-error { color: var(--danger, #c83b32); }
+.agent-excel-preview-mappings { display: grid; gap: 2px; margin-top: 6px; color: var(--text-secondary); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-excel-preview-mappings .is-muted { color: var(--ds-color-ink-muted); }
 .agent-plan-card { max-width: min(92%, 350px); padding: 9px 11px; border: 1px solid rgba(91,106,191,.14); border-radius: 12px; background: rgba(248,249,253,.9); color: var(--text-secondary); box-shadow: 0 2px 8px rgba(40,48,85,.04); }
 .agent-plan-card summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: var(--ds-type-meta); }
 .agent-plan-card summary::-webkit-details-marker { display: none; }

@@ -319,7 +319,7 @@ export interface CalendarImportPreviewResult {
   };
 }
 
-export async function previewImport(fileBytes: Buffer, filename = ''): Promise<CalendarImportPreviewResult> {
+export async function previewImport(fileBytes: Buffer, filename = '', duplicateStrategy = 'merge'): Promise<CalendarImportPreviewResult> {
   const conn = getDb().connInstance;
   const [, , academicTermId, scope] = scopeOf({ conn });
   const result: CalendarImportPreviewResult = {
@@ -364,6 +364,13 @@ export async function previewImport(fileBytes: Buffer, filename = ''): Promise<C
     if (conflict) {
       action = '冲突';
       error = `同一文件第 ${duplicate!.row} 行与第 ${item.row} 行对同一天有不同安排`;
+      result.summary.conflict += 1;
+    } else if (current && duplicateStrategy === 'skip') {
+      action = '跳过';
+      result.summary.skip += 1;
+    } else if (current && duplicateStrategy === 'conflict') {
+      action = '冲突';
+      error = '目标日期已有校历记录，当前策略要求人工处理冲突';
       result.summary.conflict += 1;
     } else if (current && ['day_type', 'title', 'is_school_day', 'note']
       .every((key) => String(current[key] || '') === String(item[key] || ''))) {

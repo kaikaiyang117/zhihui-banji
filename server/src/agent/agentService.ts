@@ -4,6 +4,7 @@ import type { Database } from 'better-sqlite3';
 import { getDb, scopeIds } from '../services/context.js';
 import * as audit from '../services/audit.js';
 import { ToolError, buildRegistry, type ToolRegistry } from './toolRegistry.js';
+import { getPlanForAccess } from '../excel/imports/importPlanService.js';
 
 const ACTION_TTL_MINUTES = 10;
 const WRITE_TOOLS: Record<string, string> = {
@@ -230,11 +231,36 @@ export function previewText(toolName: string, args: Record<string, unknown>): st
     const count = Array.isArray(args['exceptions']) ? args['exceptions'].length : 0;
     detail = `提交点名异常 ${count} 人`;
   } else if (toolName === 'execute_excel_import') {
-    detail = `执行 Excel 导入计划 ${String(args['plan_id'] ?? '')}`;
+    detail = `导入 Excel 计划 ${String(args['plan_id'] ?? '')}`;
   } else {
     detail = `为 ${Array.isArray(args['student_ids']) ? args['student_ids'].length : 0} 名学生创建班级任务"${String(args['title'] ?? '')}"`;
   }
   return `将要${detail}。这是一次${label}，回复“确认”执行，回复“取消”放弃。确认有效期 ${ACTION_TTL_MINUTES} 分钟。`;
+}
+
+function excelActionPreview(options: {
+  args: Record<string, unknown>; sessionId: string; actorId: string; channel: string; conn: Database;
+}): Record<string, unknown> | null {
+  const planId = String(options.args.plan_id ?? '').trim();
+  if (!planId) return null;
+  const [classId, termId] = scopeIds({ conn: options.conn });
+  const plan = getPlanForAccess(planId, {
+    ownerId: options.actorId, channel: options.channel, sessionId: options.sessionId, classId, termId,
+  }, options.conn);
+  if (!plan.preview || !plan.previewHash || plan.previewHash !== String(options.args.preview_hash ?? '')) {
+    throw new ActionError('Excel 业务预览已失效，请重新生成预览');
+  }
+  return {
+    plan_id: plan.id, adapter_id: plan.adapterId, artifact_id: plan.artifactId,
+    preview_hash: plan.previewHash, preview: plan.preview,
+  };
+}
+
+function excelActionPreviewText(value: Record<string, unknown> | null): string {
+  const preview = value?.preview as Record<string, unknown> | undefined;
+  if (!preview) return 'Excel 导入预览已准备，请确认导入。';
+  return `准备导入：新增 ${Number(preview.new_count ?? 0)}，更新 ${Number(preview.update_count ?? 0)}，`
+    + `跳过 ${Number(preview.skip_count ?? 0)}，错误 ${Number(preview.error_rows ?? 0)}。点击“导入”后才会修改业务数据。`;
 }
 
 function validatePositiveInt(key: string, value: unknown): void {
@@ -311,15 +337,19 @@ export function createPendingAction(options: {
     "SELECT * FROM agent_actions WHERE session_id=? AND actor_id=? AND arguments_hash=? AND status='pending' "
     + 'ORDER BY id DESC LIMIT 1',
   ).get(sessionId, actorId, argsHash) as Record<string, unknown> | undefined;
+  const businessPreview = toolName === 'execute_excel_import'
+    ? excelActionPreview({ args, sessionId, actorId, channel, conn }) : null;
   if (existing) {
     const item: Record<string, unknown> = { ...existing };
     item['confirmation_required'] = true;
     item['action_id'] = item['id'];
+    if (businessPreview) item['business_preview'] = businessPreview;
     return item;
   }
   const token = randomBytes(3).toString('hex').toUpperCase();
   const expiresAt = stampOf(new Date(Date.now() + ACTION_TTL_MINUTES * 60 * 1000));
-  const preview = previewText(toolName, args);
+  const preview = toolName === 'execute_excel_import'
+    ? excelActionPreviewText(businessPreview) : previewText(toolName, args);
   const inserted = conn.prepare(
     'INSERT INTO agent_actions('
     + 'class_id, term_id, session_id, channel, actor_id, tool_name, '
@@ -331,6 +361,7 @@ export function createPendingAction(options: {
   item['confirmation_required'] = true;
   item['action_id'] = item['id'];
   item['confirmation_token'] = token;
+  if (businessPreview) item['business_preview'] = businessPreview;
   audit.record('agent_action', Number(item['id']), 'preview', {
     status: 'success',
     summary: preview,
@@ -343,7 +374,7 @@ export function createPendingAction(options: {
 export function invokeTool(
   name: string,
   argsValue?: Record<string, unknown> | null,
-  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean } = {},
+  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean } = {},
 ): Record<string, unknown> {
   const channel = options.channel ?? 'local';
   const actorId = options.actorId ?? '';
@@ -386,7 +417,10 @@ export function invokeTool(
   }
   let result: Record<string, unknown>;
   try {
-    result = registry.execute(name, args, { channel, actorId, sessionId });
+    result = registry.execute(name, args, {
+      channel, actorId, sessionId, allowSensitiveExcelValues: options.allowSensitiveExcelValues,
+      allowManualExcelMapping: options.allowManualExcelMapping,
+    });
   } catch (error) {
     if (error instanceof ToolError) {
       recordAudit(channel, actorId, name, args, 'error', error.message);
@@ -402,7 +436,7 @@ export function invokeTool(
 export async function invokeToolAsync(
   name: string,
   argsValue?: Record<string, unknown> | null,
-  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean } = {},
+  options: { channel?: string; actorId?: string; sessionId?: string; confirmed?: boolean; allowSensitiveExcelValues?: boolean; allowManualExcelMapping?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   const channel = options.channel ?? 'local';
   const actorId = options.actorId ?? '';
@@ -442,7 +476,10 @@ export async function invokeToolAsync(
     throw new ToolError(message, { code: 'permission_denied' });
   }
   try {
-    const result = await registry.executeAsync(name, args, { channel, actorId, sessionId });
+    const result = await registry.executeAsync(name, args, {
+      channel, actorId, sessionId, allowSensitiveExcelValues: options.allowSensitiveExcelValues,
+      allowManualExcelMapping: options.allowManualExcelMapping,
+    });
     recordAudit(channel, actorId, name, args, 'success', summaryText(result));
     return result;
   } catch (error) {

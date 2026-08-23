@@ -57,6 +57,32 @@ export async function executeImportPlan(options: {
     throw new ExcelImportExecutionError('导入预览已失效，请重新预览');
   }
   const { adapter, context } = contextOf(plan, options.access, db);
+  if (plan.adapterVersion !== adapter.version) {
+    throw new ExcelImportExecutionError('导入适配器版本已更新，请重新生成计划和预览');
+  }
+  // WorkbookArtifact adapters prepare/parse asynchronously, then commit and
+  // verify synchronously inside one SQLite transaction.  A failed post-write
+  // verification therefore rolls back the business writes instead of leaving
+  // a partially trusted import behind.
+  if (adapter.prepare && adapter.commitPrepared && adapter.verifySync) {
+    const prepared = await adapter.prepare(context);
+    try {
+      return db.transaction(() => {
+        const result = adapter.commitPrepared!({ ...context, requestId: options.requestId }, prepared);
+        const verification = adapter.verifySync!({ ...context, requestId: options.requestId }, result);
+        if (!verification.verified) {
+          throw new ExcelImportExecutionError(`导入写入验证失败：${verification.evidence}`);
+        }
+        markImportPlanStatus(plan.id, 'executed', options.access, db);
+        return {
+          plan_id: plan.id, status: 'executed', result, verification, request_id: options.requestId,
+        };
+      })();
+    } catch (error) {
+      try { markImportPlanStatus(plan.id, 'failed', options.access, db); } catch { /* preserve original */ }
+      throw error;
+    }
+  }
   const result = await adapter.execute({ ...context, requestId: options.requestId });
   const verification = await adapter.verify({ ...context, requestId: options.requestId }, result);
   if (!verification.verified) {

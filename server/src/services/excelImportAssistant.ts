@@ -68,6 +68,7 @@ export interface ArtifactFieldMappingInput {
   confidence?: number;
   status?: 'accepted' | 'needs_confirmation' | 'ignored';
   reason?: string;
+  confirmedByUser?: boolean;
 }
 
 interface SemanticMapping {
@@ -468,20 +469,32 @@ function mapArtifactHeaders(
   return defaults.map(item => {
     const selected = supplied.get(item.source);
     if (!selected) return item;
+    // The model is allowed to propose a mapping, but it is not allowed to
+    // manufacture an accepted decision by sending status/confidence fields.
+    // Deterministic header rules remain authoritative; all other proposals
+    // must be explicitly confirmed by a later user-owned flow.
+    if (item.source_kind === 'rule' && item.target) return item;
     const target = String(selected.targetField ?? '').trim();
     if (selected.status === 'ignored' || !target) {
       return {
         source: item.source, target: '', matched: false, source_kind: selected.source ?? 'manual',
-        mapping_status: 'ignored', confidence: selected.confidence, reason: selected.reason,
+        mapping_status: 'ignored', confidence: 0, reason: selected.reason,
       };
     }
     if (!CANONICAL_HEADERS[module]?.[target]) {
       throw new ExcelImportError(`字段映射目标不受支持：${target}`);
     }
+    if (selected.confirmedByUser === true && selected.source === 'manual') {
+      return {
+        source: item.source, target, matched: true, source_kind: 'manual',
+        mapping_status: 'accepted', confidence: 1,
+        reason: selected.reason || '用户已确认字段映射',
+      };
+    }
     return {
-      source: item.source, target, matched: selected.status !== 'needs_confirmation',
-      source_kind: selected.source ?? 'manual', mapping_status: selected.status ?? 'accepted',
-      confidence: selected.confidence ?? 1, reason: selected.reason,
+      source: item.source, target, matched: false, source_kind: 'ai',
+      mapping_status: 'needs_confirmation', confidence: 0.65,
+      reason: '模型提出的字段映射需要用户确认；模型不能直接批准写入',
     };
   });
 }
@@ -1167,8 +1180,7 @@ export async function executeImport(options: {
   return result;
 }
 
-/** Artifact/ImportPlan 直接使用的业务预览，不依赖旧版 excel-temp 元数据。 */
-export async function previewImportBuffer(options: {
+type ArtifactImportOptions = {
   buffer: Buffer;
   filename: string;
   module: string;
@@ -1176,7 +1188,18 @@ export async function previewImportBuffer(options: {
   headerRow: number;
   mappings: ArtifactFieldMappingInput[];
   duplicateStrategy?: string;
-}): Promise<Record<string, unknown>> {
+};
+
+export interface PreparedImportBuffer {
+  fieldMapping: ExcelFieldMapping[];
+  preview: Record<string, unknown>;
+  /** Synchronous DB phase. It is safe to call inside the outer DB transaction. */
+  commit: (requestId: string) => Record<string, unknown>;
+}
+
+/** Parse, map and preview outside the transaction; retain the validated rows for
+ * the synchronous commit/verify phase. */
+export async function prepareImportBuffer(options: ArtifactImportOptions): Promise<PreparedImportBuffer> {
   if (!SUPPORTED_MODULES.includes(options.module as SupportedModule)) {
     throw new ExcelImportError(`不支持的导入模块：${options.module}`);
   }
@@ -1184,8 +1207,17 @@ export async function previewImportBuffer(options: {
   const headers = (rows[Math.max(0, options.headerRow - 1)] ?? []).map(value => cellText(value));
   const mapping = mapArtifactHeaders(headers, options.module, options.mappings);
   assertMappingUnambiguous(mapping);
-  if (mapping.some(item => item.mapping_status === 'needs_confirmation')) {
-    throw new ExcelImportError('存在置信度不足的字段映射，请先人工确认');
+  const needsInput = mapping.filter(item => item.mapping_status === 'needs_confirmation');
+  if (needsInput.length > 0) {
+    return {
+      fieldMapping: mapping,
+      preview: {
+        module: options.module, field_mapping: mapping, needs_input: true,
+        needs_input_mappings: needsInput.map(item => ({ source: item.source, target: item.target, reason: item.reason })),
+        message: '有字段无法可靠判断，请补充映射后继续。',
+      },
+      commit: () => { throw new ExcelImportError('请先补充字段映射'); },
+    };
   }
   const normalizedBuffer = await normalizedWorkbookBuffer(
     options.buffer, options.sheetIndex, options.headerRow, mapping, options.module,
@@ -1197,8 +1229,9 @@ export async function previewImportBuffer(options: {
   let updateCount = 0;
   let skipCount = 0;
   const errors: Array<{ row: number; reason: string }> = [];
+  let commit: (requestId: string) => Record<string, unknown>;
   if (options.module === 'students') {
-    const preview = await previewStudents(normalizedBuffer, options.filename);
+    const preview = await previewStudents(normalizedBuffer, options.filename, options.duplicateStrategy ?? 'update');
     totalRows = preview.rows.length + preview.errors.length;
     validRows = preview.summary.valid;
     newCount = preview.summary.imported;
@@ -1206,6 +1239,21 @@ export async function previewImportBuffer(options: {
     skipCount = preview.summary.skipped;
     errorRows = preview.errors.length;
     errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.msg })));
+    commit = (requestId) => {
+      const result = commitStudentImport(
+        preview.rows.filter(row => row.action !== '跳过'), options.filename,
+        options.duplicateStrategy ?? 'update',
+      );
+      return {
+        imported: result.imported, updated: result.updated,
+        skipped: result.skipped + preview.summary.skipped,
+        error_count: result.errors.length + preview.errors.length,
+        errors: [
+          ...preview.errors.map(error => ({ row: error.row, reason: error.msg })),
+          ...result.errors.map(error => ({ row: error.row, reason: error.msg })),
+        ], request_id: requestId,
+      };
+    };
   } else if (options.module === 'scores') {
     const scoreRows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), options.headerRow);
     const preview = scores.previewExamRows(scoreRows, options.duplicateStrategy ?? 'update');
@@ -1216,8 +1264,20 @@ export async function previewImportBuffer(options: {
     skipCount = preview.summary.skip;
     errorRows = preview.summary.error;
     errors.push(...preview.errors.map(error => ({ row: originalRow(error.row, options.headerRow), reason: error.message })));
+    commit = (requestId) => {
+      const valid = preview.rows.filter(item => item.valid === true && item.action !== '跳过');
+      const result = scores.commitExamRows(valid, {
+        filename: options.filename, duplicateStrategy: options.duplicateStrategy ?? 'update', requestId,
+      });
+      return {
+        ...result, imported: Number(result.imported ?? 0), updated: Number(result.updated ?? 0),
+        skipped: Number(result.skipped ?? 0) + preview.summary.skip,
+        error_count: preview.errors.length,
+        errors: preview.errors.map(error => ({ row: originalRow(error.row, options.headerRow), reason: error.message })),
+      };
+    };
   } else if (options.module === 'calendar') {
-    const preview = await calendar.previewImport(normalizedBuffer, options.filename);
+    const preview = await calendar.previewImport(normalizedBuffer, options.filename, options.duplicateStrategy ?? 'merge');
     totalRows = preview.summary.parsed;
     validRows = preview.summary.valid;
     newCount = preview.summary.new;
@@ -1225,9 +1285,19 @@ export async function previewImportBuffer(options: {
     skipCount = preview.summary.skip;
     errorRows = preview.summary.error + preview.summary.conflict;
     errors.push(...preview.errors.map(error => ({ row: error.row, reason: error.message })));
+    commit = (requestId) => {
+      const validRows = preview.rows.filter(row => (row.valid ?? true) && row.action !== '冲突');
+      const result = calendar.commitImport(validRows, options.filename, requestId);
+      return {
+        ...result, imported: Number(result.imported ?? 0), updated: Number(result.updated ?? 0),
+        skipped: Number(result.skipped ?? 0),
+        error_count: Number(result.error_count ?? 0) + preview.errors.length,
+        errors: preview.errors.map(error => ({ row: error.row, reason: error.message })),
+      };
+    };
   } else {
     const timetableRows = rowsFromHeader(await parseXlsxRows(normalizedBuffer, 0), options.headerRow);
-    const preview = timetable.previewImport(timetableRows, options.filename);
+    const preview = timetable.previewImport(timetableRows, options.filename, options.duplicateStrategy ?? 'merge');
     const previewRows = preview.rows as Array<Record<string, unknown>>;
     totalRows = previewRows.length;
     validRows = (preview.summary as { valid: number }).valid;
@@ -1238,8 +1308,23 @@ export async function previewImportBuffer(options: {
     errors.push(...previewRows.filter(row => row.error).map(row => ({
       row: originalRow(Number(row.row ?? 0), options.headerRow), reason: String(row.error),
     })));
+    commit = (requestId) => {
+      const validRows = previewRows.filter(row => row.valid === true);
+      const previewErrors = previewRows.filter(row => row.error).map(row => ({
+        row: originalRow(Number(row.row ?? 0), options.headerRow), reason: String(row.error),
+      }));
+      const result = timetable.commitImport(
+        validRows, options.filename, requestId, options.duplicateStrategy ?? 'merge',
+      ) as Record<string, unknown>;
+      return {
+        ...result, imported: Number(result.imported ?? 0), updated: Number(result.updated ?? 0),
+        skipped: Number(result.skipped ?? 0),
+        error_count: Number(result.error_count ?? 0) + previewErrors.length,
+        errors: previewErrors,
+      };
+    };
   }
-  return {
+  const previewResult = {
     module: options.module,
     field_mapping: mapping,
     total_rows: totalRows,
@@ -1251,6 +1336,13 @@ export async function previewImportBuffer(options: {
     errors,
     duplicate_strategy: options.duplicateStrategy ?? 'update',
   };
+  return { fieldMapping: mapping, preview: previewResult, commit };
+}
+
+/** Artifact/ImportPlan 直接使用的业务预览，不依赖旧版 excel-temp 元数据。 */
+export async function previewImportBuffer(options: ArtifactImportOptions): Promise<Record<string, unknown>> {
+  const prepared = await prepareImportBuffer(options);
+  return prepared.preview;
 }
 
 /** Artifact/ImportPlan 直接使用的业务执行；调用方负责外层备份、事务和写后验证。 */
@@ -1264,21 +1356,8 @@ export async function executeImportBuffer(options: {
   duplicateStrategy?: string;
   requestId: string;
 }): Promise<Record<string, unknown>> {
-  const rows = await parseXlsxRows(options.buffer, options.sheetIndex);
-  const headers = (rows[Math.max(0, options.headerRow - 1)] ?? []).map(value => cellText(value));
-  const mapping = mapArtifactHeaders(headers, options.module, options.mappings);
-  assertMappingUnambiguous(mapping);
-  if (mapping.some(item => item.mapping_status === 'needs_confirmation')) {
-    throw new ExcelImportError('存在置信度不足的字段映射，请先人工确认');
-  }
-  const normalizedBuffer = await normalizedWorkbookBuffer(
-    options.buffer, options.sheetIndex, options.headerRow, mapping, options.module,
-  );
-  const result = await doImport(
-    options.module, normalizedBuffer, options.filename, options.duplicateStrategy ?? 'update',
-    options.requestId, options.headerRow,
-  );
-  return { ...result, field_mapping: mapping };
+  const prepared = await prepareImportBuffer(options);
+  return { ...prepared.commit(options.requestId), field_mapping: prepared.fieldMapping };
 }
 
 export function discardUpload(fileId: string, options?: { owner?: string; session?: string; channel?: string }): void {

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { currentActor } from '../../services/audit.js';
 import { getCurrentScope } from '../../services/context.js';
 import {
-  createArtifactFromBuffer, discardArtifact,
+  cleanExpiredArtifacts, createArtifactFromBuffer, discardArtifact,
 } from '../../excel/artifacts/artifactService.js';
 import {
   ExcelArtifactError, requireArtifact,
@@ -12,7 +12,7 @@ import {
 import {
   createImportPlan, ExcelImportPlanError, getImportPlan, updateImportPlan,
 } from '../../excel/imports/importPlanRepository.js';
-import type { ArtifactAccess, FieldMapping, ImportPlanStatus } from '../../excel/domain/types.js';
+import type { ArtifactAccess, FieldMapping } from '../../excel/domain/types.js';
 
 type UploadPart = { toBuffer: () => Promise<Buffer>; filename: string };
 
@@ -40,6 +40,9 @@ function errorStatus(error: unknown): number {
 export function registerExcelArtifactRoutes(app: FastifyInstance): void {
   app.post('/api/excel-artifacts/upload', async (request, reply) => {
     try {
+      // Cleanup is opportunistic as well as startup-driven, so long-running
+      // desktop processes do not retain expired workbook files indefinitely.
+      cleanExpiredArtifacts();
       const multipart = request as unknown as { file?: () => Promise<UploadPart> };
       const part = await multipart.file?.();
       if (!part) return reply.status(400).send({ detail: '未接收到 Excel 文件' });
@@ -78,7 +81,18 @@ export function registerExcelArtifactRoutes(app: FastifyInstance): void {
     try {
       const body = bodyOf(request);
       const access = requestAccess(request as unknown as { headers: Record<string, unknown> });
-      const mappings = Array.isArray(body.mappings) ? body.mappings as FieldMapping[] : [];
+      const mappings = Array.isArray(body.mappings) ? body.mappings.map(item => {
+        const raw = item && typeof item === 'object' && !Array.isArray(item)
+          ? item as Record<string, unknown> : {};
+        return {
+          sourceColumn: String(raw.sourceColumn ?? ''),
+          targetField: raw.targetField == null ? null : String(raw.targetField),
+          source: raw.source === 'manual' ? 'manual' : raw.source === 'rule' ? 'rule' : 'ai',
+          confidence: Number(raw.confidence ?? 0), status: raw.status === 'ignored' ? 'ignored' : 'accepted',
+          reason: raw.reason == null ? undefined : String(raw.reason),
+          confirmedByUser: raw.source === 'manual',
+        } as FieldMapping;
+      }) : [];
       const options = body.options && typeof body.options === 'object' && !Array.isArray(body.options)
         ? body.options as Record<string, unknown> : {};
       const plan = createImportPlan({
@@ -107,16 +121,41 @@ export function registerExcelArtifactRoutes(app: FastifyInstance): void {
     }
   });
 
+  app.get('/api/excel-import-plans/:id/error-report', async (request, reply) => {
+    try {
+      const params = request.params as { id?: string };
+      const access = requestAccess(request as unknown as { headers: Record<string, unknown> });
+      const plan = getImportPlan(String(params.id ?? ''), access);
+      if (!plan) return reply.status(404).send({ detail: '导入计划不存在或不属于当前会话' });
+      const errors = Array.isArray(plan.preview?.errors) ? plan.preview.errors : [];
+      reply.header('content-type', 'application/json; charset=utf-8');
+      reply.header('content-disposition', `attachment; filename="excel-import-errors-${plan.id}.json"`);
+      return { plan_id: plan.id, artifact_id: plan.artifactId, errors };
+    } catch (error) {
+      return reply.status(errorStatus(error)).send({ detail: error instanceof Error ? error.message : '错误报告读取失败' });
+    }
+  });
+
   app.patch('/api/excel-import-plans/:id', async (request, reply) => {
     try {
       const params = request.params as { id?: string };
       const body = bodyOf(request);
-      const mappings = Array.isArray(body.mappings) ? body.mappings as FieldMapping[] : undefined;
+      const mappings = Array.isArray(body.mappings) ? body.mappings.map(item => {
+        const raw = item && typeof item === 'object' && !Array.isArray(item)
+          ? item as Record<string, unknown> : {};
+        return {
+          sourceColumn: String(raw.sourceColumn ?? ''),
+          targetField: raw.targetField == null ? null : String(raw.targetField),
+          source: raw.source === 'manual' ? 'manual' : raw.source === 'rule' ? 'rule' : 'ai',
+          confidence: Number(raw.confidence ?? 0), status: raw.status === 'ignored' ? 'ignored' : 'accepted',
+          reason: raw.reason == null ? undefined : String(raw.reason),
+          confirmedByUser: raw.source === 'manual',
+        } as FieldMapping;
+      }) : undefined;
       const options = body.options && typeof body.options === 'object' && !Array.isArray(body.options)
         ? body.options as Record<string, unknown> : undefined;
       const plan = updateImportPlan({
         id: String(params.id ?? ''), mappings, options,
-        status: body.status ? String(body.status) as ImportPlanStatus : undefined,
         access: requestAccess(request as unknown as { headers: Record<string, unknown> }),
       });
       return { plan };

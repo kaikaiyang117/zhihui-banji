@@ -11,6 +11,10 @@ export type ExposurePolicy = 'structure_only' | 'redacted_values' | 'allowed_val
 
 export class WorkbookQueryError extends Error {}
 
+export type QueryOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+export interface WorkbookQueryFilter { column: string; op: QueryOperator; value?: unknown }
+export interface WorkbookQueryAggregate { function: 'count' | 'sum' | 'avg' | 'min' | 'max'; column?: string; as?: string }
+
 type CellValue = string | number | boolean | Date | null | undefined | { formula?: string; result?: unknown };
 
 interface RangeRef {
@@ -135,7 +139,14 @@ export async function readWorkbookRange(options: {
       columns[index].inferred_types.add(type);
       if (type !== 'empty') columns[index].non_empty_count += 1;
       row.push(exposedValue(value, policy));
-      if (rowNumber === ref.startRow) headers.push(valueText(value));
+      // A range may start in the data area (for example A2:C10).  Returning
+      // its first row as “headers” would leak real names/IDs under
+      // structure_only.  Keep the existing A1 structural header behaviour
+      // for compatibility, but never expose arbitrary data rows.
+      if (rowNumber === ref.startRow) {
+        headers.push(policy === 'allowed_values' || (policy === 'structure_only' && ref.startRow === 1)
+          ? valueText(value) : '');
+      }
     }
     rows.push(row);
   }
@@ -198,4 +209,95 @@ export async function profileWorkbookRegion(options: {
       inferred_types: [...profile.types].sort(),
     })),
   };
+}
+
+function compareQueryValue(left: unknown, right: unknown, op: QueryOperator): boolean {
+  const lText = valueText(left as CellValue);
+  const rText = valueText(right as CellValue);
+  const lNumber = Number(left);
+  const rNumber = Number(right);
+  const numeric = Number.isFinite(lNumber) && Number.isFinite(rNumber) && lText !== '' && rText !== '';
+  const l = numeric ? lNumber : lText;
+  const r = numeric ? rNumber : rText;
+  if (op === 'contains') return lText.toLowerCase().includes(rText.toLowerCase());
+  if (op === 'eq') return l === r;
+  if (op === 'neq') return l !== r;
+  if (op === 'gt') return l > r;
+  if (op === 'gte') return l >= r;
+  if (op === 'lt') return l < r;
+  return l <= r;
+}
+
+/** Executes a bounded query locally. Raw cell values are returned only when
+ * the caller already has an explicit allowed_values capability. */
+export async function queryWorkbookRegion(options: {
+  filePath: string;
+  sheetIndex: number;
+  region: TableRegion;
+  select?: string[];
+  filters?: WorkbookQueryFilter[];
+  sort?: { column: string; direction?: 'asc' | 'desc' };
+  aggregate?: WorkbookQueryAggregate[];
+  limit?: number;
+  exposurePolicy?: ExposurePolicy;
+}): Promise<Record<string, unknown>> {
+  const sheet = await loadSheet(options.filePath, options.sheetIndex);
+  const ref = parseRange(options.region.range, { maxRows: MAX_ROWS_PER_SHEET, maxColumns: MAX_COLUMNS_PER_SHEET });
+  const headerRow = options.region.headerRows[0] ?? ref.startRow;
+  const headers = Array.from({ length: ref.endColumn - ref.startColumn + 1 }, (_, index) => {
+    const raw = sheet.getCell(headerRow, ref.startColumn + index).value as CellValue;
+    return valueText(raw) || columnName(ref.startColumn + index);
+  });
+  const keyIndex = (key: string): number => {
+    const normalized = key.trim().toLowerCase();
+    const byHeader = headers.findIndex(header => header.trim().toLowerCase() === normalized);
+    if (byHeader >= 0) return byHeader;
+    const byLetter = headers.findIndex((_, index) => columnName(ref.startColumn + index).toLowerCase() === normalized);
+    return byLetter;
+  };
+  const records: Array<Record<string, unknown>> = [];
+  const dataStart = Math.max(headerRow + 1, ref.startRow + options.region.headerRows.length);
+  for (let rowNumber = dataStart; rowNumber <= ref.endRow; rowNumber += 1) {
+    const values = headers.map((_, index) => sheet.getCell(rowNumber, ref.startColumn + index).value as CellValue);
+    if (!values.some(value => valueText(value))) continue;
+    const record: Record<string, unknown> = {};
+    headers.forEach((header, index) => { record[header] = values[index]; });
+    const matches = (options.filters ?? []).every(filter => {
+      const index = keyIndex(filter.column);
+      return index >= 0 && compareQueryValue(values[index], filter.value, filter.op);
+    });
+    if (matches) records.push(record);
+  }
+  if (options.sort) {
+    const direction = options.sort.direction === 'desc' ? -1 : 1;
+    records.sort((left, right) => {
+      const result = compareQueryValue(left[options.sort!.column], right[options.sort!.column], 'lt') ? -1 :
+        compareQueryValue(left[options.sort!.column], right[options.sort!.column], 'gt') ? 1 : 0;
+      return result * direction;
+    });
+  }
+  const aggregates = (options.aggregate ?? []).map(item => {
+    const values = item.column ? records.map(record => Number(record[item.column!])).filter(Number.isFinite) : [];
+    let value: number;
+    if (item.function === 'count') value = item.column ? values.length : records.length;
+    else if (item.function === 'sum') value = values.reduce((sum, current) => sum + current, 0);
+    else if (item.function === 'avg') value = values.length ? values.reduce((sum, current) => sum + current, 0) / values.length : 0;
+    else if (item.function === 'min') value = values.length ? Math.min(...values) : 0;
+    else value = values.length ? Math.max(...values) : 0;
+    return { as: item.as ?? `${item.function}_${item.column ?? 'rows'}`, value };
+  });
+  const policy = options.exposurePolicy ?? 'structure_only';
+  const selected = (options.select?.length ? options.select : headers).filter(key => keyIndex(key) >= 0);
+  const limit = Math.max(1, Math.min(Number(options.limit ?? 50), MAX_QUERY_ROWS));
+  const result: Record<string, unknown> = {
+    sheet_index: options.sheetIndex, sheet_name: sheet.name, region_id: options.region.id,
+    columns: selected, matched_count: records.length, returned_count: Math.min(records.length, limit),
+    aggregates, exposure_policy: policy,
+  };
+  if (policy !== 'structure_only') {
+    result.rows = records.slice(0, limit).map(record => Object.fromEntries(
+      selected.map(key => [key, exposedValue(record[key] as CellValue, policy)]),
+    ));
+  }
+  return result;
 }

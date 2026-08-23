@@ -41,7 +41,7 @@ export class AgentRunner {
     this.maxTurns = Math.max(1, Math.min(options.maxTurns ?? 5, 10));
   }
 
-  static async _callTool(name: string, rawArguments: string, channel: string, actorId: string, sessionId = ''): Promise<Record<string, unknown>> {
+  static async _callTool(name: string, rawArguments: string, channel: string, actorId: string, sessionId = '', userText = ''): Promise<Record<string, unknown>> {
     let argumentsValue: unknown;
     try {
       argumentsValue = parseToolArguments(rawArguments);
@@ -58,6 +58,10 @@ export class AgentRunner {
     try {
       return await invokeToolAsync(name, argumentsValue as Record<string, unknown>, {
         channel, actorId, sessionId,
+        // Raw workbook values are never model-authorized by tool arguments.
+        // A future consent flow can replace this server-side capability.
+        allowSensitiveExcelValues: false,
+        allowManualExcelMapping: explicitExcelMappingTurn(userText),
       }) as Record<string, unknown>;
     } catch (error) {
       if (error instanceof ToolError) {
@@ -69,7 +73,7 @@ export class AgentRunner {
 
   private async executeToolWithRetry(
     name: string, rawArguments: string, channel: string, actorId: string,
-    failureCounts: Record<string, number>, sessionId = '',
+    failureCounts: Record<string, number>, sessionId = '', userText = '',
   ): Promise<Record<string, unknown>> {
     const key = `${name}:${rawArguments}`;
     if ((failureCounts[key] ?? 0) >= 1) {
@@ -77,12 +81,12 @@ export class AgentRunner {
       recordToolFailure(channel, actorId, name, {}, 'retry_exhausted', message);
       return toolError('retry_exhausted', message, false);
     }
-    const result = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
+    const result = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId, userText);
     const error = result.error as Record<string, unknown> | undefined;
     if (!error) return result;
     failureCounts[key] = 1;
     if (!Boolean(error.autoRetry ?? error.auto_retry)) return result;
-    const retryResult = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId);
+    const retryResult = await AgentRunner._callTool(name, rawArguments, channel, actorId, sessionId, userText);
     if (!retryResult.error) return retryResult;
     (retryResult.error as Record<string, unknown>).retry_attempts = 1;
     return retryResult;
@@ -161,7 +165,7 @@ export class AgentRunner {
           toolStarted = true;
           result = await self.executeToolWithRetry(
             step.tool, JSON.stringify(argumentsValue), state.channel, state.actorId,
-            failureCounts, state.sessionId);
+            failureCounts, state.sessionId, state.text);
         } catch (error) {
           if (!toolStarted) {
             argumentsValue = step.arguments;
@@ -185,7 +189,10 @@ export class AgentRunner {
         const sessionMessages = self.sessionStore.loadOwned(
           state.sessionId, state.actorId, state.channel);
         const currentAttachment = state.attachment;
-        const carriedAttachment = !currentAttachment?.artifact_id && isExcelFollowup(state.text)
+        // The latest workbook is active session context. Do not make its
+        // availability depend on a keyword regex (“继续”“多少人”等短问句
+        // must still be able to refer to the attached workbook).
+        const carriedAttachment = !currentAttachment?.artifact_id
           ? latestExcelAttachment(sessionMessages) : null;
         const attachment = currentAttachment?.artifact_id ? currentAttachment : carriedAttachment;
         const resolvedReference = resolveFollowupStudentReference(state.text, sessionMessages);
@@ -262,7 +269,7 @@ export class AgentRunner {
           role: 'assistant', content: null, reasoning_content: '',
           tool_calls: [{ id: toolCallId, type: 'function', function: { name: toolName, arguments: toolArguments } }],
         });
-        const result = await AgentRunner._callTool(toolName, toolArguments, state.channel, state.actorId, state.sessionId);
+        const result = await AgentRunner._callTool(toolName, toolArguments, state.channel, state.actorId, state.sessionId, state.text);
         emitToolEvent(emit, toolCallId, toolName, result.error ? 'error' : 'completed', input, result);
         messages.push({ role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(result) });
         return { messages };
@@ -393,7 +400,7 @@ export class AgentRunner {
           for (const call of response.tool_calls) {
             emitToolEvent(emit, call.id || `tool-${turn}`, call.name, 'running', parseToolInput(call.arguments));
             const result = await self.executeToolWithRetry(
-              call.name, call.arguments, state.channel, state.actorId, failureCounts, state.sessionId);
+              call.name, call.arguments, state.channel, state.actorId, failureCounts, state.sessionId, state.text);
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
             emitToolEvent(
               emit, call.id || `tool-${turn}`, call.name,
@@ -589,8 +596,9 @@ function shouldAttemptModelPlan(text: string): boolean {
   ].some((term) => text.includes(term));
 }
 
-function isExcelFollowup(text: string): boolean {
-  return /Excel|工作簿|表格|这个表|这份表|附件|导入|写入|预览|字段|映射|继续/i.test(text);
+function explicitExcelMappingTurn(text: string): boolean {
+  return /(列|字段|成绩\s*\d+|成绩[一二三四五六七八九十]).{0,16}(是|对应|代表|指的是|映射为)/.test(text)
+    || /(是|对应|代表|映射为).{0,16}(列|字段|成绩\s*\d+)/.test(text);
 }
 
 function latestExcelAttachment(messages: Array<Record<string, unknown>>): Record<string, unknown> | null {

@@ -89,7 +89,7 @@ export function createImportPlan(input: {
   conn?: Database;
 }): ExcelImportPlan {
   const db = connOf(input.conn);
-  getImportAdapter(input.adapterId);
+  const adapter = getImportAdapter(input.adapterId);
   const artifact = requireArtifact(input.artifactId, input.access, db);
   const blueprint = artifact.blueprint;
   const sheet = blueprint?.sheets[input.sheetIndex];
@@ -97,7 +97,10 @@ export function createImportPlan(input: {
   if (input.regionId && !sheet.regions.some(region => region.id === input.regionId)) {
     throw new ExcelImportPlanError('导入计划的数据区域不存在');
   }
-  const adapterVersion = input.adapterVersion ?? '1';
+  const adapterVersion = adapter.version;
+  if (input.adapterVersion && input.adapterVersion !== adapterVersion) {
+    throw new ExcelImportPlanError('适配器版本已由服务端锁定，请重新创建导入计划');
+  }
   const planHash = hashPlan({
     artifactSha256: artifact.sha256,
     adapterId: input.adapterId,
@@ -128,17 +131,14 @@ export function updateImportPlan(input: {
   id: string;
   mappings?: FieldMapping[];
   options?: Record<string, unknown>;
-  status?: ImportPlanStatus;
+  /** Status is controlled by preview/confirmation/execution transitions. */
   access: ArtifactAccess;
   conn?: Database;
 }): ExcelImportPlan {
   const db = connOf(input.conn);
   const plan = requireImportPlan(input.id, input.access, db);
-  if (input.status && ![
-    'draft', 'needs_input', 'ready', 'previewed', 'awaiting_confirmation',
-    'executed', 'failed', 'cancelled',
-  ].includes(input.status)) {
-    throw new ExcelImportPlanError('导入计划状态不合法');
+  if (plan.status === 'executed' || plan.status === 'cancelled') {
+    throw new ExcelImportPlanError('已结束的导入计划不能修改，请新建计划');
   }
   const artifact = requireArtifact(plan.artifactId, input.access, db);
   const mappings = input.mappings ?? plan.mappings;
@@ -156,10 +156,10 @@ export function updateImportPlan(input: {
   });
   db.prepare(
     `UPDATE excel_import_plans
-        SET mappings_json=?, options_json=?, status=?, plan_hash=?,
+        SET mappings_json=?, options_json=?, status='draft', plan_hash=?,
             preview_json='', preview_hash='', updated_at=datetime('now','localtime')
       WHERE id=?`,
-  ).run(JSON.stringify(mappings), JSON.stringify(options), input.status ?? 'draft', nextHash, input.id);
+  ).run(JSON.stringify(mappings), JSON.stringify(options), nextHash, input.id);
   const updated = getImportPlan(input.id, input.access, db);
   if (!updated) throw new ExcelImportPlanError('导入计划更新失败');
   return updated;
@@ -170,13 +170,17 @@ export function saveImportPreview(
 ): ExcelImportPlan {
   const db = connOf(conn);
   const plan = requireImportPlan(id, access, db);
+  if (plan.status === 'executed' || plan.status === 'cancelled') {
+    throw new ExcelImportPlanError('已结束的导入计划不能重新预览');
+  }
   const previewHash = hashPreview(plan.planHash, preview);
+  const status = preview.needs_input === true ? 'needs_input' : 'awaiting_confirmation';
   db.prepare(
     `UPDATE excel_import_plans
-        SET status='awaiting_confirmation', preview_json=?, preview_hash=?,
+        SET status=?, preview_json=?, preview_hash=?,
             updated_at=datetime('now','localtime')
       WHERE id=?`,
-  ).run(JSON.stringify(preview), previewHash, id);
+  ).run(status, JSON.stringify(preview), previewHash, id);
   const updated = getImportPlan(id, access, db);
   if (!updated) throw new ExcelImportPlanError('导入预览保存失败');
   return updated;

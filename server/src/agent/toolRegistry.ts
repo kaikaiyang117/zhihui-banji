@@ -39,6 +39,9 @@ export interface ToolExecutionContext {
   channel: string;
   actorId: string;
   sessionId: string;
+  /** Server-granted per-turn capability; model arguments cannot set this. */
+  allowSensitiveExcelValues?: boolean;
+  allowManualExcelMapping?: boolean;
 }
 
 export type ToolHandlerResult = Record<string, unknown> | Promise<Record<string, unknown>>;

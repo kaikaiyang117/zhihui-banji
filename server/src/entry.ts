@@ -13,6 +13,7 @@ import { WorkbenchDb } from './db/connection.js';
 import { setDatabase } from './services/context.js';
 import { setDb as setDbSingleton } from './db/index.js';
 import { migrateStoredSecrets } from './services/secretMigration.js';
+import { cleanExpiredArtifacts } from './excel/artifacts/artifactService.js';
 import { pathToFileURL } from 'node:url';
 
 function print(message: string): void {
@@ -67,6 +68,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         db.open();
         setDatabase(db);
         setDbSingleton(db);
+        cleanExpiredArtifacts();
         migrateStoredSecrets();
         print(`数据库就绪（schema v${db.schemaVersion()}）：${db.paths.dbPath}`);
         // 启动时评估规则（失败不阻断启动，与 Python 一致）

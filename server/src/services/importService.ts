@@ -41,7 +41,7 @@ export async function buildTemplate(): Promise<Buffer> {
 
 export interface PreviewRow {
   row: number;
-  action: '新增' | '更新';
+  action: '新增' | '更新' | '跳过';
   student_id: number | null;
   fields: Record<string, string>;
 }
@@ -53,7 +53,7 @@ export interface ImportPreviewResult {
   summary: { imported: number; updated: number; skipped: number; valid: number };
 }
 
-export async function previewStudents(fileBytes: Buffer, filename = ''): Promise<ImportPreviewResult> {
+export async function previewStudents(fileBytes: Buffer, filename = '', duplicateStrategy = 'update'): Promise<ImportPreviewResult> {
   const conn = getDb().connInstance;
   const result: ImportPreviewResult = {
     filename, rows: [], errors: [], summary: { imported: 0, updated: 0, skipped: 0, valid: 0 },
@@ -131,9 +131,10 @@ export async function previewStudents(fileBytes: Buffer, filename = ''): Promise
       result.summary.skipped += 1;
       continue;
     }
-    const action = existing ? '更新' : '新增';
+    const action = existing && duplicateStrategy === 'skip' ? '跳过' : existing ? '更新' : '新增';
     result.rows.push({ row: r, action, student_id: existing ? Number(existing.id) : null, fields });
-    if (existing) result.summary.updated += 1;
+    if (action === '跳过') result.summary.skipped += 1;
+    else if (existing) result.summary.updated += 1;
     else result.summary.imported += 1;
     seen.add(学号);
   }
@@ -149,7 +150,7 @@ export interface ImportCommitResult {
 }
 
 export function commitStudentImport(
-  rows: Array<{ row: number; fields: Record<string, string> }>, filename = '',
+  rows: Array<{ row: number; fields: Record<string, string>; action?: string }>, filename = '', duplicateStrategy = 'update',
 ): ImportCommitResult {
   const conn = getDb().connInstance;
   const [classId, termId] = scopeIds({ write: true, conn });
@@ -190,6 +191,10 @@ export function commitStudentImport(
       const existing = existingStmt.get(fields['学号']) as { id: number; deleted_at: string } | undefined;
       if (existing && existing.deleted_at) {
         result.errors.push({ row: rowNo, msg: `学号「${fields['学号']}」位于回收站，请先恢复` });
+        result.skipped += 1;
+        continue;
+      }
+      if (existing && duplicateStrategy === 'skip') {
         result.skipped += 1;
         continue;
       }

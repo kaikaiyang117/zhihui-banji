@@ -20,6 +20,8 @@ export interface FieldMapping {
   confidence: number;
   status: MappingStatus;
   reason?: string;
+  /** Set only by an authenticated user-facing mapping editor, never by the model tool. */
+  confirmedByUser?: boolean;
 }
 
 export interface ColumnProfile {

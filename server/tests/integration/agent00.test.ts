@@ -294,11 +294,11 @@ describe('模型客户端', () => {
 });
 
 describe('工具注册表与回归', () => {
-  it('37 个工具，微信渠道过滤敏感工具', () => {
+  it('39 个工具，微信渠道过滤敏感工具', () => {
     const registry = getRegistry();
-    expect(registry.list().length).toBe(37);
+    expect(registry.list().length).toBe(39);
     const web = listTools('web');
-    expect(web.length).toBe(37);
+    expect(web.length).toBe(39);
     const wechat = listTools('wechat');
     expect(wechat.length).toBe(26);
     expect(wechat.some((tool) => tool.name === 'student_get_profile')).toBe(false);
