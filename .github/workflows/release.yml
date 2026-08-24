@@ -100,10 +100,6 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install server dependencies
-        working-directory: server
-        run: npm ci
-
       - name: Build Windows Electron installer
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -156,6 +152,11 @@ jobs:
             echo 'REQUIRE_NOTARIZATION=0' >> "$GITHUB_ENV"
             echo '::warning::未配置完整 macOS 公证凭证，将跳过公证。'
           fi
+
+      - name: Install desktop dependencies
+        if: matrix.platform == 'macos'
+        working-directory: desktop
+        run: npm ci
 
       - name: Build macOS Electron installer
         if: matrix.platform == 'macos'
