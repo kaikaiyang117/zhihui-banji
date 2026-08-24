@@ -1,0 +1,74 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version, for example 2.3.9 or v2.3.9'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
+            desktop/package-lock.json
+
+      - name: Resolve application version
+        id: metadata
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $package = Get-Content .\desktop\package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+            $version = [string]$package.version
+          }
+          $version = $version -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+            throw "Invalid application version: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      - name: Build and smoke test installer
+        shell: pwsh
+        run: .\packaging\build-installer.ps1 "${{ steps.metadata.outputs.version }}" -RunSmokeTest
+
+      - name: Create SHA-256 checksum
+        shell: pwsh
+        run: |
+          $installer = Get-Item .\artifacts\Zhihui-Banji-Setup-Windows-x64.exe -ErrorAction Stop
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash
+          "$hash  $($installer.Name)" | Set-Content .\artifacts\SHA256SUMS.txt -Encoding ASCII
+          Write-Host "SHA-256: $hash"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhihui-Banji-Windows-x64-${{ steps.metadata.outputs.version }}
+          path: |
+            artifacts/Zhihui-Banji-Setup-Windows-x64.exe
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

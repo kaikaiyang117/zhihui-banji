@@ -15,7 +15,7 @@ $SmokeScript = Join-Path $PSScriptRoot 'test-windows-installer.ps1'
 
 function Get-ProjectVersion {
   $packagePath = Join-Path $ProjectRoot 'desktop\package.json'
-  $package = Get-Content $packagePath -Raw | ConvertFrom-Json
+  $package = Get-Content $packagePath -Raw -Encoding UTF8 | ConvertFrom-Json
   return [string]$package.version
 }
 
