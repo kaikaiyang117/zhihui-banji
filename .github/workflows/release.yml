@@ -107,7 +107,7 @@ jobs:
           APP_VERSION: ${{ inputs.version || github.ref_name }}
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          REQUIRE_WINDOWS_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+          REQUIRE_WINDOWS_SIGNING: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && '1' || '0' }}
         run: .\packaging\build-windows.ps1
 
       - name: Smoke test Windows package
