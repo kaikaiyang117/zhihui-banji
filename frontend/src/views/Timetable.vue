@@ -391,7 +391,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.timetable-page { max-width: 1400px; margin: 0 auto; }
+.timetable-page { width: 100%; }
 .timetable-segmented { margin-bottom: 16px; }
 .timetable-toolbar { flex-wrap: wrap; }
 .timetable-toolbar .form-select { min-width: 150px; width: auto; }
