@@ -295,9 +295,12 @@ export async function queryWorkbookRegion(options: {
     return { as: item.as ?? `${item.function}_${item.column ?? 'rows'}`, value };
   });
   const policy = options.exposurePolicy ?? 'structure_only';
-  const selected = (options.select?.length ? options.select : headers)
-    .map(key => resolveColumnKey(key))
-    .filter((key): key is string => Boolean(key));
+  const selectedKeys = options.select?.length ? options.select : headers;
+  const selected = selectedKeys.map(key => {
+    const resolved = resolveColumnKey(key);
+    if (!resolved) throw new WorkbookQueryError(`查询列不存在：${key}`);
+    return resolved;
+  });
   const limit = Math.max(1, Math.min(Number(options.limit ?? 50), MAX_QUERY_ROWS));
   const result: Record<string, unknown> = {
     sheet_index: options.sheetIndex, sheet_name: sheet.name, region_id: options.region.id,

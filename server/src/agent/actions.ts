@@ -99,13 +99,14 @@ export function listSessionActions(
 ): Array<Record<string, unknown>> {
   const db = connOf(conn);
   expireActions(db);
-  const [classId, termId] = scopeIds({ conn: db });
   const rows = db.prepare(
-    'SELECT id, class_id, term_id, session_id, channel, actor_id, tool_name, arguments_json, preview, status, '
-    + 'expires_at, result_json, created_at, confirmed_at, executed_at '
-    + 'FROM agent_actions WHERE session_id=? AND actor_id=? AND channel=? AND class_id=? AND term_id=? '
-    + 'ORDER BY id ASC',
-  ).all(sessionId, actorId, channel, classId, termId) as Array<Record<string, unknown>>;
+    'SELECT a.id, a.class_id, a.term_id, a.session_id, a.channel, a.actor_id, a.tool_name, '
+    + 'a.arguments_json, a.preview, a.status, a.expires_at, a.result_json, a.created_at, '
+    + 'a.confirmed_at, a.executed_at, c.name AS class_name, t.name AS term_name '
+    + 'FROM agent_actions a '
+    + 'LEFT JOIN classes c ON c.id=a.class_id LEFT JOIN terms t ON t.id=a.term_id '
+    + 'WHERE a.session_id=? AND a.actor_id=? AND a.channel=? ORDER BY a.id ASC',
+  ).all(sessionId, actorId, channel) as Array<Record<string, unknown>>;
   return rows.map((row) => {
     let result: Record<string, unknown> | null = null;
     try {
@@ -117,7 +118,8 @@ export function listSessionActions(
       try {
         const args = JSON.parse(String(row.arguments_json ?? '{}')) as Record<string, unknown>;
         const plan = getPlanForAccess(String(args.plan_id ?? ''), {
-          ownerId: actorId, channel, sessionId, classId, termId,
+          ownerId: actorId, channel, sessionId,
+          classId: Number(row.class_id), termId: Number(row.term_id),
         }, db);
         businessPreview = {
           plan_id: plan.id, adapter_id: plan.adapterId, artifact_id: plan.artifactId,
@@ -130,6 +132,11 @@ export function listSessionActions(
       preview: String(row.preview ?? ''), expires_at: String(row.expires_at ?? ''),
       created_at: String(row.created_at ?? ''), confirmed_at: String(row.confirmed_at ?? ''),
       executed_at: String(row.executed_at ?? ''), result, business_preview: businessPreview,
+      target_scope: {
+        class_id: Number(row.class_id), term_id: Number(row.term_id),
+        class_name: String(row.class_name ?? ''), term_name: String(row.term_name ?? ''),
+        label: `${String(row.class_name ?? '当前班级')} · ${String(row.term_name ?? '当前学期')}`,
+      },
     };
   });
 }

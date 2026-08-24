@@ -96,6 +96,25 @@ describe('Excel Agent 只读工具', () => {
     ]);
   });
 
+  it('查询工具拒绝无效聚合参数，并把列名错误转成结构化工具错误', async () => {
+    const current = access();
+    const artifact = createArtifactFromBuffer({
+      buffer: await workbookBuffer(), filename: '查询校验.xlsx', access: current,
+    });
+    const inspected = await inspectArtifact(artifact.id, current);
+    const regionId = inspected.blueprint?.sheets[0].regions[0].id;
+    await expect(invokeToolAsync('excel_query_region', {
+      artifact_id: artifact.id, region_id: regionId,
+      aggregate: [{ function: 'sum' }],
+    }, { channel: 'web', actorId: 'tool-user', sessionId: current.sessionId }))
+      .rejects.toThrow(/必须指定 column/);
+    await expect(invokeToolAsync('excel_query_region', {
+      artifact_id: artifact.id, region_id: regionId,
+      aggregate: [{ function: 'count', column: '不存在的列' }],
+    }, { channel: 'web', actorId: 'tool-user', sessionId: current.sessionId }))
+      .rejects.toThrow(/聚合列不存在/);
+  });
+
   it('跨会话读取被拒绝，微信不能调用敏感范围读取', async () => {
     const current = access();
     const artifact = createArtifactFromBuffer({

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileSpreadsheet, Maximize2, Minimize2, Paperclip, RefreshCw, Send, Settings, Sparkles } from 'lucide-vue-next'
+import { FileSpreadsheet, Maximize2, Minimize2, Paperclip, Send, Settings, Sparkles, SquarePen } from 'lucide-vue-next'
 import { useChat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
 import QRCode from 'qrcode'
@@ -65,9 +65,9 @@ const accessCloseEl = ref(null)
 const accessTriggerEl = ref(null)
 let accessPreviousActiveEl = null
 const agentSuggestions = [
-  '今天谁缺勤？',
-  '分析这个 Excel',
-  '查看本周待办',
+  { text: '今天谁缺勤？', action: 'send' },
+  { text: '查看本周待办', action: 'send' },
+  { text: '上传 Excel 分析', action: 'upload' },
 ]
 const agentCapabilities = [
   '查询班级数据',
@@ -128,6 +128,18 @@ const agentChat = useChat({
   },
 })
 const agentMessages = agentChat.messages
+const displayedAgentMessages = computed(() => {
+  const grouped = []
+  for (const message of agentMessages.value) {
+    const previous = grouped[grouped.length - 1]
+    if (previous?.role === 'assistant' && message.role === 'assistant') {
+      previous.parts = [...(previous.parts || []), ...(message.parts || [])]
+      continue
+    }
+    grouped.push({ ...message, parts: [...(message.parts || [])] })
+  }
+  return grouped
+})
 const agentStatus = agentChat.status
 const agentSending = computed(() => ['submitted', 'streaming'].includes(agentStatus.value))
 let petAgentWasRunning = false
@@ -493,8 +505,23 @@ async function downloadExcelPlanErrors(part) {
   }
 }
 
+function hasAgentAction(part) {
+  return Boolean(part?.output?.confirmation_required && part?.output?.action_id)
+}
+
 function isPendingAgentAction(part) {
-  return Boolean(part.output?.confirmation_required && part.output?.action_id)
+  return hasAgentAction(part) && agentActionState(part).status === 'pending'
+}
+
+function agentActionStatus(part) {
+  return hasAgentAction(part) ? agentActionState(part).status : ''
+}
+
+function agentActionScopeLabel(part) {
+  const scope = part?.output?.target_scope || part?.output?.business_preview?.target_scope
+  if (scope?.label) return String(scope.label)
+  if (scope?.class_name || scope?.term_name) return `${scope.class_name || '当前班级'} · ${scope.term_name || '当前学期'}`
+  return agentScopeLabel.value
 }
 
 function isAgentToolPart(part) {
@@ -508,10 +535,17 @@ function agentToolPartId(part) {
 function agentTraceSteps(message) {
   const parts = message?.parts || []
   const plans = parts.filter(part => part.type === 'data-agent-plan')
-  const latestPlan = plans[plans.length - 1]
   const toolParts = parts.filter(isAgentToolPart)
   const toolById = new Map(toolParts.map(part => [agentToolPartId(part), part]))
-  const planSteps = Array.isArray(latestPlan?.data?.steps) ? latestPlan.data.steps : []
+  const planStepsById = new Map()
+  plans.forEach(plan => {
+    const steps = Array.isArray(plan.data?.steps) ? plan.data.steps : []
+    steps.forEach(step => {
+      const id = String(step.id || `plan-step-${planStepsById.size}`)
+      planStepsById.set(id, { ...(planStepsById.get(id) || {}), ...step })
+    })
+  })
+  const planSteps = [...planStepsById.values()]
   const usedToolIds = new Set()
   const steps = planSteps.map(step => {
     const toolPart = toolById.get(String(step.id))
@@ -534,12 +568,12 @@ function agentTraceSteps(message) {
 function agentTraceStepStatus(step) {
   const toolPart = step.toolPart
   if (step.status === 'error' || toolPart?.state === 'output-error') return 'error'
-  if (toolPart && isPendingAgentAction(toolPart)) {
+  if (toolPart && hasAgentAction(toolPart)) {
     const actionStatus = agentActionState(toolPart).status
     if (actionStatus === 'executed') return 'completed'
     if (actionStatus === 'cancelled') return 'skipped'
     if (actionStatus === 'error') return 'error'
-    return 'waiting'
+    if (['pending', 'confirming'].includes(actionStatus)) return 'waiting'
   }
   if (toolPart?.state === 'output-available') return 'completed'
   return step.status || 'pending'
@@ -626,6 +660,41 @@ function actionResultSummary(part) {
   return state.status === 'executed' ? `已确认写入：${agentToolName(part)}。写入校验已通过。` : ''
 }
 
+function agentActionParts(message) {
+  return (message?.parts || []).filter(part => hasAgentAction(part) && !isExcelImportAction(part))
+}
+
+function agentActionCardTitle(part) {
+  return agentToolName(part)
+}
+
+function agentActionCardStatus(part) {
+  return ({
+    pending: '待确认', confirming: '正在写入', executed: '已完成',
+    cancelled: '已取消', error: '写入失败',
+  })[agentActionStatus(part)] || '待处理'
+}
+
+function excelResultStatus(part) {
+  const preview = excelPreviewModel(part)
+  if (preview?.needsInput) return '需要补充'
+  return ({
+    pending: '待确认', confirming: '正在导入', executed: '已完成',
+    cancelled: '已取消', error: '导入失败',
+  })[agentActionStatus(part)] || '已检查'
+}
+
+function excelResultTitle(part) {
+  const suffix = agentActionStatus(part) === 'executed' ? '导入完成' : '导入预览'
+  return `${excelModuleName(excelPreviewModel(part).module)}${suffix}`
+}
+
+function excelResultConsequence(part) {
+  const preview = excelPreviewModel(part)
+  const verb = agentActionStatus(part) === 'executed' ? '已新增' : '将新增'
+  return `${verb} ${preview.added} 条，${agentActionStatus(part) === 'executed' ? '已更新' : '更新'} ${preview.updated} 条。`
+}
+
 function actionHistoryMessage(action) {
   const actionId = String(action.action_id || '')
   if (!actionId) return null
@@ -633,6 +702,7 @@ function actionHistoryMessage(action) {
     confirmation_required: true,
     action_id: Number(action.action_id),
     preview: action.preview || '',
+    target_scope: action.target_scope || null,
     ...(action.business_preview ? { business_preview: action.business_preview } : {}),
   }
   return {
@@ -643,6 +713,12 @@ function actionHistoryMessage(action) {
       state: 'output-available', output,
     }],
   }
+}
+
+function actionHistoryPart(action, toolCallId) {
+  const message = actionHistoryMessage(action)
+  if (!message) return null
+  return { ...message.parts[0], toolCallId: toolCallId || message.parts[0].toolCallId }
 }
 
 function hydrateAgentActions(actions) {
@@ -662,15 +738,6 @@ function hydrateAgentActions(actions) {
   agentActionStates.value = states
 }
 
-function appendAgentAssistantMessage(text) {
-  agentMessages.value.push({
-    id: `local-agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'assistant',
-    parts: [{ type: 'text', text, state: 'done' }],
-  })
-  scrollAgentToBottom()
-}
-
 async function confirmAgentAction(part) {
   if (!isPendingAgentAction(part)) return
   const actionId = String(part.output.action_id)
@@ -681,7 +748,7 @@ async function confirmAgentAction(part) {
       session_id: agentSessionId.value,
     })
     setAgentActionState(actionId, { status: 'executed', error: '', result })
-    appendAgentAssistantMessage(actionResultSummary(part))
+    scrollAgentToBottom()
   } catch (error) {
     setAgentActionState(actionId, { status: 'error', error: error.message || '写入失败，请稍后重试。' })
   }
@@ -697,13 +764,13 @@ async function cancelAgentAction(part) {
       session_id: agentSessionId.value,
     })
     setAgentActionState(actionId, { status: 'cancelled', error: '' })
-    appendAgentAssistantMessage(`已取消${agentToolName(part)}，没有修改业务数据。`)
+    scrollAgentToBottom()
   } catch (error) {
     setAgentActionState(actionId, { status: 'error', error: error.message || '取消失败，请稍后重试。' })
   }
 }
 
-function historyMessage(item, index) {
+function historyMessage(item, index, actionByToolCallId = new Map()) {
   const role = item.role === 'user' || item.role === 'assistant' ? item.role : ''
   const contentValue = item.display_content === undefined ? item.content : item.display_content
   const content = typeof contentValue === 'string' ? contentValue : ''
@@ -719,6 +786,14 @@ function historyMessage(item, index) {
     })
   }
   if (content.trim()) parts.push({ type: 'text', text: content, state: 'done' })
+  if (role === 'assistant' && Array.isArray(item.tool_calls)) {
+    item.tool_calls.forEach(call => {
+      const callId = String(call?.id || '')
+      const action = actionByToolCallId.get(callId)
+      const part = action ? actionHistoryPart(action, callId) : null
+      if (part) parts.push(part)
+    })
+  }
   if (!parts.length) return null
   return {
     id: `history-${index}`,
@@ -754,9 +829,22 @@ function scrollAgentToBottom(options = {}) {
   })
 }
 
-function useAgentSuggestion(message) {
-  agentInput.value = message
-  nextTick(() => agentInputEl.value?.focus())
+async function useAgentSuggestion(suggestion) {
+  if (suggestion.action === 'upload') {
+    triggerAgentExcelUpload()
+    return
+  }
+  agentInput.value = suggestion.text
+  await nextTick()
+  sendAgentMessage()
+}
+
+function handleAgentInput() {
+  const input = agentInputEl.value
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${Math.min(input.scrollHeight, 140)}px`
+  input.style.overflowY = input.scrollHeight > 140 ? 'auto' : 'hidden'
 }
 
 function openAgentChat() {
@@ -842,6 +930,7 @@ async function sendAgentMessage() {
   const artifact = agentExcel.value.artifact
   if ((!message && !artifact) || agentSending.value || agentExcel.value.busy) return
   agentInput.value = ''
+  nextTick(handleAgentInput)
   agentError.value = ''
   try {
     if (!agentSessionId.value) await createAgentSession()
@@ -901,13 +990,12 @@ async function resetAgentSession() {
   if (agentSending.value) return
   try {
     await discardAgentExcel()
-    if (agentSessionId.value) {
-      await del(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
-    }
     await createAgentSession()
     agentMessages.value = []
     agentActionStates.value = {}
     agentTraceOpenStates.value = {}
+    agentInput.value = ''
+    nextTick(handleAgentInput)
     agentChat.clearError()
     agentError.value = ''
     scrollAgentToBottom({ instant: true })
@@ -922,11 +1010,19 @@ async function loadAgentHistory() {
     const data = await get(`/api/agent/sessions/${encodeURIComponent(agentSessionId.value)}`)
     const actions = Array.isArray(data.actions) ? data.actions : []
     hydrateAgentActions(actions)
-    const messages = (data.messages || []).map(historyMessage).filter(Boolean)
-    agentMessages.value = [
-      ...messages,
-      ...actions.map(actionHistoryMessage).filter(Boolean),
-    ]
+    const actionById = new Map(actions.map(action => [String(action.action_id), action]))
+    const actionByToolCallId = new Map()
+    for (const item of (data.messages || [])) {
+      if (item.role !== 'tool') continue
+      let output = null
+      try { output = JSON.parse(String(item.content || '{}')) } catch { /* ignore malformed history */ }
+      const actionId = output?.action_id
+      if (actionId && actionById.has(String(actionId))) {
+        actionByToolCallId.set(String(item.tool_call_id || ''), actionById.get(String(actionId)))
+      }
+    }
+    const messages = (data.messages || []).map((item, index) => historyMessage(item, index, actionByToolCallId)).filter(Boolean)
+    agentMessages.value = messages
     agentChat.clearError()
     scrollAgentToBottom({ instant: true })
   } catch (error) {
@@ -1096,8 +1192,8 @@ onBeforeUnmount(() => {
               <Minimize2 v-if="agentExpanded" :size="16" />
               <Maximize2 v-else :size="16" />
             </button>
-            <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话" @click="resetAgentSession">
-              <RefreshCw :size="16" />
+            <button class="agent-icon-button" type="button" aria-label="开启新会话" title="新会话（保留当前会话）" @click="resetAgentSession">
+              <SquarePen :size="16" />
             </button>
             <button class="agent-icon-button" type="button" aria-label="收起班小助" title="收起" @click="closeAgentChat">
               <component :is="renderIcon('X')" :size="17" />
@@ -1112,13 +1208,14 @@ onBeforeUnmount(() => {
               <span v-for="capability in agentCapabilities" :key="capability">{{ capability }}</span>
             </div>
             <div class="agent-suggestion-list">
-              <button v-for="suggestion in agentSuggestions" :key="suggestion" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
-                {{ suggestion }}
-                <component :is="renderIcon('ChevronRight')" :size="14" />
+              <button v-for="suggestion in agentSuggestions" :key="suggestion.text" type="button" class="agent-suggestion" @click="useAgentSuggestion(suggestion)">
+                <span>{{ suggestion.text }}</span>
+                <Paperclip v-if="suggestion.action === 'upload'" :size="14" />
+                <component v-else :is="renderIcon('ChevronRight')" :size="14" />
               </button>
             </div>
           </div>
-          <div v-for="message in agentMessages" :key="message.id" class="agent-message" :class="message.role">
+          <div v-for="message in displayedAgentMessages" :key="message.id" class="agent-message" :class="message.role">
             <template v-for="(part, partIndex) in message.parts" :key="`${message.id}-${partIndex}`">
               <template v-if="part.type === 'text'">
                 <div v-if="message.role === 'assistant' && (part.state !== 'streaming' || agentStatus === 'ready')" class="agent-message-bubble agent-markdown" v-html="renderAgentMarkdown(part.text)"></div>
@@ -1135,12 +1232,12 @@ onBeforeUnmount(() => {
                 <div class="agent-result-heading"><Sparkles :size="14" /><span>处理结果</span></div>
                 <div class="agent-excel-preview-card agent-result-card">
                   <div class="agent-result-card-head">
-                    <div class="agent-result-card-title"><FileSpreadsheet :size="17" /><strong>{{ excelModuleName(excelPreviewModel(previewPart).module) }}导入预览</strong></div>
-                    <span class="agent-result-status" :class="{ 'is-waiting': isPendingAgentAction(previewPart), 'is-success': agentActionState(previewPart).status === 'executed' }">
-                      {{ excelPreviewModel(previewPart).needsInput ? '需要补充' : isPendingAgentAction(previewPart) ? '待确认' : agentActionState(previewPart).status === 'executed' ? '已完成' : '已检查' }}
+                    <div class="agent-result-card-title"><FileSpreadsheet :size="17" /><strong>{{ excelResultTitle(previewPart) }}</strong></div>
+                    <span class="agent-result-status" :class="{ 'is-waiting': ['pending', 'confirming'].includes(agentActionStatus(previewPart)), 'is-success': agentActionStatus(previewPart) === 'executed' }">
+                      {{ excelResultStatus(previewPart) }}
                     </span>
                   </div>
-                  <div class="agent-result-context">目标：{{ agentScopeLabel }}</div>
+                  <div class="agent-result-context">目标：{{ agentActionScopeLabel(previewPart) }}</div>
                   <div class="agent-result-context">重复记录：{{ excelDuplicateName(previewPart) }}</div>
                   <div v-if="excelPreviewModel(previewPart).needsInput" class="agent-excel-preview-input-hint">有 {{ excelPreviewModel(previewPart).needsInputMappings.length }} 列暂时无法可靠判断，请补充它们对应的字段。</div>
                   <div class="agent-excel-preview-stats agent-result-stats">
@@ -1159,20 +1256,43 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
                   </details>
-                  <div v-if="isPendingAgentAction(previewPart)" class="agent-result-consequence">将新增 {{ excelPreviewModel(previewPart).added }} 条，更新 {{ excelPreviewModel(previewPart).updated }} 条。</div>
+                  <div v-if="['pending', 'confirming'].includes(agentActionStatus(previewPart))" class="agent-result-consequence">{{ excelResultConsequence(previewPart) }}</div>
+                  <div v-else-if="agentActionStatus(previewPart) === 'executed'" class="agent-result-consequence is-success">{{ excelResultConsequence(previewPart) }}</div>
                   <div class="agent-action-buttons agent-result-actions">
                     <template v-if="excelPreviewModel(previewPart).needsInput">
                       <button class="btn btn-primary btn-sm" type="button" @click="requestExcelMapping(previewPart)">补充字段映射</button>
                     </template>
-                    <template v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'pending'">
+                    <template v-else-if="isPendingAgentAction(previewPart)">
                       <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(previewPart)">确认导入 {{ Number(excelPreviewModel(previewPart).added) + Number(excelPreviewModel(previewPart).updated) }} 条</button>
                       <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(previewPart)">取消</button>
                     </template>
-                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'confirming'" class="agent-action-state">正在写入…</span>
-                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'executed'" class="agent-action-state success">{{ actionResultSummary(previewPart) }}</span>
-                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
-                    <span v-else-if="isPendingAgentAction(previewPart) && agentActionState(previewPart).status === 'error'" class="agent-action-state error">{{ friendlyAgentError(agentActionState(previewPart).error) }}</span>
+                    <span v-else-if="agentActionStatus(previewPart) === 'confirming'" class="agent-action-state">正在导入…</span>
+                    <span v-else-if="agentActionStatus(previewPart) === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
+                    <span v-else-if="agentActionStatus(previewPart) === 'error'" class="agent-action-state error">{{ friendlyAgentError(agentActionState(previewPart).error) }}</span>
                     <button v-if="excelPreviewModel(previewPart).errors > 0 && excelImportPlanId(previewPart)" class="btn btn-outline btn-sm agent-excel-error-download" type="button" @click="downloadExcelPlanErrors(previewPart)">下载错误报告</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template v-if="message.role === 'assistant' && agentActionParts(message).length">
+              <div v-for="actionPart in agentActionParts(message)" :key="`action-result-${agentToolPartId(actionPart)}`" class="agent-result-block">
+                <div class="agent-result-heading"><Sparkles :size="14" /><span>操作结果</span></div>
+                <div class="agent-action-card agent-result-card">
+                  <div class="agent-result-card-head">
+                    <div class="agent-result-card-title"><SquarePen :size="17" /><strong>{{ agentActionCardTitle(actionPart) }}</strong></div>
+                    <span class="agent-result-status" :class="{ 'is-waiting': ['pending', 'confirming'].includes(agentActionStatus(actionPart)), 'is-success': agentActionStatus(actionPart) === 'executed' }">{{ agentActionCardStatus(actionPart) }}</span>
+                  </div>
+                  <div class="agent-result-context">目标：{{ agentActionScopeLabel(actionPart) }}</div>
+                  <div class="agent-action-preview">{{ actionPart.output.preview || '操作预览已准备，请确认后写入。' }}</div>
+                  <div class="agent-action-buttons agent-result-actions">
+                    <template v-if="isPendingAgentAction(actionPart)">
+                      <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(actionPart)">确认写入</button>
+                      <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(actionPart)">取消</button>
+                    </template>
+                    <span v-else-if="agentActionStatus(actionPart) === 'confirming'" class="agent-action-state">正在写入…</span>
+                    <span v-else-if="agentActionStatus(actionPart) === 'executed'" class="agent-action-state success">{{ actionResultSummary(actionPart) }}</span>
+                    <span v-else-if="agentActionStatus(actionPart) === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
+                    <span v-else-if="agentActionStatus(actionPart) === 'error'" class="agent-action-state error">{{ friendlyAgentError(agentActionState(actionPart).error) }}</span>
                   </div>
                 </div>
               </div>
@@ -1195,16 +1315,6 @@ onBeforeUnmount(() => {
                       <span class="agent-trace-step-status">{{ agentTraceStepStatusText(step) }}</span>
                     </div>
                     <div v-if="agentTraceStepDetail(step)" class="agent-trace-step-detail">{{ agentTraceStepDetail(step) }}</div>
-                    <div v-if="step.toolPart && !isExcelImportAction(step.toolPart) && isPendingAgentAction(step.toolPart)" class="agent-action-buttons">
-                      <template v-if="agentActionState(step.toolPart).status === 'pending'">
-                        <button class="btn btn-primary btn-sm" type="button" @click="confirmAgentAction(step.toolPart)">确认写入</button>
-                        <button class="btn btn-outline btn-sm" type="button" @click="cancelAgentAction(step.toolPart)">取消</button>
-                      </template>
-                      <span v-else-if="agentActionState(step.toolPart).status === 'confirming'" class="agent-action-state">正在写入…</span>
-                      <span v-else-if="agentActionState(step.toolPart).status === 'executed'" class="agent-action-state success">{{ actionResultSummary(step.toolPart) }}</span>
-                      <span v-else-if="agentActionState(step.toolPart).status === 'cancelled'" class="agent-action-state">已取消，未修改数据</span>
-                      <span v-else class="agent-action-state error">{{ friendlyAgentError(agentActionState(step.toolPart).error) }}</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1231,7 +1341,7 @@ onBeforeUnmount(() => {
               <div v-else-if="agentExcel.artifact" class="agent-excel-summary">{{ formatAgentFileSize(agentExcel.artifact.sizeBytes) }} · 将随本条消息一起发送</div>
             </div>
             <div v-if="agentExcel.error" class="agent-excel-error">{{ agentExcel.error }}</div>
-            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="问班级数据、分析学生，或上传 Excel…" :disabled="agentSending" @keydown="handleAgentKeydown"></textarea>
+            <textarea ref="agentInputEl" v-model="agentInput" rows="2" maxlength="2000" placeholder="问班级数据、分析学生，或上传 Excel…" :disabled="agentSending" @input="handleAgentInput" @keydown="handleAgentKeydown"></textarea>
             <div class="agent-composer-bottom">
               <div class="agent-composer-meta"><button class="agent-attach-button" type="button" :disabled="agentSending || agentExcel.busy" @click="triggerAgentExcelUpload"><Paperclip :size="14" /> 添加 Excel</button><span class="agent-status-dot"></span>可读取当前班级数据</div>
               <button class="agent-send-button" type="button" aria-label="发送消息" :disabled="(!agentInput.trim() && !agentExcel.artifactId) || agentSending" @click="sendAgentMessage">
@@ -1505,6 +1615,9 @@ onBeforeUnmount(() => {
 .agent-result-actions { margin-top: 12px; }
 .agent-result-actions .btn { min-height: 36px; }
 .agent-excel-preview-card.agent-result-card .agent-excel-preview-input-hint { margin-top: 10px; font-size: 12px; }
+.agent-action-card.agent-result-card { border-color: rgba(91,106,191,.2); }
+.agent-action-preview { margin-top: 10px; color: var(--text-secondary); font: var(--ds-type-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.agent-result-consequence.is-success { background: #eaf7ee; color: var(--success); }
 .agent-trace-card { width: min(100%, 520px); box-sizing: border-box; margin: 7px 0 9px; padding: 8px 10px; border: 1px solid rgba(91,106,191,.12); border-radius: 10px; background: rgba(248,249,253,.72); color: var(--text-secondary); }
 .agent-trace-card[open] { background: rgba(248,249,253,.98); }
 .agent-trace-card summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: var(--ds-type-meta); }
@@ -1579,7 +1692,8 @@ onBeforeUnmount(() => {
 .agent-error-retry { width: fit-content; margin-top: 4px; padding: 3px 0; border: 0; background: transparent; color: var(--ds-color-danger); font: var(--ds-type-label); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .agent-error-retry:disabled { opacity: .5; cursor: default; }
 .agent-chat-foot { padding: 10px 14px 13px; border-top: 1px solid var(--border); background: rgba(255,255,255,.9); }
-.agent-composer { padding: 7px 9px 8px 12px; border: 1px solid rgba(126,137,194,.35); border-radius: 16px; background: #fff; box-shadow: 0 3px 12px rgba(40, 48, 85, .06); }
+.agent-composer { padding: 7px 9px 8px 12px; border: 1px solid rgba(126,137,194,.35); border-radius: 16px; background: #fff; box-shadow: 0 3px 12px rgba(40, 48, 85, .06); transition: border-color var(--ds-duration-fast) var(--ds-ease-out), box-shadow var(--ds-duration-fast) var(--ds-ease-out); }
+.agent-composer:focus-within { border-color: rgba(126,137,194,.35); box-shadow: 0 3px 12px rgba(40, 48, 85, .06); }
 .agent-excel-input { display: none; }
 .agent-excel-card { margin: 0 0 8px; padding: 9px 10px; border: 1px solid rgba(91,106,191,.18); border-radius: 11px; background: rgba(248,249,253,.9); font-size: 12px; }
 .agent-excel-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1594,11 +1708,9 @@ onBeforeUnmount(() => {
 .agent-attach-button { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 3px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; }
 .agent-attach-button:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-attach-button:disabled { opacity: .5; cursor: default; }
-.agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; resize: none; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
-.agent-chat-foot textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,106,191,.12); }
-.agent-chat-foot textarea:focus-visible { outline: none !important; outline-offset: 0; }
+.agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; max-height: 140px; resize: none; overflow-y: hidden; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
+.agent-chat-foot textarea:focus, .agent-chat-foot textarea:focus-visible { border-color: transparent; box-shadow: none; outline: none; }
 .agent-chat-foot textarea:disabled { opacity: .7; }
-.agent-chat-foot textarea:focus { box-shadow: none; }
 .agent-composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .agent-composer-meta { display: flex; align-items: center; gap: 7px; color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }
 .agent-send-button { display: grid; place-items: center; flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 10px; background: var(--primary); color: #fff; cursor: pointer; transition: transform var(--ds-duration-fast) var(--ds-ease-out), opacity var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }

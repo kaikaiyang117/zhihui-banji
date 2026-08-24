@@ -371,15 +371,17 @@ export class AgentRunner {
         const emit = emitFor(config);
         const messages = [...state.messages];
         const failureCounts = { ...state.failureCounts };
+        let excelFailureCount = 0;
         let finalAnswer = '';
         let halted = false;
         for (let turn = 0; turn < self.maxTurns; turn += 1) {
           const started = Date.now();
           let response: ModelResponse | null = null;
+          const turnContent: string[] = [];
           try {
             for await (const event of self.modelClient.iter_complete(
               messages, registry.modelTools(state.channel))) {
-              if (event.content) emitDelta(emit, event.content);
+              if (event.content) turnContent.push(event.content);
               if (event.response) response = event.response;
             }
           } catch (error) {
@@ -394,7 +396,9 @@ export class AgentRunner {
           }
           self.recordUsage(state.sessionId, state.channel, state.actorId, 'success', started, response);
           if (!response.tool_calls || response.tool_calls.length === 0) {
-            finalAnswer = (response.content ?? '').trim() || '模型没有返回可显示的内容。';
+            finalAnswer = (response.content ?? '').trim() || turnContent.join('').trim()
+              || '模型没有返回可显示的内容。';
+            emitDelta(emit, finalAnswer);
             messages.push({ role: 'assistant', content: finalAnswer });
             break;
           }
@@ -409,6 +413,14 @@ export class AgentRunner {
               emit, call.id || `tool-${turn}`, call.name,
               result.error ? 'error' : 'completed', parseToolInput(call.arguments), result,
             );
+            const error = result.error as Record<string, unknown> | undefined;
+            if (error && isExcelAnalysisTool(call.name)) {
+              excelFailureCount += 1;
+              if (error.code === 'permission_denied' || excelFailureCount >= 2) {
+                haltMessage = excelToolFailureMessage(error);
+                break;
+              }
+            }
             if (result.needs_input === true) {
               haltMessage = '这份 Excel 预览还缺少字段信息，请补充后我再继续。';
               break;
@@ -425,6 +437,7 @@ export class AgentRunner {
             }
           }
           if (haltMessage) {
+            emitDelta(emit, haltMessage);
             messages.push({ role: 'assistant', content: haltMessage });
             finalAnswer = haltMessage;
             halted = true;
@@ -432,7 +445,10 @@ export class AgentRunner {
           }
         }
         if (!finalAnswer) {
-          finalAnswer = '这次查询步骤太多，请缩小问题范围后重试。';
+          finalAnswer = excelFailureCount > 0
+            ? '我已读取 Excel 的结构，但数据分析没有完成。请重新发送分析请求，或指定要统计的列。'
+            : '这次查询步骤太多，请缩小问题范围后重试。';
+          emitDelta(emit, finalAnswer);
           messages.push({ role: 'assistant', content: finalAnswer });
         }
         return { messages, finalAnswer, halted, failureCounts };
@@ -918,6 +934,22 @@ function planFailureAnswer(
 
 function toolFailureMessage(): string {
   return '班小助尝试查询时工具连续失败，已停止重复调用。请换一种说法，或稍后再试。';
+}
+
+function isExcelAnalysisTool(name: string): boolean {
+  return ['excel_inspect_workbook', 'excel_list_regions', 'excel_read_range',
+    'excel_profile_region', 'excel_query_region'].includes(name);
+}
+
+function excelToolFailureMessage(error: Record<string, unknown>): string {
+  const code = String(error.code ?? '');
+  if (code === 'permission_denied') {
+    return '我已读取 Excel 的结构，但当前对话不允许读取原始单元格值；我可以继续做数量、类型和分布统计。';
+  }
+  if (code === 'invalid_arguments') {
+    return '我已读取 Excel 的结构，但数据统计参数无法校正，已停止重复尝试。请重新发送“分析这个表”，或指定要统计的列。';
+  }
+  return '我已读取 Excel 的结构，但数据分析没有完成，已停止重复尝试。请稍后重试。';
 }
 
 function assistantToolMessage(response: ModelResponse): Record<string, unknown> {

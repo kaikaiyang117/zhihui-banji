@@ -8,7 +8,7 @@ import { createImportPlan, getImportPlan, updateImportPlan } from '../../excel/i
 import { previewImportPlan } from '../../excel/imports/importPlanService.js';
 import { listImportAdapters } from '../../excel/imports/adapterRegistry.js';
 import {
-  profileWorkbookRegion, queryWorkbookRegion, readWorkbookRange, type ExposurePolicy,
+  profileWorkbookRegion, queryWorkbookRegion, readWorkbookRange, WorkbookQueryError, type ExposurePolicy,
   type WorkbookQueryAggregate, type WorkbookQueryFilter, type QueryOperator,
 } from '../../excel/query/workbookQuery.js';
 import { ToolError, ToolDefinition, type ToolExecutionContext } from '../toolRegistry.js';
@@ -137,17 +137,79 @@ async function queryRegion(args: Record<string, unknown>, context?: ToolExecutio
   const region = artifact.blueprint?.sheets.find(sheet => sheet.index === sheetIndex)?.regions
     .find(item => item.id === regionId) as TableRegion | undefined;
   if (!region) throw new ToolError('指定的数据区域不存在', { code: 'not_found', retryable: false });
+  if (args.filters !== undefined && !Array.isArray(args.filters)) {
+    throw new ToolError('filters 必须是数组', { code: 'invalid_arguments', retryable: true });
+  }
   const filters = Array.isArray(args.filters) ? args.filters as WorkbookQueryFilter[] : [];
-  const aggregate = Array.isArray(args.aggregate) ? args.aggregate as WorkbookQueryAggregate[] : [];
-  const select = Array.isArray(args.select) ? args.select.map(String) : undefined;
-  const sort = args.sort && typeof args.sort === 'object' ? args.sort as { column: string; direction?: 'asc' | 'desc' } : undefined;
-  if (filters.some(filter => !filter || typeof filter.column !== 'string' || !['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains'].includes(filter.op as QueryOperator))) {
+  if (filters.some(filter => !filter || typeof filter.column !== 'string' || !filter.column.trim()
+    || !['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains'].includes(filter.op as QueryOperator))) {
     throw new ToolError('filters 参数不合法', { code: 'invalid_arguments', retryable: true });
   }
-  const result = await queryWorkbookRegion({
-    filePath: getStoredArtifactPath(id, access), sheetIndex, region, select, filters, sort, aggregate,
-    limit: Number(args.limit ?? 50), exposurePolicy: policy,
-  });
+  if (args.select !== undefined && (!Array.isArray(args.select)
+    || args.select.some(item => typeof item !== 'string' || !item.trim()))) {
+    throw new ToolError('select 参数必须是非空字符串数组', { code: 'invalid_arguments', retryable: true });
+  }
+  const select = Array.isArray(args.select) ? args.select.map(String) : undefined;
+  let sort: { column: string; direction?: 'asc' | 'desc' } | undefined;
+  if (args.sort !== undefined) {
+    if (!args.sort || typeof args.sort !== 'object' || Array.isArray(args.sort)) {
+      throw new ToolError('sort 参数必须是对象', { code: 'invalid_arguments', retryable: true });
+    }
+    const rawSort = args.sort as Record<string, unknown>;
+    if (typeof rawSort.column !== 'string' || !rawSort.column.trim()
+      || (rawSort.direction !== undefined && rawSort.direction !== 'asc' && rawSort.direction !== 'desc')) {
+      throw new ToolError('sort 参数需要 column，以及可选的 asc 或 desc direction', {
+        code: 'invalid_arguments', retryable: true,
+      });
+    }
+    sort = { column: rawSort.column.trim(), direction: rawSort.direction as 'asc' | 'desc' | undefined };
+  }
+  if (args.aggregate !== undefined && !Array.isArray(args.aggregate)) {
+    throw new ToolError('aggregate 必须是数组', { code: 'invalid_arguments', retryable: true });
+  }
+  const aggregate = Array.isArray(args.aggregate) ? args.aggregate.map((item): WorkbookQueryAggregate => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new ToolError('aggregate 中包含无效项目', { code: 'invalid_arguments', retryable: true });
+    }
+    const raw = item as Record<string, unknown>;
+    const fn = raw.function;
+    if (!['count', 'sum', 'avg', 'min', 'max'].includes(String(fn))) {
+      throw new ToolError('aggregate.function 必须是 count、sum、avg、min 或 max', {
+        code: 'invalid_arguments', retryable: true,
+      });
+    }
+    if (raw.column !== undefined && (typeof raw.column !== 'string' || !raw.column.trim())) {
+      throw new ToolError('aggregate.column 必须是非空字符串', { code: 'invalid_arguments', retryable: true });
+    }
+    if (fn !== 'count' && (typeof raw.column !== 'string' || !raw.column.trim())) {
+      throw new ToolError(`${String(fn)} 聚合必须指定 column`, { code: 'invalid_arguments', retryable: true });
+    }
+    if (raw.as !== undefined && (typeof raw.as !== 'string' || !raw.as.trim())) {
+      throw new ToolError('aggregate.as 必须是非空字符串', { code: 'invalid_arguments', retryable: true });
+    }
+    return {
+      function: fn as WorkbookQueryAggregate['function'],
+      ...(raw.column !== undefined ? { column: String(raw.column).trim() } : {}),
+      ...(raw.as !== undefined ? { as: String(raw.as).trim() } : {}),
+    };
+  }) : [];
+  const rawLimit = args.limit ?? 50;
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new ToolError('limit 必须是 1 到 200 之间的整数', { code: 'invalid_arguments', retryable: true });
+  }
+  let result: Record<string, unknown>;
+  try {
+    result = await queryWorkbookRegion({
+      filePath: getStoredArtifactPath(id, access), sheetIndex, region, select, filters, sort, aggregate,
+      limit, exposurePolicy: policy,
+    });
+  } catch (error) {
+    if (error instanceof WorkbookQueryError) {
+      throw new ToolError(error.message, { code: 'invalid_arguments', retryable: true });
+    }
+    throw error;
+  }
   return { artifact_id: artifact.id, ...result };
 }
 

@@ -12,7 +12,7 @@ import { WorkbenchDb } from '../../src/db/connection.js';
 import { setDatabase } from '../../src/services/context.js';
 import { invokeTool } from '../../src/agent/agentService.js';
 import {
-  pendingForSession, confirmAction, cancelAction, executeConfirmed, handleConfirmation, ActionError,
+  pendingForSession, listSessionActions, confirmAction, cancelAction, executeConfirmed, handleConfirmation, ActionError,
 } from '../../src/agent/actions.js';
 import { AgentRunner } from '../../src/agent/runner.js';
 import { ModelResponse, type ModelStreamEvent } from '../../src/agent/modelClient.js';
@@ -311,6 +311,15 @@ describe('写入预览与确认状态机', () => {
 });
 
 describe('聊天确认拦截', () => {
+  it('操作记录返回创建时的班级与学期快照', () => {
+    invokeTool('create_task', { title: '范围快照测试', student_id: 1 }, {
+      channel: 'web', actorId: 'teacher', sessionId: 'web:t:scope-snapshot',
+    });
+    const actions = listSessionActions('web:t:scope-snapshot', 'teacher', 'web');
+    expect(actions[0].target_scope).toMatchObject({ class_id: 1, term_id: 1 });
+    expect(String((actions[0].target_scope as Record<string, unknown>).label)).toContain('·');
+  });
+
   it('回复确认执行、取消放弃、其他提示', async () => {
     const preview = invokeTool('record_points', { student_id: 1, amount: 5, reason: '课堂表现' }, {
       channel: 'web', actorId: 'teacher', sessionId: 'web:t:7',

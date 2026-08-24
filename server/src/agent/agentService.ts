@@ -263,6 +263,20 @@ function excelActionPreviewText(value: Record<string, unknown> | null): string {
     + `跳过 ${Number(preview.skip_count ?? 0)}，错误 ${Number(preview.error_rows ?? 0)}。点击“导入”后才会修改业务数据。`;
 }
 
+function actionScopeSnapshot(classId: number, termId: number, conn: Database): Record<string, unknown> {
+  const row = conn.prepare(
+    'SELECT c.id AS class_id, c.name AS class_name, t.id AS term_id, t.name AS term_name '
+    + 'FROM classes c JOIN terms t ON t.class_id=c.id WHERE c.id=? AND t.id=?',
+  ).get(classId, termId) as Record<string, unknown> | undefined;
+  return {
+    class_id: classId,
+    term_id: termId,
+    class_name: String(row?.class_name ?? ''),
+    term_name: String(row?.term_name ?? ''),
+    label: row ? `${String(row.class_name)} · ${String(row.term_name)}` : '当前班级 · 当前学期',
+  };
+}
+
 function validatePositiveInt(key: string, value: unknown): void {
   let parsed: number;
   if (typeof value === 'number') {
@@ -330,6 +344,7 @@ export function createPendingAction(options: {
   validateArguments(toolName, args);
   const conn = getDb().connInstance;
   const [classId, termId] = scopeIds({ write: true, conn });
+  const targetScope = actionScopeSnapshot(classId, termId, conn);
   const raw = canonicalJson(args);
   const argsHash = sha256(raw);
   expireActions(conn);
@@ -343,6 +358,7 @@ export function createPendingAction(options: {
     const item: Record<string, unknown> = { ...existing };
     item['confirmation_required'] = true;
     item['action_id'] = item['id'];
+    item['target_scope'] = actionScopeSnapshot(Number(item.class_id), Number(item.term_id), conn);
     if (businessPreview) item['business_preview'] = businessPreview;
     return item;
   }
@@ -361,6 +377,7 @@ export function createPendingAction(options: {
   item['confirmation_required'] = true;
   item['action_id'] = item['id'];
   item['confirmation_token'] = token;
+  item['target_scope'] = targetScope;
   if (businessPreview) item['business_preview'] = businessPreview;
   audit.record('agent_action', Number(item['id']), 'preview', {
     status: 'success',

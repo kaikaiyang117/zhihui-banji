@@ -398,6 +398,41 @@ describe('计划执行与纠错', () => {
 });
 
 describe('流式事件序列', () => {
+  it('工具调用回合的中间话术不会先发给用户', async () => {
+    let turn = 0;
+    const model = {
+      async *iter_complete(): AsyncGenerator<ModelStreamEvent> {
+        if (turn === 0) {
+          turn += 1;
+          yield {
+            content: '我先调整统计参数。',
+            response: {
+              content: '我先调整统计参数。',
+              tool_calls: [{ id: 'call-count', name: 'class_student_count', arguments: '{}' }],
+              reasoning_content: '', usage: null,
+            },
+          } as ModelStreamEvent;
+          return;
+        }
+        yield {
+          content: '统计完成。',
+          response: { content: '统计完成。', tool_calls: [], reasoning_content: '', usage: null },
+        } as ModelStreamEvent;
+      },
+    };
+    const events: Array<Record<string, unknown>> = [];
+    for await (const event of new AgentRunner({ modelClient: model as never }).chatStream(
+      's-stream-buffered', '请分析这个表格的数据', {
+        channel: 'web', actorId: 'u', attachment: { artifact_id: 'artifact-1', filename: '数据.xlsx' },
+      })) {
+      events.push(event);
+    }
+    const answer = events.filter((event) => event.type === 'delta')
+      .map((event) => String(event.content ?? '')).join('');
+    expect(answer).toBe('统计完成。');
+    expect(answer).not.toContain('调整统计参数');
+  });
+
   it('chatStream 输出 plan/plan_step/delta 事件', async () => {
     const model = new FakeModel({
       plan: [['students_query', { fields: ['student_no', 'student_name'] }]],
