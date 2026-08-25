@@ -70,3 +70,9 @@ macOS 构建脚本会根据 `desktop/assets/icon.png` 自动生成临时 `icon.i
 输出目录：`artifacts/`。Windows 生成 `Zhihui-Banji-Setup-Windows-x64.exe`，macOS 生成对应架构的 `.dmg`。
 
 构建顺序固定为：`Vue build → Node 后端编译（build/server-bundle/）→ Electron Builder → 签名/公证 → artifacts/`。Node 后端资源位于 Electron `Contents/Resources/server/`（Windows 为 `resources/server/`），不会打进 `app.asar`。应用版本唯一来源为构建时的 `APP_VERSION`，同步写入 `server-bundle/static/app-version.json` 与桌面应用版本。
+
+## GitHub Actions
+
+`.github/workflows/windows-installer.yml` 会在推送到 `main` 后自动构建 Windows x64 安装包，也可以在 GitHub Actions 页面手动运行并指定版本号。流水线会执行完整安装、启动、后端健康检查、退出和卸载冒烟测试，并把安装包与 `SHA256SUMS.txt` 保存为 Actions Artifact，默认保留 30 天。
+
+版本标签发布仍由 `release.yml` 负责，并将构建结果上传到 GitHub Release。Windows 安装包构建需要的签名证书不是必需项；未配置证书时会生成未签名包。正式发布如需签名，请在仓库 Secrets 中配置 `WINDOWS_CERTIFICATE_BASE64` 和 `WINDOWS_CERTIFICATE_PASSWORD`。

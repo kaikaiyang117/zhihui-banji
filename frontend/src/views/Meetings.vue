@@ -174,7 +174,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.education-page { max-width: 1180px; margin: 0 auto; }
+.education-page { width: 100%; }
 .education-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.6fr); gap: 16px; margin-top: 16px; }
 .education-list-card, .education-detail-card { min-width: 0; }
 .education-list-item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; color: var(--text); }

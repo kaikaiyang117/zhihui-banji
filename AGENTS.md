@@ -248,7 +248,7 @@ npm test
 
 ### CI
 
-`.github/workflows/ci.yml` 会执行后端测试、前端构建和浏览器 UI 冒烟测试。发布前还应参考 `docs/发布检查清单.md`，但不要把发布操作当作普通代码修改的一部分自动执行。
+`.github/workflows/ci.yml` 会执行后端测试、前端构建和浏览器 UI 冒烟测试；`.github/workflows/windows-installer.yml` 会在 `main` 推送或手动触发时构建 Windows x64 安装包、运行安装冒烟测试并保存 Actions Artifact；版本标签发布由 `release.yml` 负责。发布前还应参考 `docs/发布检查清单.md`，但不要把发布操作当作普通代码修改的一部分自动执行。
 
 ## 数据安全
 

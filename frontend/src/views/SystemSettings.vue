@@ -56,7 +56,7 @@ onBeforeUnmount(clearNoticeTimer)
 </script>
 
 <template>
-  <div>
+  <div class="system-settings-page">
     <div class="page-title-bar system-settings-titlebar">
       <div>
         <button class="btn btn-outline system-settings-back" type="button" @click="router.push('/dashboard')"><ArrowLeft :size="14" /> 返回工作台</button>
@@ -94,7 +94,8 @@ onBeforeUnmount(clearNoticeTimer)
 <style scoped>
 .system-settings-titlebar { display:flex; align-items:flex-start; }
 .system-settings-back { margin-bottom:12px; }
-.system-settings-card { max-width:760px; }
+.system-settings-page { width: 100%; }
+.system-settings-card { width: 100%; box-sizing: border-box; }
 .system-settings-field { display:grid; gap:8px; max-width:620px; color:var(--text); font-weight:600; }
 .system-settings-field small { color:var(--text-secondary); font-size:12px; font-weight:400; line-height:1.6; }
 .system-settings-actions { margin-top:18px; }

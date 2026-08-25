@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, parseAppVersion, validateBusinessDate } from '../../src/config/index.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const PROJECT_ROOT = path.resolve(SERVER_ROOT, '..');
 
 const SAVED_ENV: Record<string, string | undefined> = {};
 
@@ -38,8 +39,9 @@ describe('config 默认值', () => {
   it('默认数据目录为项目根 data/（开发模式）', () => {
     saveEnv(ENV_KEYS);
     const config = loadConfig();
-    expect(config.dataDir.endsWith(path.join('workbench', 'data'))).toBe(true);
-    expect(config.readyMarkerPath.endsWith(path.join('data', '.workbench-ready'))).toBe(true);
+    const expectedDataDir = path.join(PROJECT_ROOT, 'data');
+    expect(config.dataDir).toBe(expectedDataDir);
+    expect(config.readyMarkerPath).toBe(path.join(expectedDataDir, '.workbench-ready'));
   });
 });
 

@@ -343,7 +343,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tools-page { padding: 24px; max-width: 960px; margin: 0 auto; }
+.tools-page { width: 100%; padding: 24px; box-sizing: border-box; }
 .tools-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
 .tools-header h1 { font-size: 20px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .tools-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

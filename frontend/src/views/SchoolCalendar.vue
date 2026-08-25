@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.school-calendar-page { max-width: 1320px; margin: 0 auto; }
+.school-calendar-page { width: 100%; }
 .calendar-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .calendar-summary-item { display: grid; gap: 4px; padding: 14px 16px; }
 .calendar-summary-item span, .calendar-summary-item small { color: var(--text-secondary); font-size: 11px; }
