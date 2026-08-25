@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
           <span class="muted">网页与微信会话相互隔离；切换会话不会混用上下文。</span>
           <button class="btn btn-primary" type="button" @click="newWebSession"><Plus :size="14" /> 新建会话</button>
         </div>
-        <div class="current-session">当前会话：<code>{{ currentWebSessionId }}</code></div>
+        <div class="current-session">当前会话已就绪</div>
         <div v-if="sessionsLoading" class="loading-inline">读取会话中…</div>
         <div v-else-if="!agentSessions.length" class="wechat-muted">还没有保存的网页会话，发送第一条消息后会自动出现在这里。</div>
         <div v-else class="session-list">
@@ -556,7 +556,6 @@ onBeforeUnmount(() => {
 .agent-session-card, .agent-usage-card { margin-top:18px; }
 .session-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .current-session { margin:12px 0; color:var(--text-secondary); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.current-session code { color:var(--text); }
 .session-list { display:grid; gap:7px; max-height:280px; overflow:auto; }
 .session-row { display:flex; align-items:center; gap:8px; padding:7px 9px; border:1px solid transparent; border-radius:9px; background:var(--bg); }
 .session-row.active { border-color:var(--primary); background:var(--primary-bg); }

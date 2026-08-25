@@ -3,7 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { record } from './audit.js';
 import { getDb } from './context.js';
 
-export const DEFAULT_SCHOOL_NAME = '汶川县七一映秀中学';
+export const DEFAULT_SCHOOL_NAME = '我的学校';
 
 export class SystemSettingsError extends Error {}
 

@@ -20,7 +20,8 @@ const editingId = ref(null)
 const termCalendarCard = ref(null)
 const listCardHeight = ref('')
 let calendarResizeObserver = null
-const form = reactive({ calendar_date: today(), day_type: '上课日', title: '', is_school_day: true, note: '' })
+const businessDate = ref(today())
+const form = reactive({ calendar_date: businessDate.value, day_type: '上课日', title: '', is_school_day: true, note: '' })
 
 const dayTypes = ['上课日', '放假日', '调休上课', '考试日', '活动日', '其他']
 const specialEntries = computed(() => entries.value.filter(item => item.title || !['上课日', '放假日'].includes(item.day_type)))
@@ -28,7 +29,7 @@ const previewRows = computed(() => importPreview.value?.rows || [])
 const commitRows = computed(() => previewRows.value.filter(item => item.valid && !['冲突', '跳过'].includes(item.action)))
 
 function today() { return new Date().toISOString().slice(0, 10) }
-function resetForm(day = today()) {
+function resetForm(day = businessDate.value) {
   Object.assign(form, { calendar_date: day, day_type: '上课日', title: '', is_school_day: true, note: '' })
 }
 function openEditor(entry = null, day = null) {
@@ -39,7 +40,7 @@ function openEditor(entry = null, day = null) {
       is_school_day: Boolean(entry.is_school_day), note: entry.note || '',
     })
   } else {
-    resetForm(day || today())
+    resetForm(day || businessDate.value)
   }
   showEditor.value = true
 }
@@ -50,7 +51,9 @@ function openTermDay(day) {
 async function load() {
   loading.value = true; error.value = ''
   try {
-    const [data] = await Promise.all([get('/api/school-calendar/term')])
+    const [data, runtime] = await Promise.all([get('/api/school-calendar/term'), get('/api/system/runtime')])
+    businessDate.value = runtime.business_date || businessDate.value
+    if (!showEditor.value) form.calendar_date = businessDate.value
     entries.value = data.entries || []
     weeks.value = data.weeks || []
     scope.value = data.scope || scope.value

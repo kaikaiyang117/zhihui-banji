@@ -14,8 +14,9 @@ const saving = ref(false)
 const notice = ref('')
 const error = ref('')
 const templateName = ref('')
+const businessDate = ref(today())
 const form = reactive({
-  held_on: today(), topic: '', format: '主题班会', content: '', participation: '', conclusion: '',
+  held_on: businessDate.value, topic: '', format: '主题班会', content: '', participation: '', conclusion: '',
   student_ids: [], action_items: [],
 })
 const action = reactive({ title: '', due_at: '' })
@@ -30,9 +31,11 @@ const selected = computed(() => meetings.value.find(item => item.id === selected
 async function load() {
   loading.value = true
   try {
-    const [meetingData, studentData, templateData] = await Promise.all([
-      get('/api/education/meetings'), get('/api/students'), get('/api/education/templates'),
+    const [meetingData, studentData, templateData, runtime] = await Promise.all([
+      get('/api/education/meetings'), get('/api/students'), get('/api/education/templates'), get('/api/system/runtime'),
     ])
+    businessDate.value = runtime.business_date || businessDate.value
+    if (!showForm.value) form.held_on = businessDate.value
     meetings.value = meetingData.meetings || []
     students.value = studentData.students || []
     templates.value = templateData.meetings || []
@@ -46,7 +49,7 @@ async function load() {
 
 function resetForm() {
   Object.assign(form, {
-    held_on: today(), topic: '', format: '主题班会', content: '', participation: '', conclusion: '',
+    held_on: businessDate.value, topic: '', format: '主题班会', content: '', participation: '', conclusion: '',
     student_ids: [], action_items: [],
   })
   Object.assign(action, { title: '', due_at: '' })

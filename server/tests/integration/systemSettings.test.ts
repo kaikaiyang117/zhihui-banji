@@ -40,7 +40,7 @@ describe('系统设置', () => {
 
     const initial = await app.inject({ method: 'GET', url: '/api/system/settings' });
     expect(initial.statusCode).toBe(200);
-    expect(initial.json()).toEqual({ school_name: '汶川县七一映秀中学' });
+    expect(initial.json()).toEqual({ school_name: '我的学校' });
 
     const updated = await app.inject({
       method: 'PUT',

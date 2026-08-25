@@ -18,7 +18,6 @@ set "PROJECT_ROOT=%~dp0"
 cd /d "%PROJECT_ROOT%"
 echo   由 Electron 启动 Node.js 后端
 if not defined MEIMEI_WECHAT_ENABLED set "MEIMEI_WECHAT_ENABLED=true"
-if not defined WORKBENCH_BUSINESS_DATE set "WORKBENCH_BUSINESS_DATE=2026-04-15"
 rem 源码调试始终使用 server/dist，不使用打包 bundle。
 set "WORKBENCH_USE_BUNDLE="
 

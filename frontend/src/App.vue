@@ -1709,7 +1709,7 @@ onBeforeUnmount(() => {
 .agent-attach-button:hover { background: var(--primary-bg); color: var(--primary); }
 .agent-attach-button:disabled { opacity: .5; cursor: default; }
 .agent-chat-foot textarea { display: block; width: 100%; box-sizing: border-box; min-height: 48px; max-height: 140px; resize: none; overflow-y: hidden; padding: 3px 2px 8px; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; }
-.agent-chat-foot textarea:focus, .agent-chat-foot textarea:focus-visible { border-color: transparent; box-shadow: none; outline: none; }
+.agent-chat-foot textarea:focus, .agent-chat-foot textarea:focus-visible, .app .agent-chat-foot textarea:focus-visible { border-color: transparent; box-shadow: none; outline: none !important; outline-offset: 0; }
 .agent-chat-foot textarea:disabled { opacity: .7; }
 .agent-composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .agent-composer-meta { display: flex; align-items: center; gap: 7px; color: var(--ds-color-ink-muted); font: var(--ds-type-meta); }

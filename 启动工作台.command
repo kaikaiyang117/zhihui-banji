@@ -5,9 +5,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/desktop"
 
-# 测试阶段默认使用春季学期内的业务日期；不改变系统时间、审计时间或数据库时间。
-export WORKBENCH_BUSINESS_DATE="${WORKBENCH_BUSINESS_DATE-2026-04-15}"
-
 # 源码启动使用本机 Node.js 运行后端。
 # better-sqlite3 是原生模块；源码后端固定使用 Node 22，打包产物则单独重建为 Electron ABI。
 NODE_BIN="${WORKBENCH_NODE:-}"

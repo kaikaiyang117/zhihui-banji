@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getDb, scopeIds } from './context.js';
 import * as audit from './audit.js';
+import { todayString } from './clock.js';
 
 export const RECORD_STATUSES = new Set(['正常', '缺考', '免考']);
 export const DUPLICATE_STRATEGIES = new Set(['update', 'skip']);
@@ -1416,7 +1417,7 @@ export function scoreSummary(options: {
 export function listUpcomingExams(options?: { limit?: number; conn?: Database }): Array<Record<string, unknown>> {
   const conn = options?.conn ?? getDb().connInstance;
   const [classId, termId] = scopeIds({ conn });
-  const businessDate = process.env.WORKBENCH_BUSINESS_DATE || new Date().toISOString().slice(0, 10);
+  const businessDate = todayString();
   const limit = Math.min(Math.max(options?.limit ?? 5, 1), 20);
   const rows = conn.prepare(
     `SELECT e.id, e.name, e.exam_date, GROUP_CONCAT(DISTINCT es.name) AS subjects

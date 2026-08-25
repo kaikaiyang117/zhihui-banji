@@ -15,8 +15,9 @@ const saving = ref(false)
 const notice = ref('')
 const error = ref('')
 const templateName = ref('')
+const businessDate = ref(today())
 const form = reactive({
-  occurred_on: today(), name: '', activity_type: '其他', budget: 0, participant_count: 0,
+  occurred_on: businessDate.value, name: '', activity_type: '其他', budget: 0, participant_count: 0,
   summary: '', result: '', retrospective: '', status: '计划中', student_ids: [], followup_title: '', followup_due: '',
 })
 
@@ -26,9 +27,11 @@ const selected = computed(() => activities.value.find(item => item.id === select
 async function load() {
   loading.value = true
   try {
-    const [activityData, studentData, templateData] = await Promise.all([
-      get('/api/education/activities'), get('/api/students'), get('/api/education/templates'),
+    const [activityData, studentData, templateData, runtime] = await Promise.all([
+      get('/api/education/activities'), get('/api/students'), get('/api/education/templates'), get('/api/system/runtime'),
     ])
+    businessDate.value = runtime.business_date || businessDate.value
+    if (!showForm.value) form.occurred_on = businessDate.value
     activities.value = activityData.activities || []
     students.value = studentData.students || []
     templates.value = templateData.activities || []
@@ -37,7 +40,7 @@ async function load() {
 }
 
 function resetForm() {
-  Object.assign(form, { occurred_on: today(), name: '', activity_type: '其他', budget: 0, participant_count: 0, summary: '', result: '', retrospective: '', status: '计划中', student_ids: [], followup_title: '', followup_due: '' })
+  Object.assign(form, { occurred_on: businessDate.value, name: '', activity_type: '其他', budget: 0, participant_count: 0, summary: '', result: '', retrospective: '', status: '计划中', student_ids: [], followup_title: '', followup_due: '' })
 }
 
 function applyTemplate() {

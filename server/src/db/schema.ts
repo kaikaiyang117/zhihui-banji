@@ -1998,7 +1998,7 @@ function migration36(conn: Database): void {
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
     INSERT OR IGNORE INTO system_settings(key, value)
-      VALUES ('school_name', '汶川县七一映秀中学');
+      VALUES ('school_name', '我的学校');
   `);
 }
 

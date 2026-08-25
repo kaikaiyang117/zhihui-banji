@@ -1,4 +1,4 @@
-export const DEFAULT_SCHOOL_NAME = '汶川县七一映秀中学'
+export const DEFAULT_SCHOOL_NAME = '我的学校'
 
 // 各工作表「添加记录」弹窗的字段配置
 export const SHEET_FIELDS = {
