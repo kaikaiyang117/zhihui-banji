@@ -62,8 +62,8 @@ afterEach(() => {
 });
 
 describe('小组管理', () => {
-  it('迁移到 v38，并按小组类型阻止学生重复分组', () => {
-    expect(schemaVersion(db.connInstance)).toBe(38);
+  it('迁移到 v39，并按小组类型阻止学生重复分组', () => {
+    expect(schemaVersion(db.connInstance)).toBe(39);
     const group = createStudentGroup({ name: '第一组', groupType: '学习小组' });
     const updated = replaceMembers(Number(group.id), [
       { studentId: 1, role: '组长', sortOrder: 0 },

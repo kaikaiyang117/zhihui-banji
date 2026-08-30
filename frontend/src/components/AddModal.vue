@@ -29,6 +29,7 @@ const importCategories = ['班主任工作', '教学资源', '考研备考', '�
 const studentFields = [
   { name: '学号', label: '学号', ph: '如 2201' },
   { name: '姓名', label: '姓名' },
+  { name: '身份证号码', label: '身份证号码' },
   { name: '性别', label: '性别', options: ['男', '女'] },
   { name: '出生年月', label: '出生日期', type: 'date' },
   { name: '民族', label: '民族', options: [
@@ -55,10 +56,10 @@ const studentFields = [
 ]
 
 const studentFieldGroups = [
-  { title: '基本信息', fields: studentFields.slice(0, 6) },
-  { title: '监护人1', fields: studentFields.slice(6, 10) },
-  { title: '监护人2', optional: true, fields: studentFields.slice(10, 14) },
-  { title: '在校信息', fields: studentFields.slice(14) },
+  { title: '基本信息', fields: studentFields.slice(0, 7) },
+  { title: '监护人1', fields: studentFields.slice(7, 11) },
+  { title: '监护人2', optional: true, fields: studentFields.slice(11, 15) },
+  { title: '在校信息', fields: studentFields.slice(15) },
 ]
 
 const legacyDateValues = {}

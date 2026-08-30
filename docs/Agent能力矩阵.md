@@ -2,7 +2,7 @@
 
 这份矩阵是系统功能、Agent 工具和渠道权限的登记表。
 
-> 当前基线（2026-08-24）：注册表共 39 个工具，工具契约按 `read_only`/`write_action` 和渠道过滤；数据库 schema v37；网页会话按操作者隔离，确认写入后自动读取业务状态验证。网页 Excel 已使用消息附件：选择文件只创建 lightweight `WorkbookArtifact`，发送后才由 Agent 按用户意图懒解析、分析或创建 `ImportPlan`；真实业务预览和统一确认执行链保持不变。微信 iLink 文件消息、证据缩略图和移动设备兼容性仍需按发布清单人工验收。
+> 当前基线（2026-08-30）：注册表共 39 个工具，工具契约按 `read_only`/`write_action` 和渠道过滤；数据库 schema v39；学生档案支持身份证号码字段；网页会话按操作者隔离，确认写入后自动读取业务状态验证。网页 Excel 已使用消息附件：选择文件只创建 lightweight `WorkbookArtifact`，发送后才由 Agent 按用户意图懒解析、分析或创建 `ImportPlan`；真实业务预览和统一确认执行链保持不变。微信 iLink 文件消息、证据缩略图和移动设备兼容性仍需按发布清单人工验收。
 
 ## 使用规则
 
@@ -56,7 +56,7 @@
 | 现场课堂点名预览 | `fieldOperations.startRollCall` | `start_roll_call` | 是 | 是 | 是 | 只读；自动绑定单一教师班级，日期/场景需校验 | 开发中 |
 | 提交点名异常 | `attendance.save_daily` | `submit_roll_call_exceptions` | 是 | 是 | 是 | 写入；预览后必须确认；按点名会话解析学生并验证异常落库 | 开发中 |
 | 首页近期考试 | `scores.listUpcomingExams` | `query_field_info(upcoming_exams)` | 是 | 是 | 是 | 只读；排除已结束考试并按日期排序 | 开发中 |
-| 多班级教师课程/考试汇总 | `teacherClasses.getTeacherTimetable/getTeacherExams` | 无 | 是 | 否 | 否 | 只读；按教师关联班级汇总，网页专用 | 开发中 |
+| 教师个人周课表 | `teacherClasses.getTeacherSchedule/createTeacherScheduleEntry/updateTeacherScheduleEntry/removeTeacherScheduleEntry` | 无 | 是 | 否 | 否 | 网页教师主动维护；每个星期/节次只能有一个启用安排，移除为软删除并记录审计；不开放给 Agent | 已接入 |
 | Excel Artifact 检查与只读分析 | `excel_inspect_workbook`、`excel_list_regions`、`excel_suggest_import_plan`、`excel_read_range`、`excel_profile_region`、`excel_query_region` | 结构检查、适配器推荐、范围读取、区域统计、本地筛选与聚合 | 是 | 是 | 否 | 网页选择文件只上传 Artifact，文字与附件发送后才懒解析；默认 `structure_only`；范围读取最多 200 行/50 列；查询在本地执行，默认只返回统计结果；`allowed_values` 必须由服务端显式授予本轮能力，默认拒绝；Artifact 绑定操作者、渠道、会话、班级、学期和过期时间 | 已接入 |
 | Excel 导入草稿计划 | `excel_create_import_plan`、`excel_update_import_plan` | 保存/修改映射和导入选项 | 是 | 是 | 否 | 只保存草稿，不写业务数据；映射或选项变化会使旧预览失效；Artifact、会话和范围由服务端校验 | 已接入 |
 | Excel 上传、预览与确认导入 | `excelImportAssistant`、`excelSemanticAnalyzer` | `excel_preview_import`、`execute_excel_import` | 是 | 是 | 否 | 附件本身不代表导入，只有明确导入意图才创建计划；预览只返回 `needs_input`/`ready_for_authorization`，只有执行工具创建一次 `PendingAction`；执行前复核预览哈希和业务效果哈希，确认后创建备份，异步准备后在单一 SQLite 事务中由适配器写入、验证，验证失败回滚；Action 状态和结果可随会话恢复；错误行可下载为 XLSX；设置页旧 Excel 向导和旧版直接执行接口（410）已移除；iLink 文件未接入 | 已接入 |

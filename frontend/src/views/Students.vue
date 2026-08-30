@@ -55,6 +55,7 @@ function startEdit(rowNo) {
   editData.value = {
     '学号': student['学号'] ?? '',
     '姓名': student['姓名'] ?? '',
+    '身份证号码': student['身份证号码'] ?? '',
     '性别': student['性别'] ?? '',
     '出生年月': student['出生年月'] ?? '',
     '民族': student['民族'] ?? '',

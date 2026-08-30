@@ -58,8 +58,12 @@ URL="http://127.0.0.1:${PORT}/"
 SNAPSHOT="$("${PWCLI[@]}" snapshot 2>&1)"
 printf '%s\n' "$SNAPSHOT"
 grep -q '手机访问' <<< "$SNAPSHOT"
-grep -q '更新' <<< "$SNAPSHOT"
-grep -q '04/15 · 当前班级' <<< "$SNAPSHOT"
+grep -q '打开系统设置' <<< "$SNAPSHOT"
+if grep -q '检查软件更新' <<< "$SNAPSHOT"; then
+  echo '顶部不应显示系统更新入口。' >&2
+  exit 1
+fi
+grep -q '2026-04-15 · 从最需要处理的事情开始' <<< "$SNAPSHOT"
 if grep -q '开发日期' <<< "$SNAPSHOT"; then
   echo '页面不应显示开发日期提示。' >&2
   exit 1

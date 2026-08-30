@@ -365,8 +365,11 @@ export async function downloadExcelImportPlanErrors(planId, sessionId = '') {
 export async function getTeacherClasses() {
   return request('/teacher/classes')
 }
-export async function addTeacherClass(classId) {
-  return request('/teacher/classes', { method: 'POST', body: JSON.stringify({ class_id: classId }) })
+export async function addTeacherClass(classId, role = '任课教师', subjects = '') {
+  return request('/teacher/classes', { method: 'POST', body: JSON.stringify({ class_id: classId, role, subjects }) })
+}
+export async function updateTeacherClass(id, data) {
+  return request(`/teacher/classes/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }
 export async function removeTeacherClass(id) {
   return request(`/teacher/classes/${id}`, { method: 'DELETE' })
@@ -377,6 +380,18 @@ export async function getTeacherTimetable(dateFrom, dateTo) {
   if (dateTo) params.set('end_date', dateTo)
   const qs = params.toString()
   return request(`/teacher/timetable${qs ? `?${qs}` : ''}`)
+}
+export async function getTeacherSchedule() {
+  return request('/teacher/schedule')
+}
+export async function createTeacherScheduleEntry(data) {
+  return request('/teacher/schedule', { method: 'POST', body: JSON.stringify(data) })
+}
+export async function updateTeacherScheduleEntry(id, data) {
+  return request(`/teacher/schedule/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+export async function removeTeacherScheduleEntry(id) {
+  return request(`/teacher/schedule/${id}`, { method: 'DELETE' })
 }
 export async function getTeacherExams() {
   return request('/teacher/exams')

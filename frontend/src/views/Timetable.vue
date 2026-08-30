@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { CalendarDays, Clock3, Download, Edit3, FileUp, Plus, RotateCcw, Save, X, Trash2, Users } from 'lucide-vue-next'
-import { download, get, post, put, upload, setStoredScope, getTeacherClasses, addTeacherClass, removeTeacherClass, getTeacherTimetable, getTeacherExams } from '../api'
+import { CalendarDays, Clock3, Download, Edit3, FileUp, Plus, RotateCcw, Save, X, Trash2 } from 'lucide-vue-next'
+import { download, get, post, put, upload, getTeacherSchedule, createTeacherScheduleEntry, updateTeacherScheduleEntry, removeTeacherScheduleEntry } from '../api'
 
 const activeView = ref('single')
 
@@ -42,16 +42,14 @@ const subjectToneMap = {
 }
 const fallbackSubjectTones = ['subject-tone-indigo', 'subject-tone-blue', 'subject-tone-mint', 'subject-tone-violet', 'subject-tone-teal']
 
-const myClasses = ref([])
-const allClasses = ref([])
 const teacherEntries = ref([])
-const teacherExamList = ref([])
+const teacherPeriods = ref([])
+const teacherClasses = ref([])
 const teacherLoading = ref(false)
 const teacherError = ref('')
-const addClassId = ref('')
-const addingClass = ref(false)
-const removingClassId = ref(null)
-const showAddClassDialog = ref(false)
+const showTeacherEntryEditor = ref(false)
+const editingTeacherEntryId = ref(null)
+const teacherEntryForm = reactive({ class_id: '', weekday: 1, period_no: 1, subject: '', room: '', note: '' })
 
 function resetEntryForm() { Object.assign(entryForm, { weekday: 1, period_no: periods.value[0]?.period_no || 1, subject: '', teacher_name: '', room: '', session_type: '普通课', week_pattern: '全周', week_start: 1, week_end: 99, note: '' }); editingEntryId.value = null }
 function resetPeriodForm() { Object.assign(periodForm, { period_no: periods.value.length + 1, label: '', start_time: '', end_time: '', session_type: '普通课' }) }
@@ -65,26 +63,6 @@ const timetableRangeLabel = computed(() => {
   const className = timetableScope.value.class_name || '当前班级'
   const weekLabel = daySchedule.value?.week_no ? `第${daySchedule.value.week_no}周` : '当前周'
   return `${className} · ${weekLabel}课程`
-})
-
-const myClassIds = computed(() => new Set(myClasses.value.map(c => Number(c.class_id))))
-const availableClasses = computed(() => allClasses.value.filter(c => !myClassIds.value.has(Number(c.id))))
-
-const teacherAgendaGrouped = computed(() => {
-  const changeItems = teacherEntries.value.filter(e => e.source === 'change')
-  const dateMap = new Map()
-  for (const item of teacherEntries.value) {
-    if (item.source === 'change') continue
-    const key = item.weekday ? `weekday-${item.weekday}` : 'other'
-    if (!dateMap.has(key)) dateMap.set(key, { label: weekdays[(item.weekday || 1) - 1] || '未知', items: [] })
-    dateMap.get(key).items.push(item)
-  }
-  for (const item of changeItems) {
-    const key = item.change_date || 'undated'
-    if (!dateMap.has(key)) dateMap.set(key, { label: item.change_date || '未定日期', items: [] })
-    dateMap.get(key).items.push(item)
-  }
-  return Array.from(dateMap.values())
 })
 
 function cellEntries(weekday, periodNo) {
@@ -194,41 +172,63 @@ function changeForPeriod(periodNo) { return changes.value.find(item => item.chan
 async function loadTeacherView() {
   teacherLoading.value = true; teacherError.value = ''
   try {
-    const [classesData, contextData, timetableData, examsData] = await Promise.all([
-      getTeacherClasses(),
-      get('/api/context'),
-      getTeacherTimetable(),
-      getTeacherExams(),
-    ])
-    myClasses.value = classesData.classes || []
-    allClasses.value = contextData.classes || []
-    teacherEntries.value = timetableData.entries || []
-    teacherExamList.value = examsData.exams || []
+    const data = await getTeacherSchedule()
+    teacherPeriods.value = data.periods || []
+    teacherEntries.value = data.entries || []
+    teacherClasses.value = data.classes || []
   } catch (e) { teacherError.value = e.message } finally { teacherLoading.value = false }
 }
 
-async function onAddClass() {
-  if (!addClassId.value) return
-  addingClass.value = true; teacherError.value = ''
-  try {
-    await addTeacherClass(Number(addClassId.value))
-    addClassId.value = ''
-    showAddClassDialog.value = false
-    await loadTeacherView()
-  } catch (e) { teacherError.value = e.message } finally { addingClass.value = false }
+function teacherCellEntry(weekday, periodNo) {
+  return teacherEntries.value.find(item => Number(item.weekday) === Number(weekday) && Number(item.period_no) === Number(periodNo))
 }
 
-async function onRemoveClass(tcId, classId) {
-  removingClassId.value = tcId
+function teacherCellAriaLabel(weekday, periodNo) {
+  const period = teacherPeriods.value.find(item => Number(item.period_no) === Number(periodNo))
+  const item = teacherCellEntry(weekday, periodNo)
+  const slot = `${weekdays[weekday - 1]}${period?.label || `第${periodNo}节`}`
+  return item ? `编辑${slot}：${item.class_name}${item.subject ? `，${item.subject}` : ''}` : `添加${slot}授课安排`
+}
+
+function openTeacherEntry(entry = null, weekday = 1, periodNo = teacherPeriods.value[0]?.period_no || 1) {
+  editingTeacherEntryId.value = entry?.id || null
+  Object.assign(teacherEntryForm, entry ? {
+    class_id: String(entry.class_id), weekday: Number(entry.weekday), period_no: Number(entry.period_no),
+    subject: entry.subject || '', room: entry.room || '', note: entry.note || '',
+  } : {
+    class_id: teacherClasses.value.length === 1 ? String(teacherClasses.value[0].id) : '',
+    weekday: Number(weekday), period_no: Number(periodNo), subject: '', room: '', note: '',
+  })
+  showTeacherEntryEditor.value = true
+}
+
+async function saveTeacherEntry() {
+  if (!teacherEntryForm.class_id) return
+  saving.value = true; teacherError.value = ''
+  try {
+    const payload = { ...teacherEntryForm, class_id: Number(teacherEntryForm.class_id), weekday: Number(teacherEntryForm.weekday), period_no: Number(teacherEntryForm.period_no) }
+    if (editingTeacherEntryId.value) await updateTeacherScheduleEntry(editingTeacherEntryId.value, payload)
+    else await createTeacherScheduleEntry(payload)
+    notice.value = editingTeacherEntryId.value ? '授课安排已更新。' : '授课安排已添加。'
+    showTeacherEntryEditor.value = false
+    await loadTeacherView()
+  } catch (e) { teacherError.value = e.message } finally { saving.value = false }
+}
+
+async function deleteTeacherEntry() {
+  if (!editingTeacherEntryId.value || !confirm('移除这条授课安排吗？')) return
+  saving.value = true
   teacherError.value = ''
   try {
-    await removeTeacherClass(tcId)
+    await removeTeacherScheduleEntry(editingTeacherEntryId.value)
+    notice.value = '授课安排已移除。'
+    showTeacherEntryEditor.value = false
     await loadTeacherView()
-  } catch (e) { teacherError.value = e.message } finally { removingClassId.value = null }
+  } catch (e) { teacherError.value = e.message } finally { saving.value = false }
 }
 
 watch(activeView, (val) => {
-  if (val === 'mine' && !myClasses.value.length) loadTeacherView()
+  if (val === 'mine') loadTeacherView()
 })
 
 onMounted(load)
@@ -237,12 +237,12 @@ onMounted(load)
 <template>
   <div class="timetable-page">
     <div class="page-title-bar">
-      <div><div class="page-title">课程表</div><div class="page-subtitle">{{ activeView === 'single' ? '高中班级课表、早晚自习与临时调课 · ' + (daySchedule?.date || selectedDate) : '多班级教师视角，汇总所有任课班级的课程与考试' }}</div></div>
+      <div><div class="page-title">课程表</div><div class="page-subtitle">{{ activeView === 'single' ? '班主任查看和维护本班全部课程 · ' + (daySchedule?.date || selectedDate) : '直接标注每周哪天、哪节课去哪个班级上课' }}</div></div>
     </div>
 
     <div class="segmented timetable-segmented">
-      <button :class="{ active: activeView === 'single' }" @click="activeView = 'single'">单班课表</button>
-      <button :class="{ active: activeView === 'mine' }" @click="activeView = 'mine'">我的安排</button>
+      <button :class="{ active: activeView === 'single' }" @click="activeView = 'single'">本班课表</button>
+      <button :class="{ active: activeView === 'mine' }" @click="activeView = 'mine'">我的授课</button>
     </div>
 
     <div v-if="notice" class="inline-message success-message">{{ notice }}</div>
@@ -295,86 +295,49 @@ onMounted(load)
     <template v-if="activeView === 'mine'">
       <div v-if="teacherLoading" class="loading">加载中…</div>
       <template v-else>
-        <section class="card my-classes-card">
-          <div class="section-heading"><div><h2><Users :size="16" /> 我的班级</h2><p>添加你任课的班级，汇总查看所有班级的课程安排</p></div><button class="btn btn-primary btn-sm" @click="showAddClassDialog = true"><Plus :size="13" /> 添加班级</button></div>
-          <div v-if="!myClasses.length" class="empty-state">还没有添加班级。点击"添加班级"，将你任课的班级加入列表，即可在"我的安排"中查看汇总课表。</div>
-          <div v-else class="my-classes-list">
-            <div v-for="cls in myClasses" :key="cls.id" class="my-class-row">
-              <div class="my-class-info">
-                <span class="my-class-name">{{ cls.class_name }}</span>
-                <span class="tag tag-blue" v-if="cls.grade">{{ cls.grade }}</span>
-                <span class="my-class-role" v-if="cls.role">{{ cls.role }}</span>
-                <span class="my-class-subjects" v-if="cls.subjects">{{ cls.subjects }}</span>
-              </div>
-              <button class="btn btn-sm btn-outline my-class-remove" :disabled="removingClassId === cls.id" @click="onRemoveClass(cls.id, cls.class_id)"><Trash2 :size="13" /></button>
-            </div>
+        <section class="card timetable-week-card teacher-schedule-card">
+          <div class="section-heading timetable-section-heading">
+            <div><h2>我的周课表</h2><p>点击任意空白格，标注这节课要去的班级；点击已有课程可继续修改</p></div>
+            <button class="btn btn-primary" :disabled="!teacherClasses.length" @click="openTeacherEntry()"><Plus :size="14" /> 添加授课</button>
           </div>
-        </section>
-
-        <section v-if="myClasses.length" class="card my-agenda-card">
-          <div class="section-heading"><div><h2>汇总课表</h2><p>所有班级的固定课程与临时变更</p></div><span class="hint">{{ teacherEntries.length }} 项</span></div>
-          <div v-if="!teacherEntries.length" class="empty-state">当前班级暂无课程安排。</div>
-          <div v-else class="my-agenda-grouped">
-            <div v-for="group in teacherAgendaGrouped" :key="group.label" class="my-agenda-date-group">
-              <div class="my-agenda-date-label">{{ group.label }}</div>
-              <div v-for="item in group.items" :key="`${item.class_id}-${item.weekday}-${item.period_no}-${item.subject}-${item.change_date || ''}`" class="my-agenda-item" :class="{ 'my-agenda-change': item.source === 'change' }">
-                <div class="my-agenda-time">
-                  <template v-if="item.source === 'change'">
-                    <strong>{{ item.change_date }}</strong>
-                    <small>第{{ item.period_no }}节</small>
-                  </template>
-                  <template v-else>
-                    <strong>第{{ item.period_no }}节</strong>
-                    <small>{{ weekdays[(item.weekday || 1) - 1] }}</small>
-                  </template>
-                </div>
-                <div class="my-agenda-body">
-                  <div class="my-agenda-subject-row">
-                    <strong>{{ item.subject }}</strong>
-                    <span class="tag tag-blue my-agenda-class-tag">{{ item.class_name }}</span>
-                    <em v-if="item.source === 'change'" class="my-agenda-action">{{ item.action }}</em>
-                    <em v-if="item.week_pattern && item.week_pattern !== '全周'" class="my-agenda-pattern">{{ item.week_pattern }}</em>
-                  </div>
-                  <div class="my-agenda-meta">{{ [item.teacher_name, item.room, item.session_type].filter(Boolean).join(' · ') }}</div>
-                  <div v-if="item.note" class="my-agenda-note">{{ item.note }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section v-if="myClasses.length && teacherExamList.length" class="card my-exams-card">
-          <div class="section-heading"><div><h2>近期考试</h2><p>所有班级的考试安排</p></div><span class="hint">{{ teacherExamList.length }} 场</span></div>
-          <div class="my-exam-list">
-            <div v-for="exam in teacherExamList" :key="exam.id" class="my-exam-row">
-              <div class="my-exam-date"><strong>{{ exam.exam_date || '待定' }}</strong></div>
-              <div class="my-exam-body">
-                <strong>{{ exam.name }}</strong>
-                <span class="tag tag-blue my-agenda-class-tag">{{ exam.class_name }}</span>
-              </div>
+          <div v-if="!teacherClasses.length" class="empty-state compact-empty">系统中还没有可用班级，请先创建班级和当前学期。</div>
+          <div v-else class="timetable-grid-scroll" aria-label="我的周课表，可横向滚动查看">
+            <div class="timetable-grid teacher-timetable-grid">
+              <div class="timetable-grid-head timetable-period-head">节次</div><div v-for="day in weekdays" :key="day" class="timetable-grid-head">{{ day }}</div>
+              <template v-for="period in teacherPeriods" :key="period.period_no">
+                <div class="timetable-period-cell"><strong>{{ period.label || `第${period.period_no}节` }}</strong><small v-if="period.start_time">{{ period.start_time }}<template v-if="period.end_time">–{{ period.end_time }}</template></small></div>
+                <button v-for="weekday in 7" :key="`${period.period_no}-${weekday}`" class="timetable-cell teacher-timetable-cell" :aria-label="teacherCellAriaLabel(weekday, period.period_no)" @click="openTeacherEntry(teacherCellEntry(weekday, period.period_no), weekday, period.period_no)">
+                  <span v-if="teacherCellEntry(weekday, period.period_no)" class="timetable-entry teacher-timetable-entry" :class="subjectTone(teacherCellEntry(weekday, period.period_no).subject || teacherCellEntry(weekday, period.period_no).class_name)">
+                    <strong>{{ teacherCellEntry(weekday, period.period_no).class_name }}</strong>
+                    <small v-if="teacherCellEntry(weekday, period.period_no).subject">{{ teacherCellEntry(weekday, period.period_no).subject }}</small>
+                    <em v-if="teacherCellEntry(weekday, period.period_no).room && teacherCellEntry(weekday, period.period_no).room !== teacherCellEntry(weekday, period.period_no).class_name">{{ teacherCellEntry(weekday, period.period_no).room }}</em>
+                  </span>
+                  <span v-else class="timetable-empty" aria-hidden="true"></span>
+                </button>
+              </template>
             </div>
           </div>
         </section>
       </template>
 
-      <div v-if="showAddClassDialog" class="modal-overlay show" @click.self="showAddClassDialog = false">
-        <div class="modal">
+      <div v-if="showTeacherEntryEditor" class="modal-overlay show" @click.self="showTeacherEntryEditor = false">
+        <div class="modal timetable-modal">
           <div class="modal-title-row">
-            <div><div class="modal-kicker">多班级教师视角</div><h3>添加任课班级</h3></div>
-            <button class="icon-button" @click="showAddClassDialog = false"><X :size="18" /></button>
+            <div><h3>{{ editingTeacherEntryId ? '编辑授课安排' : '添加授课安排' }}</h3><p class="modal-description">填写哪天、哪节课去哪个班级</p></div>
+            <button class="icon-button" aria-label="关闭授课安排" @click="showTeacherEntryEditor = false"><X :size="18" /></button>
           </div>
-          <div v-if="!availableClasses.length" class="empty-state">所有班级已添加，或系统中没有更多班级。请先在工作台创建班级。</div>
-          <template v-else>
-            <label style="display:grid;gap:5px;color:var(--text-secondary);font-size:12px">选择班级
-              <select class="form-select" v-model="addClassId">
-                <option value="">请选择班级</option>
-                <option v-for="cls in availableClasses" :key="cls.id" :value="cls.id">{{ cls.name }}{{ cls.grade ? ` (${cls.grade})` : '' }}</option>
-              </select>
-            </label>
-          </template>
+          <div class="form-grid">
+            <label>星期<select class="form-select" v-model.number="teacherEntryForm.weekday"><option v-for="(day, index) in weekdays" :key="day" :value="index + 1">{{ day }}</option></select></label>
+            <label>节次<select class="form-select" v-model.number="teacherEntryForm.period_no"><option v-for="period in teacherPeriods" :key="period.period_no" :value="period.period_no">{{ period.label || `第${period.period_no}节` }}<template v-if="period.start_time"> · {{ period.start_time }}</template></option></select></label>
+            <label class="form-grid-wide">授课班级<select class="form-select" v-model="teacherEntryForm.class_id"><option value="">请选择班级</option><option v-for="cls in teacherClasses" :key="`${cls.id}-${cls.term_id}`" :value="String(cls.id)">{{ cls.name }}{{ cls.grade ? ` · ${cls.grade}` : '' }}</option></select></label>
+            <label>科目<input class="form-input" v-model="teacherEntryForm.subject" placeholder="选填，如：政治"></label>
+            <label>上课地点<input class="form-input" v-model="teacherEntryForm.room" placeholder="选填，如：实验楼302"></label>
+            <label class="form-grid-wide">备注<textarea class="form-textarea" rows="2" v-model="teacherEntryForm.note" placeholder="选填"></textarea></label>
+          </div>
           <div class="modal-actions">
-            <button class="btn btn-outline" @click="showAddClassDialog = false">取消</button>
-            <button class="btn btn-primary" :disabled="addingClass || !addClassId" @click="onAddClass">{{ addingClass ? '添加中…' : '添加' }}</button>
+            <button v-if="editingTeacherEntryId" class="btn btn-outline teacher-entry-delete" :disabled="saving" @click="deleteTeacherEntry"><Trash2 :size="14" /> 移除</button>
+            <button class="btn btn-outline" @click="showTeacherEntryEditor = false">取消</button>
+            <button class="btn btn-primary" :disabled="saving || !teacherEntryForm.class_id" @click="saveTeacherEntry"><Save :size="14" /> {{ saving ? '保存中…' : '保存' }}</button>
           </div>
         </div>
       </div>
@@ -395,13 +358,16 @@ onMounted(load)
 .timetable-segmented { margin-bottom: 16px; }
 .timetable-toolbar { flex-wrap: wrap; }
 .timetable-toolbar .form-select { min-width: 150px; width: auto; }
+.timetable-page .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.timetable-page .section-heading h2 { margin: 0; color: var(--text); font-size: 18px; line-height: 1.35; letter-spacing: -0.02em; }
+.timetable-page .section-heading p { max-width: 68ch; margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.timetable-page .section-heading > .hint { flex: none; margin-top: 3px; }
 .timetable-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
 .timetable-action-card { display: flex; align-items: center; gap: 11px; padding: 14px; border: 1px solid var(--border); text-align: left; color: var(--text); cursor: pointer; }
 .timetable-action-card > span { display: grid; flex: 1; gap: 3px; }
 .timetable-action-card small { color: var(--text-secondary); font-size: 11px; }
 .timetable-week-card { overflow: hidden; }
 .timetable-section-heading { align-items: center; margin-bottom: 16px; }
-.timetable-section-heading h2 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
 .timetable-grid-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 2px; }
 .timetable-grid { display: grid; grid-template-columns: 104px repeat(7, minmax(96px, 1fr)); min-width: 776px; border: 1px solid var(--border-light); border-radius: 12px; overflow: hidden; background: var(--border-light); gap: 1px; }
 .timetable-grid-head { padding: 12px 8px; background: var(--surface-subtle, #f8f8fa); color: var(--text-secondary); font-size: 12px; font-weight: 650; letter-spacing: 0.02em; text-align: center; }
@@ -459,45 +425,25 @@ onMounted(load)
 .tag-gray { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--bg); color: var(--text-tertiary); font-size: 11px; }
 .tag-blue { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--primary-bg); color: var(--primary); font-size: 11px; }
 
-.my-classes-card { margin-bottom: 16px; }
-.my-classes-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.my-class-row { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
-.my-class-info { display: flex; align-items: center; gap: 6px; }
-.my-class-name { font-size: 13px; font-weight: 500; }
-.my-class-role { color: var(--text-secondary); font-size: 11px; }
-.my-class-subjects { color: var(--text-tertiary); font-size: 11px; }
-.my-class-remove { padding: 4px 6px; }
-
-.my-agenda-card { margin-bottom: 16px; }
-.my-agenda-grouped { display: grid; gap: 16px; }
-.my-agenda-date-group { border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; }
-.my-agenda-date-label { padding: 8px 12px; background: var(--surface-subtle, #f8f8fa); font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-.my-agenda-item { display: flex; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border-light); }
-.my-agenda-item.my-agenda-change { background: var(--warning-bg, #fff8e1); }
-.my-agenda-time { min-width: 60px; display: grid; gap: 2px; }
-.my-agenda-time strong { font-size: 13px; }
-.my-agenda-time small { color: var(--text-tertiary); font-size: 11px; }
-.my-agenda-body { display: grid; gap: 3px; }
-.my-agenda-subject-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.my-agenda-subject-row strong { font-size: 13px; }
-.my-agenda-class-tag { font-size: 10px; }
-.my-agenda-action { color: var(--warning, #f59e0b); font-size: 11px; font-style: normal; font-weight: 500; }
-.my-agenda-pattern { color: var(--primary); font-size: 11px; font-style: normal; font-weight: 500; }
-.my-agenda-meta { color: var(--text-secondary); font-size: 12px; }
-.my-agenda-note { color: var(--text-tertiary); font-size: 11px; }
-
-.my-exams-card { margin-bottom: 16px; }
-.my-exam-list { display: grid; gap: 8px; }
-.my-exam-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
-.my-exam-date { min-width: 80px; font-size: 13px; }
-.my-exam-body { display: flex; align-items: center; gap: 6px; }
-.my-exam-body strong { font-size: 13px; }
+.teacher-schedule-card { margin-bottom: 16px; }
+.teacher-timetable-grid { grid-template-columns: 104px repeat(7, minmax(96px, 1fr)); }
+.teacher-timetable-cell { min-height: 78px; }
+.teacher-timetable-entry { min-height: 48px; }
+.teacher-timetable-entry strong { font-size: 12px; }
+.teacher-timetable-entry small { font-size: 11px; }
+.modal-description { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; }
+.teacher-entry-delete { margin-right: auto; color: var(--danger); }
+.teacher-entry-delete:hover { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
 
 @media (max-width: 800px) {
   .timetable-actions { grid-template-columns: 1fr; }
   .timetable-lower-grid { grid-template-columns: 1fr; }
   .day-schedule-card { grid-template-columns:1fr; }
-  .my-classes-list { flex-direction: column; }
-  .my-class-row { width: 100%; justify-content: space-between; }
+}
+
+@media (max-width: 560px) {
+  .timetable-page .section-heading { gap: 8px; }
+  .teacher-schedule-card .section-heading { flex-direction: column; }
+  .teacher-schedule-card .section-heading .btn { width: 100%; }
 }
 </style>

@@ -2,7 +2,7 @@
 /* Electron 桌面壳冒烟测试
  *
  * 用临时 WORKBENCH_DATA_DIR / WORKBENCH_KB_DIR 启动 Electron，
- * 检查工作台页面渲染、手机访问/更新入口、后端健康检查；
+ * 检查工作台页面渲染、手机访问/系统设置中的更新入口、后端健康检查；
  * 退出后确认后端进程与端口释放。
  */
 import { spawn, spawnSync } from 'child_process';
@@ -159,7 +159,7 @@ if (!markers.SMOKE_TITLE || !markers.SMOKE_TITLE.includes('智汇·班记')) {
   fail(`窗口标题异常：${markers.SMOKE_TITLE}`, output);
 }
 if (markers.SMOKE_ENTRIES !== '1') {
-  fail('页面缺少“手机访问”或“更新”入口', output);
+  fail('页面缺少“手机访问”或系统设置中的“系统更新”入口', output);
 }
 if (markers.SMOKE_BACKEND !== 'ok') {
   fail('后端健康检查未通过', output);

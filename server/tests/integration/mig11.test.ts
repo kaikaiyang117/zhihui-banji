@@ -13,6 +13,7 @@ import {
   cancelChange, commitImport, createEntry, createPeriod, daySchedule, listTimetable,
   previewImport, saveChange,
 } from '../../src/services/timetable.js';
+import { getTeacherTimetable } from '../../src/services/teacherClasses.js';
 
 let tempDir: string;
 let db: WorkbenchDb;
@@ -47,8 +48,8 @@ afterEach(() => {
 });
 
 describe('课程表服务', () => {
-  it('迁移到 v38，支持固定周课表和按日解析', () => {
-    expect(schemaVersion(db.connInstance)).toBe(38);
+  it('迁移到 v39，支持固定周课表和按日解析', () => {
+    expect(schemaVersion(db.connInstance)).toBe(39);
     createPeriod({ periodNo: 1, label: '第1节', startTime: '08:00', endTime: '08:45' });
     createPeriod({ periodNo: 2, label: '第2节', startTime: '08:55', endTime: '09:40' });
     createEntry({ weekday: 3, periodNo: 1, subject: '数学', teacherName: '王老师', room: '高一1班' });
@@ -82,6 +83,38 @@ describe('课程表服务', () => {
     expect(result.imported).toBe(1);
     expect(commitImport(preview.rows as Array<Record<string, unknown>>, '课程表.xlsx', 'req-1')).toMatchObject({ duplicate: true });
     expect(db.connInstance.prepare('SELECT COUNT(*) AS count FROM timetable_entries').get()).toMatchObject({ count: 1 });
+  });
+
+  it('任课教师汇总只返回已配置学科的课程', () => {
+    createPeriod({ periodNo: 1 });
+    createPeriod({ periodNo: 2 });
+    createEntry({ weekday: 1, periodNo: 1, subject: '英语', teacherName: '陈老师' });
+    createEntry({ weekday: 1, periodNo: 2, subject: '数学', teacherName: '李老师' });
+    const classResult = db.connInstance.prepare(
+      "INSERT INTO classes(name, grade) VALUES('高一1班', '高一')",
+    ).run();
+    const classId = Number(classResult.lastInsertRowid);
+    const termResult = db.connInstance.prepare(
+      "INSERT INTO terms(class_id, name, start_date, end_date) VALUES(?, '当前学期', '2026-04-13', '2026-07-10')",
+    ).run(classId);
+    const termId = Number(termResult.lastInsertRowid);
+    db.connInstance.prepare(
+      "INSERT INTO timetable_entries(class_id, term_id, weekday, period_no, subject, teacher_name, status) VALUES(?,?,?,?,?,?, '启用')",
+    ).run(classId, termId, 1, 1, '英语', '陈老师');
+    db.connInstance.prepare(
+      "INSERT INTO timetable_entries(class_id, term_id, weekday, period_no, subject, teacher_name, status) VALUES(?,?,?,?,?,?, '启用')",
+    ).run(classId, termId, 1, 2, '物理', '张老师');
+    db.connInstance.prepare(
+      "INSERT INTO teacher_classes(teacher_name, class_id, role, subjects) VALUES('default', 1, '任课教师', '英语')",
+    ).run();
+    db.connInstance.prepare(
+      "INSERT INTO teacher_classes(teacher_name, class_id, role, subjects) VALUES('default', ?, '任课教师', '英语')",
+    ).run(classId);
+
+    const entries = getTeacherTimetable({ conn: db.connInstance });
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.subject)).toEqual(['英语', '英语']);
+    expect(entries.map((entry) => entry.class_name)).toEqual(['我的班级', '高一1班']);
   });
 
   it('接口支持课程表读取与模板下载', async () => {

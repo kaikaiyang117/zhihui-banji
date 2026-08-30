@@ -79,6 +79,7 @@ export function photoPath(relativePath: string | null): string | null {
 export interface StudentFields {
   学号?: string;
   姓名?: string;
+  身份证号码?: string;
   性别?: string;
   出生年月?: string;
   民族?: string;
@@ -116,7 +117,11 @@ export function listStudents(keyword = ''): Record<string, unknown> {
     sql += ' AND (s.姓名 LIKE ? OR s.学号 LIKE ?)';
     params.push(`%${keyword}%`, `%${keyword}%`);
   }
-  sql += ' ORDER BY s.学号';
+  sql += ` ORDER BY
+    CASE WHEN trim(s.学号) <> '' AND trim(s.学号) NOT GLOB '*[^0-9]*' THEN 0 ELSE 1 END,
+    CASE WHEN trim(s.学号) <> '' AND trim(s.学号) NOT GLOB '*[^0-9]*' THEN CAST(trim(s.学号) AS INTEGER) END,
+    trim(s.学号) COLLATE NOCASE,
+    s.id`;
   return { students: conn.prepare(sql).all(...params) };
 }
 

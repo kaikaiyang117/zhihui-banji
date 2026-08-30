@@ -19,7 +19,6 @@ import * as exportService from '../../src/services/exportService.js';
 import * as migrationService from '../../src/services/migrationService.js';
 import * as updateService from '../../src/services/update.js';
 import { createBackup } from '../../src/db/connection.js';
-import { secretPath } from '../../src/services/secretStore.js';
 import ExcelJS from 'exceljs';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -224,28 +223,15 @@ describe('迁移包', () => {
 });
 
 describe('更新状态机', () => {
-  it('github-token 保存与校验', () => {
-    updateService.saveGithubToken('ghp_testtoken1234567890');
-    expect(updateService.githubTokenConfigured()).toBe(true);
-    expect(db.connInstance.prepare(
-      "SELECT value FROM agent_settings WHERE key='github_token'",
-    ).get()).toBeUndefined();
-    expect(JSON.parse(fs.readFileSync(secretPath('github-token.json'), 'utf8')).token)
-      .toBe('ghp_testtoken1234567890');
-    expect(() => updateService.saveGithubToken('bad')).toThrow(/Token 格式/);
-    expect(() => updateService.saveGithubToken('')).toThrow(/不能为空/);
-  });
-
   it('installer-path 未就绪时拒绝', () => {
     expect(() => updateService.installerPath(db)).toThrow(/没有待安装/);
   });
 });
 
-describe('更新源', () => {
+describe('GitHub 更新源', () => {
   const INSTALLER_NAMES = [
     'MeimeiWorkbench-Setup-Windows-x64.exe',
     'MeimeiWorkbench-macOS-arm64.dmg',
-    'MeimeiWorkbench-macOS-x86_64.dmg',
   ];
   const installerBytes = Buffer.from('fake-installer-bytes-v9.9.9');
   const installerSha = createHash('sha256').update(installerBytes).digest('hex');
@@ -253,13 +239,11 @@ describe('更新源', () => {
   let server: http.Server;
   let base = '';
   let processPlatformDescriptor: PropertyDescriptor | undefined;
-  let serverAuthHeaders: Array<string | undefined> = [];
-  let githubInstallerRequests = 0;
+  let processArchDescriptor: PropertyDescriptor | undefined;
 
   function expectedMarker(): string {
     if (process.platform === 'win32') return 'MeimeiWorkbench-Setup-Windows-x64.exe';
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
-    return `MeimeiWorkbench-macOS-${arch}.dmg`;
+    return 'MeimeiWorkbench-macOS-arm64.dmg';
   }
 
   function withEnv(patch: Record<string, string | undefined>): void {
@@ -284,7 +268,9 @@ describe('更新源', () => {
     /* platformAsset 只支持 win32/darwin，统一按 darwin 模拟，
      * 让多源用例在 CI（Linux）与本地表现一致，不再按平台跳过。 */
     processPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    processArchDescriptor = Object.getOwnPropertyDescriptor(process, 'arch');
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
     server = http.createServer((req, res) => {
       const url = req.url ?? '';
       const send = (body: string): void => {
@@ -318,50 +304,12 @@ describe('更新源', () => {
         }));
         return;
       }
-      if (url === '/api/server/manifest') {
-        serverAuthHeaders.push(req.headers.authorization);
-        send(JSON.stringify({
-          tag_name: 'v9.9.9',
-          html_url: 'https://updates.test/workbench/v9.9.9',
-          assets: INSTALLER_NAMES.map((name) => ({
-            name,
-            browser_download_url: `${base}/server/file/${name}`,
-            size: installerBytes.length,
-            sha256: installerSha,
-          })),
-        }));
-        return;
-      }
-      if (url === '/api/server/broken-manifest') {
-        send(JSON.stringify({
-          tag_name: 'v9.9.9',
-          assets: INSTALLER_NAMES.map((name) => ({
-            name,
-            browser_download_url: `${base}/broken/file/${name}`,
-            size: installerBytes.length,
-            sha256: installerSha,
-          })),
-        }));
-        return;
-      }
       if (url === '/github/file/SHA256SUMS.txt') {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.end(INSTALLER_NAMES.map((name) => `${installerSha}  ${name}`).join('\n'));
         return;
       }
       if (url.startsWith('/github/file/')) {
-        githubInstallerRequests += 1;
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.end(installerBytes);
-        return;
-      }
-      if (url.startsWith('/broken/file/')) {
-        res.statusCode = 503;
-        res.end('temporarily unavailable');
-        return;
-      }
-      if (url.startsWith('/server/file/')) {
-        serverAuthHeaders.push(req.headers.authorization);
         res.setHeader('Content-Type', 'application/octet-stream');
         res.end(installerBytes);
         return;
@@ -381,47 +329,31 @@ describe('更新源', () => {
     if (processPlatformDescriptor) {
       Object.defineProperty(process, 'platform', processPlatformDescriptor);
     }
+    if (processArchDescriptor) {
+      Object.defineProperty(process, 'arch', processArchDescriptor);
+    }
   });
 
   afterEach(() => {
     process.env = { ...previousEnv };
   });
 
-  beforeEach(() => {
-    serverAuthHeaders = [];
-    githubInstallerRequests = 0;
-  });
-
-  it('自建更新服务器可用时作为主源', async () => {
+  it('GitHub Release 可用时作为唯一更新源', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
-      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
-      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
-    });
-    const result = await updateService.checkForUpdate();
-    expect(result.source).toBe('server');
-    expect(result.update_available).toBe(true);
-    expect(result.asset.sha256).toBe(installerSha);
-    expect(result.release_url).toBe('https://updates.test/workbench/v9.9.9');
-  });
-
-  it('自建更新服务器失败时回退 GitHub Release', async () => {
-    withEnv({
-      WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
     const result = await updateService.checkForUpdate();
     expect(result.source).toBe('github');
+    expect(result.update_available).toBe(true);
     expect(result.asset.sha256).toBe(installerSha);
+    expect(result.release_url).toBe('https://github.com/test/workbench/releases/tag/v9.9.9');
   });
 
-  it('GitHub API 失败时使用 GitHub 清单中的 browser_download_url', async () => {
+  it('GitHub API 失败时使用清单中的 browser_download_url', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
@@ -431,68 +363,28 @@ describe('更新源', () => {
     expect(result.asset.url).toBe(`${base}/github/file/${expectedMarker()}`);
   });
 
-  it('所有更新源不可达时报告错误', async () => {
+  it('GitHub Release 不可达时报告错误', async () => {
     withEnv({
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
       WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
     });
     await expect(updateService.checkForUpdate()).rejects.toThrow(/fetch failed|ECONNREFUSED/);
   });
 
-  it('从自建更新服务器下载、校验且不泄露 GitHub Token', async () => {
+  it('从 GitHub 下载并完成 SHA-256 校验', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
-      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
-      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
-    });
-    updateService.saveGithubToken('ghp_testtoken1234567890');
-    updateService.startUpdateWorker(db);
-    await waitFinished();
-    expect(updateService.updateStatus().status).toBe('ready_to_install');
-    const info = updateService.installerPath(db);
-    expect(path.basename(info.path)).toBe(expectedMarker());
-    expect(fs.readFileSync(info.path)).toEqual(installerBytes);
-    expect(serverAuthHeaders).toEqual([undefined, undefined]);
-  });
-
-  it('自建服务器下载失败时改用同版本 GitHub 安装包', async () => {
-    withEnv({
-      WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/broken-manifest`,
       WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
     updateService.startUpdateWorker(db);
     await waitFinished();
     expect(updateService.updateStatus().status).toBe('ready_to_install');
-    expect(githubInstallerRequests).toBeGreaterThan(0);
     const info = updateService.installerPath(db);
+    expect(path.basename(info.path)).toBe(expectedMarker());
     expect(fs.readFileSync(info.path)).toEqual(installerBytes);
   });
 
-  it('Intel macOS 兼容 x86_64 安装包命名', async () => {
-    const descriptor = Object.getOwnPropertyDescriptor(process, 'arch');
-    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
-    try {
-      withEnv({
-        WORKBENCH_VERSION: '9.8.7',
-        WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
-      });
-      const result = await updateService.checkForUpdate();
-      expect(result.asset.name).toBe('MeimeiWorkbench-macOS-x86_64.dmg');
-    } finally {
-      if (descriptor) Object.defineProperty(process, 'arch', descriptor);
-    }
-  });
-
-  it('Token 校验只接受 GitHub 格式', () => {
-    updateService.saveGithubToken('ghp_testtoken1234567890');
-    expect(updateService.githubTokenConfigured()).toBe(true);
-    updateService.saveGithubToken('github_pat_testtoken1234567890');
-    expect(() => updateService.saveGithubToken('a'.repeat(40))).toThrow(/Token 格式/);
-  });
 });
 
 describe('HTTP 冒烟', () => {
@@ -549,14 +441,10 @@ describe('HTTP 冒烟', () => {
     expect(migrationFile.headers['content-disposition']).toContain('filename*=UTF-8');
     expect(migrationFile.rawPayload.length).toBeGreaterThan(0);
 
-    const tokenStatus = await app.inject({ method: 'GET', url: '/api/system/update/github-token' });
-    expect(tokenStatus.statusCode).toBe(200);
-
-    const tokenSave = await app.inject({
-      method: 'PUT', url: '/api/system/update/github-token',
-      payload: { token: 'ghp_httptesttoken1234567890' },
+    const remoteInstall = await app.inject({
+      method: 'POST', url: '/api/system/update/install', remoteAddress: '192.168.31.99',
     });
-    expect(tokenSave.statusCode).toBe(200);
+    expect(remoteInstall.statusCode).toBe(403);
 
     const install = await app.inject({ method: 'POST', url: '/api/system/update/install' });
     expect(install.statusCode).toBe(400); // 开发模式拒绝

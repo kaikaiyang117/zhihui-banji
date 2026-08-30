@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v38）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v39）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。
@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 38;
+export const CURRENT_SCHEMA_VERSION = 39;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -2053,8 +2053,32 @@ function migration37(conn: Database): void {
 }
 
 function migration38(conn: Database): void {
-  addColumn(conn, 'score_exams', 'full_score', 'REAL NOT NULL DEFAULT 0');
-  addColumn(conn, 'score_exams', 'remark', "TEXT NOT NULL DEFAULT ''");
+  addColumn(conn, 'students', '身份证号码', "TEXT DEFAULT ''");
+}
+
+function migration39(conn: Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS teacher_schedule_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_name TEXT NOT NULL DEFAULT 'default',
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        term_id INTEGER NOT NULL REFERENCES terms(id),
+        weekday INTEGER NOT NULL,
+        period_no INTEGER NOT NULL,
+        subject TEXT NOT NULL DEFAULT '',
+        room TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '启用',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teacher_schedule_active_slot
+        ON teacher_schedule_entries(teacher_name, weekday, period_no)
+        WHERE status='启用';
+    CREATE INDEX IF NOT EXISTS idx_teacher_schedule_scope
+        ON teacher_schedule_entries(class_id, term_id, status);
+  `);
 }
 
 function migration32(conn: Database): void {
@@ -2120,6 +2144,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   36: migration36,
   37: migration37,
   38: migration38,
+  39: migration39,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */

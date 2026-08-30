@@ -23,7 +23,7 @@ import {
   createClass, createTerm, updateTerm, rolloverTerm, transferEnrollment,
   enrollStudent, updateEnrollment, listContexts, ArchivedScopeError,
 } from '../../src/services/context.js';
-import { createStudent, savePhoto, StudentDuplicateError, StudentPhotoError } from '../../src/services/students.js';
+import { createStudent, listStudents, savePhoto, StudentDuplicateError, StudentPhotoError } from '../../src/services/students.js';
 import { previewStudents, commitStudentImport, buildTemplate } from '../../src/services/importService.js';
 import * as importService from '../../src/services/importService.js';
 import { derive, getRows, insertRow, attendanceCompatibilityRows } from '../../src/services/sheets.js';
@@ -335,6 +335,21 @@ describe('通用工作表与派生列', () => {
 });
 
 describe('座位表与 HTTP 冒烟', () => {
+  it('学生列表按纯数字学号的自然顺序排序，并兼容字母学号', () => {
+    const conn = db.connInstance;
+    for (const studentNo of ['10', '2', '1', 'A001']) {
+      const student = conn.prepare('INSERT INTO students(学号, 姓名) VALUES(?, ?)').run(studentNo, `排序${studentNo}`);
+      conn.prepare(
+        "INSERT INTO student_enrollments(student_id, class_id, term_id, status) VALUES(?, 1, 1, '在读')",
+      ).run(student.lastInsertRowid);
+    }
+
+    bindRequestScope(1, 1);
+    const students = (listStudents().students as Array<Record<string, unknown>>).map((student) => student.学号);
+    bindRequestScope(null, null);
+    expect(students.slice(0, 4)).toEqual(['1', '2', '10', 'A001']);
+  });
+
   it('HTTP：创建学生 → 列表 → 更新 → 导出', async () => {
     const app = buildApp({ config: testConfig() });
     await app.ready();

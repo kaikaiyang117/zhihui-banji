@@ -1201,11 +1201,26 @@ async function runSmokeChecks() {
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
       domResult = await mainWindow.webContents.executeJavaScript(
-        `({ phone: document.body.innerText.includes('手机访问'), update: Boolean(document.querySelector('button[aria-label="检查软件更新"]')), ready: document.body.innerText.includes('今天') })`
+        `({ phone: document.body.innerText.includes('手机访问'), settings: Boolean(document.querySelector('button[aria-label="打开系统设置"]')), ready: document.body.innerText.includes('今天') })`
       );
-      if (domResult.phone && domResult.update && domResult.ready) break;
+      if (domResult.phone && domResult.settings && domResult.ready) break;
       await new Promise(resolve => setTimeout(resolve, 700));
     }
+    let hasUpdateEntry = false;
+    if (domResult?.settings) {
+      await mainWindow.webContents.executeJavaScript(
+        `document.querySelector('button[aria-label="打开系统设置"]')?.click()`
+      );
+      const settingsDeadline = Date.now() + 10000;
+      while (Date.now() < settingsDeadline) {
+        hasUpdateEntry = await mainWindow.webContents.executeJavaScript(
+          `document.body.innerText.includes('系统更新') && document.body.innerText.includes('检查系统更新')`
+        );
+        if (hasUpdateEntry) break;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    domResult = domResult || { phone: false, settings: false, ready: false };
     const health = await new Promise(resolve => {
       http.get(`${backendBaseUrl}/api/system/health`, response => {
         let body = '';
@@ -1214,10 +1229,10 @@ async function runSmokeChecks() {
       }).on('error', () => resolve(false));
     });
     const petManifest = loadPetManifest();
-    logLine(`SMOKE_ENTRIES=${domResult.phone && domResult.update ? '1' : '0'}`);
+    logLine(`SMOKE_ENTRIES=${domResult.phone && domResult.settings && hasUpdateEntry ? '1' : '0'}`);
     logLine(`SMOKE_BACKEND=${health ? 'ok' : 'fail'}`);
     logLine(`SMOKE_PET=${petManifest && petManifest.spriteVersionNumber === 2 ? 'ok' : 'fail'}`);
-    if (!domResult.phone || !domResult.update) smokeFailures.push('页面缺少“手机访问”或“更新”入口');
+    if (!domResult.phone || !domResult.settings || !hasUpdateEntry) smokeFailures.push('页面缺少“手机访问”或系统设置中的“系统更新”入口');
     if (!health) smokeFailures.push('后端健康检查失败');
     if (!petManifest) smokeFailures.push('桌面宠物 v2 素材缺失或无效');
     if (!domResult.ready) smokeFailures.push('首页未渲染');

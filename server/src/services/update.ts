@@ -2,7 +2,7 @@
  * 安装所有权归 Electron 桌面壳：本服务只负责检查、备份、下载与 SHA-256 校验，
  * 校验通过后进入 ready_to_install，由 Electron 通过 installer-path 取得安装包。
  *
- * 更新源：自建更新服务器优先，GitHub Releases API / manifest 作为回退。
+ * 更新源：GitHub Release。支持 Releases API 与 update-manifest.json 兜底，
  * 下载失败时仍会校验 SHA-256，避免使用不完整或被篡改的安装包。
  */
 import fs from 'node:fs';
@@ -11,21 +11,11 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { getDb } from './context.js';
 import { loadAppVersion, APP_NAME } from '../config/index.js';
 import { WorkbenchDb } from '../db/connection.js';
-import { deleteSettings, readSecret, writeSecret } from './secretStore.js';
 
-const GITHUB_TOKEN_SECRET_FILE = 'github-token.json';
-
-const GITHUB_REPO = 'aitia0718/workbench';
-const DEFAULT_SERVER_MANIFEST_URL = 'https://home.kaikaiyang.top/updates/update-manifest.json';
-const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
-
-function serverManifestUrl(): string {
-  return process.env.WORKBENCH_UPDATE_SERVER_MANIFEST_URL
-    ?? DEFAULT_SERVER_MANIFEST_URL;
-}
+const GITHUB_REPO = 'kaikaiyang117/zhihui-banji';
+const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 function githubApiUrl(): string {
   return process.env.WORKBENCH_UPDATE_URL
@@ -45,7 +35,7 @@ export interface UpdateAsset {
 }
 
 export interface UpdateSourceInfo {
-  source: 'server' | 'github';
+  source: 'github';
   version: string;
   release_url: string;
   release_notes: string;
@@ -70,42 +60,13 @@ export interface UpdateCheckResult extends Omit<UpdateSourceInfo, 'version'> {
 let updateState: UpdateState = { status: 'idle', message: '', error: '', asset_name: '' };
 let updateRunning = false;
 
-/** GitHub 更新源 Token。 */
-function storedToken(): string {
-  const envToken = process.env.WORKBENCH_GITHUB_TOKEN ?? '';
-  if (envToken) return envToken;
-  const storedSecret = readSecret<Record<string, unknown>>(GITHUB_TOKEN_SECRET_FILE);
-  if (storedSecret?.token) return String(storedSecret.token);
-  const row = getDb().connInstance.prepare(
-    'SELECT value FROM agent_settings WHERE key=?',
-  ).get('github_token') as { value: string } | undefined;
-  if (!row) return '';
-  const token = String(row.value);
-  writeSecret(GITHUB_TOKEN_SECRET_FILE, { token });
-  deleteSettings(getDb().connInstance, ['github_token']);
-  return token;
-}
-
-export function migrateStoredGithubToken(conn?: import('better-sqlite3').Database): void {
-  const db = conn ?? getDb().connInstance;
-  const file = readSecret<Record<string, unknown>>(GITHUB_TOKEN_SECRET_FILE);
-  const row = db.prepare('SELECT value FROM agent_settings WHERE key=?').get('github_token') as { value: string } | undefined;
-  if (!file && row?.value) writeSecret(GITHUB_TOKEN_SECRET_FILE, { token: row.value });
-  if (row) deleteSettings(db, ['github_token']);
-}
-
 async function fetchJson(url: string, options: {
   accept?: string;
-  githubAuth?: boolean;
 } = {}): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = {
     Accept: options.accept ?? 'application/vnd.github+json',
     'User-Agent': `${APP_NAME}-Updater`,
   };
-  const token = options.githubAuth ? storedToken() : '';
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -119,18 +80,16 @@ function versionKey(version: string): number[] {
 }
 
 function platformAsset(assets: Array<Record<string, unknown>>): Record<string, unknown> | null {
-  let markers: string[] = [];
+  let marker = '';
   if (process.platform === 'win32') {
-    markers = ['Setup-Windows-x64.exe'];
+    marker = 'Setup-Windows-x64.exe';
   } else if (process.platform === 'darwin') {
-    markers = process.arch === 'arm64'
-      ? ['macOS-arm64.dmg']
-      : ['macOS-x64.dmg', 'macOS-x86_64.dmg'];
+    if (process.arch !== 'arm64') return null;
+    marker = 'macOS-arm64.dmg';
   } else {
     return null;
   }
-  return assets.find((asset) => markers.some((marker) =>
-    String(asset.name ?? '').endsWith(marker))) ?? null;
+  return assets.find((asset) => String(asset.name ?? '').endsWith(marker)) ?? null;
 }
 
 function checksumFor(checksumText: string, filename: string): string {
@@ -147,22 +106,18 @@ function assetDownloadUrl(asset: Record<string, unknown> | null): string {
   return String(asset?.url ?? asset?.browser_download_url ?? '');
 }
 
-function isGitHubUrl(url: string): boolean {
+/** GitHub 源：releases API 优先，update-manifest.json 兜底（应对 API 被墙或限流）。 */
+async function checkGitHubSource(): Promise<UpdateSourceInfo> {
+  let release: Record<string, unknown>;
   try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === 'github.com'
-      || hostname === 'api.github.com'
-      || hostname.endsWith('.github.com')
-      || hostname.endsWith('.githubusercontent.com');
-  } catch {
-    return false;
+    release = await fetchJson(githubApiUrl());
+  } catch (primaryError) {
+    try {
+      release = await fetchJson(githubManifestUrl(), { accept: 'application/json' });
+    } catch {
+      throw primaryError;
+    }
   }
-}
-
-async function releaseInfo(
-  release: Record<string, unknown>,
-  source: UpdateSourceInfo['source'],
-): Promise<UpdateSourceInfo> {
   const tagName = String(release.tag_name ?? '');
   const latestVersion = tagName.replace(/^v/, '');
   const assets = (release.assets ?? []) as Array<Record<string, unknown>>;
@@ -176,10 +131,7 @@ async function releaseInfo(
         Accept: 'application/octet-stream',
         'User-Agent': `${APP_NAME}-Updater`,
       };
-      const checksumUrl = assetDownloadUrl(checksumAsset);
-      const token = isGitHubUrl(checksumUrl) ? storedToken() : '';
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const response = await fetch(checksumUrl, {
+      const response = await fetch(assetDownloadUrl(checksumAsset), {
         headers, signal: AbortSignal.timeout(10_000),
       });
       if (response.ok) {
@@ -190,7 +142,7 @@ async function releaseInfo(
     }
   }
   return {
-    source,
+    source: 'github',
     version: latestVersion,
     release_url: String(release.html_url ?? ''),
     release_notes: String(release.body ?? ''),
@@ -203,44 +155,8 @@ async function releaseInfo(
   };
 }
 
-function validatePrimarySource(info: UpdateSourceInfo): UpdateSourceInfo {
-  if (!info.version) throw new Error('更新服务器清单缺少版本号');
-  if (!info.asset.name || !info.asset.url || !/^[a-f0-9]{64}$/i.test(info.asset.sha256)) {
-    throw new Error('更新服务器清单缺少当前系统安装包或 SHA-256');
-  }
-  return info;
-}
-
-/** 自建更新服务器：一个静态 manifest 即可完成检查和下载。 */
-async function checkServerSource(): Promise<UpdateSourceInfo> {
-  const release = await fetchJson(serverManifestUrl(), { accept: 'application/json' });
-  return validatePrimarySource(await releaseInfo(release, 'server'));
-}
-
-/** GitHub 回退源：Releases API 优先，GitHub manifest 再兜底。 */
-async function checkGitHubSource(): Promise<UpdateSourceInfo> {
-  let release: Record<string, unknown>;
-  try {
-    release = await fetchJson(githubApiUrl(), { githubAuth: true });
-  } catch (primaryError) {
-    try {
-      release = await fetchJson(githubManifestUrl(), {
-        accept: 'application/json', githubAuth: true,
-      });
-    } catch {
-      throw primaryError;
-    }
-  }
-  return releaseInfo(release, 'github');
-}
-
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
-  let info: UpdateSourceInfo;
-  try {
-    info = await checkServerSource();
-  } catch {
-    info = await checkGitHubSource();
-  }
+  const info = await checkGitHubSource();
   const currentVersion = loadAppVersion();
   const current = versionKey(currentVersion);
   const latest = versionKey(info.version);
@@ -282,12 +198,7 @@ async function downloadAsset(url: string, destination: string): Promise<void> {
     Accept: 'application/octet-stream',
     'User-Agent': `${APP_NAME}-Updater`,
   };
-  const token = isGitHubUrl(url) ? storedToken() : '';
-  let target = url;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const response = await fetch(target, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`);
   if (!response.body) throw new Error('下载失败：响应没有数据流');
   const temporary = `${destination}.download`;
@@ -309,7 +220,7 @@ async function sha256File(filename: string): Promise<string> {
   return digest.digest('hex').toLowerCase();
 }
 
-/** 下载安装包并立即完成 SHA-256 校验。 */
+/** 从 GitHub Release 下载安装包并立即完成 SHA-256 校验。 */
 async function downloadInstaller(
   info: Pick<UpdateCheckResult, 'asset'>,
   installerPath: string,
@@ -318,7 +229,7 @@ async function downloadInstaller(
   const digest = await sha256File(installerPath);
   if (digest !== info.asset.sha256.toLowerCase()) {
     fs.rmSync(installerPath, { force: true });
-    throw new Error('下载文件 SHA-256 校验失败');
+    throw new Error('下载文件 SHA-256 校验失败（GitHub）');
   }
   return info.asset;
 }
@@ -340,34 +251,19 @@ export function startUpdateWorker(db: WorkbenchDb): void {
       }
       const updateDir = path.join(db.paths.dataDir, 'updates');
       fs.mkdirSync(updateDir, { recursive: true });
+      const installerPath = path.join(updateDir, path.basename(info.asset.name));
       setState('backing_up', '正在创建升级前数据库备份…', '', info.asset.name);
       await db.createBackup('pre-update');
-      let activeAsset = info.asset;
-      let installerPath = path.join(updateDir, path.basename(activeAsset.name));
-      const sourceName = info.source === 'server' ? '更新服务器' : 'GitHub';
-      setState('downloading', `正在从${sourceName}下载更新…`, '', activeAsset.name);
-      let downloadedAsset: UpdateAsset;
-      try {
-        downloadedAsset = await downloadInstaller({ asset: activeAsset }, installerPath);
-      } catch (primaryError) {
-        if (info.source !== 'server') throw primaryError;
-        const fallback = await checkGitHubSource();
-        if (fallback.version !== info.latest_version || !fallback.asset.url || !fallback.asset.sha256) {
-          throw primaryError;
-        }
-        activeAsset = fallback.asset;
-        installerPath = path.join(updateDir, path.basename(activeAsset.name));
-        setState('downloading', '更新服务器下载失败，正在从 GitHub 重试…', '', activeAsset.name);
-        downloadedAsset = await downloadInstaller({ asset: activeAsset }, installerPath);
-      }
+      setState('downloading', '正在从 GitHub 下载更新…', '', info.asset.name);
+      const downloadedAsset = await downloadInstaller(info, installerPath);
 
-      setState('verifying', '正在校验安装包…', '', activeAsset.name);
+      setState('verifying', '正在校验安装包…', '', info.asset.name);
       if (await sha256File(installerPath) !== downloadedAsset.sha256.toLowerCase()) {
         fs.rmSync(installerPath, { force: true });
         throw new Error('安装包 SHA-256 校验失败，已删除下载文件');
       }
       // 安装所有权归 Electron 桌面壳
-      setState('ready_to_install', '校验通过，请点击"安装并重启工作台"完成更新。', '', activeAsset.name);
+      setState('ready_to_install', '校验通过，请点击"安装并重启工作台"完成更新。', '', info.asset.name);
     } catch (error) {
       setState('error', '', String((error as Error).message));
     } finally {
@@ -389,18 +285,4 @@ export function installerPath(db: WorkbenchDb): { path: string; name: string } {
     throw new Error('安装包不存在或已被删除，请重新下载更新');
   }
   return { path: target, name: assetName };
-}
-
-export function saveGithubToken(token: string): void {
-  const value = String(token ?? '').trim();
-  if (!value) throw new Error('Token 不能为空');
-  if (!value.startsWith('ghp_') && !value.startsWith('github_pat_')) {
-    throw new Error('Token 格式不正确，应为 GitHub ghp_ 或 github_pat_ Token');
-  }
-  writeSecret(GITHUB_TOKEN_SECRET_FILE, { token: value });
-  deleteSettings(getDb().connInstance, ['github_token']);
-}
-
-export function githubTokenConfigured(): boolean {
-  return Boolean(storedToken());
 }

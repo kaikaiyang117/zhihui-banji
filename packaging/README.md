@@ -58,16 +58,15 @@ Windows 打包使用仓库 `.nvmrc` 指定的 Node.js 22.x。打包脚本会自�
 .\打包Windows安装包.bat 2.3.9 -RunSmokeTest
 ```
 
-macOS（在对应架构的 Mac 上执行）：
+macOS（在 Apple Silicon Mac 上执行）：
 
 ```bash
 ./packaging/build-macos.sh arm64    # Apple Silicon
-./packaging/build-macos.sh x86_64   # Intel
 ```
 
-macOS 构建脚本会根据 `desktop/assets/icon.png` 自动生成临时 `icon.icns`；无需手工提交生成的图标文件。Intel 构建会将 Electron Builder 的 `x64` 输出统一命名为发布约定的 `x86_64`。
+macOS 构建脚本仅支持 Apple Silicon arm64，并根据 `desktop/assets/icon.png` 自动生成临时 `icon.icns`；无需手工提交生成的图标文件。
 
-输出目录：`artifacts/`。Windows 生成 `Zhihui-Banji-Setup-Windows-x64.exe`，macOS 生成对应架构的 `.dmg`。
+输出目录：`artifacts/`。Windows 生成 `Zhihui-Banji-Setup-Windows-x64.exe`，macOS 生成 `Zhihui-Banji-macOS-arm64.dmg`。
 
 构建顺序固定为：`Vue build → Node 后端编译（build/server-bundle/）→ Electron Builder → 签名/公证 → artifacts/`。Node 后端资源位于 Electron `Contents/Resources/server/`（Windows 为 `resources/server/`），不会打进 `app.asar`。应用版本唯一来源为构建时的 `APP_VERSION`，同步写入 `server-bundle/static/app-version.json` 与桌面应用版本。
 

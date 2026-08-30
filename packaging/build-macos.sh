@@ -9,10 +9,10 @@ cd "$PROJECT_ROOT"
 VERSION="${APP_VERSION#v}"
 VERSION="${VERSION:-0.0.0-dev}"
 ARCH="${1:-$(uname -m)}"
-case "$ARCH" in
-  arm64|x86_64) ;;
-  *) echo "不支持的 macOS 架构：$ARCH"; exit 1 ;;
-esac
+if [ "$ARCH" != "arm64" ]; then
+  echo "不支持的 macOS 架构：$ARCH，仅支持 Apple Silicon arm64"
+  exit 1
+fi
 
 echo "==> 清理旧产物"
 rm -rf dist/MeimeiWorkbench build/server-bundle desktop/dist desktop/release artifacts
@@ -52,11 +52,10 @@ if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_APP_PA
 else
   echo "::warning::未配置完整 macOS 公证凭证，将跳过公证。"
 fi
-./node_modules/.bin/electron-builder --config electron-builder.yml --mac --"${ARCH//x86_64/x64}" --publish never
+./node_modules/.bin/electron-builder --config electron-builder.yml --mac --arm64 --publish never
 cd ..
 
-BUILDER_ARCH="${ARCH//x86_64/x64}"
-DMG_PATH="desktop/dist/Zhihui-Banji-macOS-${BUILDER_ARCH}.dmg"
+DMG_PATH="desktop/dist/Zhihui-Banji-macOS-arm64.dmg"
 FINAL_DMG="artifacts/Zhihui-Banji-macOS-${ARCH}.dmg"
 if [ ! -f "$DMG_PATH" ]; then
   echo "未生成 DMG 安装包"

@@ -71,7 +71,7 @@ describe('WorkbookArtifact 与 ImportPlan', () => {
     expect(JSON.stringify(inspected.blueprint)).not.toContain('ST-001');
     expect(JSON.stringify(inspected.blueprint)).not.toContain('蓝同学');
     expect(db.connInstance.prepare('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1').get())
-      .toMatchObject({ version: 38 });
+      .toMatchObject({ version: 39 });
   });
 
   it('计划绑定 Artifact、范围和双层哈希，变更映射会使旧预览失效', async () => {

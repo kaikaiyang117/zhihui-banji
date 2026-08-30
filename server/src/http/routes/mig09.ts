@@ -296,12 +296,9 @@ export function registerMig09Routes(app: FastifyInstance): void {
     } catch (error) {
     const record = error as { message?: string };
     let hint = '暂时无法检查更新';
-    if (String(record.message).includes('github: HTTP 401')
-      || String(record.message).includes('github: HTTP 403')) {
-      hint = 'GitHub 仓库需要公开，或在下方配置 GitHub Token。';
-    } else if (String(record.message).includes('HTTP 404')) hint = '尚未找到 GitHub Release。如果仓库为私有，请配置 GitHub Token。';
-    else if (String(record.message).includes('HTTP 403')) hint = 'GitHub API 访问受限或触发限流，请稍后重试。';
-    else if (String(record.message).includes('HTTP 401')) hint = 'GitHub Token 无效或已过期，请重新配置。';
+    if (String(record.message).includes('HTTP 404')) hint = '尚未找到公开的 GitHub Release，请稍后重试。';
+    else if (String(record.message).includes('HTTP 403')) hint = 'GitHub Release 暂时不可访问或触发限流，请稍后重试。';
+    else if (String(record.message).includes('HTTP 401')) hint = 'GitHub Release 访问未授权，请稍后重试。';
     return {
       current_version: loadAppVersion(), latest_version: '',
       update_available: false, downloadable: false,
@@ -312,8 +309,10 @@ export function registerMig09Routes(app: FastifyInstance): void {
 
   app.get('/api/system/update/status', async () => updateService.updateStatus());
 
-  app.post('/api/system/update/install', async (_request, reply) => {
-    void reply;
+  app.post('/api/system/update/install', async (request, reply) => {
+    if (!isLocalHost(request.ip)) {
+      return reply.status(403).send({ detail: '更新只能在工作台本机管理' });
+    }
     const frozen = Boolean(process.env.MEIMEI_PACKAGED);
     if (!frozen) {
       return reply.status(400).send({ detail: '当前启动方式不支持直接安装更新，请使用正式安装版完成更新' });
@@ -337,19 +336,6 @@ export function registerMig09Routes(app: FastifyInstance): void {
     }
   });
 
-  app.get('/api/system/update/github-token', async () => ({
-    configured: updateService.githubTokenConfigured(),
-  }));
-
-  app.put('/api/system/update/github-token', async (request, reply) => {
-    const body = request.body as { token?: string };
-    try {
-      updateService.saveGithubToken(body.token ?? '');
-      return { ok: true };
-    } catch (error) {
-      return reply.status(400).send({ detail: (error as Error).message });
-    }
-  });
 }
 
 function requireLocal(request: { ip: string }, reply: FastifyReply): boolean {

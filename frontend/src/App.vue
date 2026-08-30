@@ -1068,10 +1068,15 @@ function handleSystemSettingsUpdated(event) {
   if (name) schoolName.value = name
 }
 
+function handleOpenUpdate() {
+  updateOpen.value = true
+}
+
 onMounted(async () => {
   window.addEventListener('meimei-agent-session-change', switchAgentSession)
   window.addEventListener('workbench-context-change', handleContextChange)
   window.addEventListener('workbench-system-settings-updated', handleSystemSettingsUpdated)
+  window.addEventListener('workbench-open-update', handleOpenUpdate)
   await loadSystemSettings()
   await loadAccessInfo()
   await loadAgentHistory()
@@ -1082,6 +1087,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('meimei-agent-session-change', switchAgentSession)
   window.removeEventListener('workbench-context-change', handleContextChange)
   window.removeEventListener('workbench-system-settings-updated', handleSystemSettingsUpdated)
+  window.removeEventListener('workbench-open-update', handleOpenUpdate)
 })
 </script>
 
@@ -1119,9 +1125,6 @@ onBeforeUnmount(() => {
         </button>
         <button class="settings-button" type="button" aria-label="打开系统设置" title="系统设置" @click="router.push('/settings')">
           <Settings :size="16" />
-        </button>
-        <button class="update-button" type="button" aria-label="检查软件更新" title="检查更新" @click="updateOpen = true">
-          <component :is="renderIcon('Download')" :size="16" />
         </button>
       </div>
     </header>
@@ -1445,12 +1448,12 @@ onBeforeUnmount(() => {
 .search-empty { padding: 18px 10px; text-align: center; color: var(--ds-color-ink-secondary); font: var(--ds-type-body); }
 
 .topbar-actions { display: flex; align-items: center; justify-self: end; gap: 2px; padding: 2px; border: 1px solid var(--ds-color-border); border-radius: 12px; background: rgba(255,255,255,.72); box-shadow: 0 1px 2px rgba(28,31,41,.04); }
-.access-button, .device-logout-button, .settings-button, .update-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: transform 100ms ease-out, color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }
+.access-button, .device-logout-button, .settings-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--ds-color-ink-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: transform 100ms ease-out, color var(--ds-duration-fast) var(--ds-ease-out), background-color var(--ds-duration-fast) var(--ds-ease-out); touch-action: manipulation; }
 .access-button, .device-logout-button { padding: 0 10px; }
-.settings-button, .update-button { width: 32px; padding: 0; }
-.access-button:hover, .device-logout-button:hover, .settings-button:hover, .update-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
-.access-button:active, .device-logout-button:active, .settings-button:active, .update-button:active { transform: scale(.94); }
-.access-button:focus-visible, .device-logout-button:focus-visible, .settings-button:focus-visible, .update-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
+.settings-button { width: 32px; padding: 0; }
+.access-button:hover, .device-logout-button:hover, .settings-button:hover { color: var(--ds-color-primary-hover); background: var(--ds-color-primary-soft); }
+.access-button:active, .device-logout-button:active, .settings-button:active { transform: scale(.94); }
+.access-button:focus-visible, .device-logout-button:focus-visible, .settings-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-color-primary) 16%, transparent); }
 
 .access-scrim {
   position: fixed;
@@ -1738,10 +1741,10 @@ onBeforeUnmount(() => {
   .global-search input { height: 40px; min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 14px; }
   .search-popover { position: fixed; top: 104px; left: 10px; right: 10px; max-height: min(360px, 52vh); }
   .topbar-actions { flex: 0 0 auto; }
-  .access-button, .device-logout-button, .settings-button, .update-button { min-height: 36px; }
+  .access-button, .device-logout-button, .settings-button { min-height: 36px; }
   .access-button span { display: none; }
   .device-logout-button span { display: none; }
-  .access-button, .device-logout-button, .settings-button, .update-button { width: 36px; padding: 0; }
+  .access-button, .device-logout-button, .settings-button { width: 36px; padding: 0; }
   .access-scrim { align-items: end; padding: 0; }
   .access-dialog { width: 100%; border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .agent-float { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); }

@@ -72,7 +72,8 @@ const scoreChange = computed(() => latestExam.value && previousExam.value ? late
 const editData = computed(() => {
   const student = data.value?.student || {}
   return {
-    '学号': student['学号'] ?? '', '姓名': student['姓名'] ?? '', '性别': student['性别'] ?? '',
+    '学号': student['学号'] ?? '', '姓名': student['姓名'] ?? '', '身份证号码': student['身份证号码'] ?? '',
+    '性别': student['性别'] ?? '',
     '出生年月': student['出生年月'] ?? '', '民族': student['民族'] ?? '', '家庭住址': student['家庭住址'] ?? '',
     '监护人姓名': student['监护人姓名'] ?? '', '监护人电话': student['监护人电话'] ?? '',
     '监护人关系': student['监护人关系'] ?? '',
@@ -378,6 +379,7 @@ onMounted(load)
     <div class="card">
       <div class="card-title">基础信息</div>
       <div class="profile-grid">
+        <div><span>身份证号码</span><strong>{{ data.student.身份证号码 || '—' }}</strong></div>
         <div><span>性别</span><strong>{{ data.student.性别 || '—' }}</strong></div>
         <div><span>出生日期</span><strong>{{ data.student.出生年月 || '—' }}</strong></div>
         <div><span>民族</span><strong>{{ data.student.民族 || '—' }}</strong></div>

@@ -157,7 +157,7 @@ server/
   完整性检查、备份后原子替换）。
 - `update.ts`：更新检查（GitHub API + manifest 回退、平台资产选择、SHA-256 校验）、
   下载状态机（checking→backing_up→downloading→verifying→ready_to_install）、
-  github-token 管理、installer-path（本机）。
+  installer-path（本机）。
 - `db/index.ts`：数据库单例 + 备份恢复（deserialize 校验 + 替换 + 重开）。
 
 `src/http/routes/mig09.ts`：报告/健康/导出/备份/恢复/迁移包/更新路由；
@@ -167,7 +167,7 @@ server/
 - 周报指标与来源追溯、档案创建/列表/读取/导出。
 - 健康目标唯一/提醒/复盘/汇总/多 sheet 导出（ExcelJS 可解析）。
 - 通用表/考勤导出；备份创建→修改→恢复；迁移包导出→破坏→恢复往返；
-  路径穿越 zip 被拒；github-token 校验；installer-path 未就绪拒绝。
+  路径穿越 zip 被拒；installer-path 未就绪拒绝；远程请求不能触发更新安装。
 - HTTP 全端点连通（开发模式 install 拒绝 400、AI 草稿 503）。
 
 ## MIG-08 账目与教育沉淀（已交付）

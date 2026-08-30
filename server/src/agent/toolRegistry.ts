@@ -206,6 +206,7 @@ const STUDENT_QUERY_FIELDS: Record<string, [string, string]> = {
   student_id: ['s.id', 'id'],
   student_no: ['s.学号', '学号'],
   student_name: ['s.姓名', '姓名'],
+  id_number: ['s.身份证号码', '身份证号码'],
   gender: ['s.性别', '性别'],
   birth_month: ['s.出生年月', '出生年月'],
   ethnicity: ['s.民族', '民族'],
@@ -286,7 +287,7 @@ function getStudentProfile(args: Record<string, unknown>): Record<string, unknow
   const conn = getDb().connInstance;
   const [classId, termId] = scopeIds({ conn });
   const row = conn.prepare(
-    'SELECT id, 学号, 姓名, 性别, 出生年月, 民族, 家庭住址, 监护人姓名, '
+    'SELECT id, 学号, 姓名, 身份证号码, 性别, 出生年月, 民族, 家庭住址, 监护人姓名, '
     + '监护人电话, 监护人关系, 监护人职业, 是否住校, 特长, 班级任职, 备注, '
     + '监护人2姓名, 监护人2电话, 监护人2关系, 监护人2职业 '
     + "FROM students s WHERE id=? AND s.deleted_at='' AND EXISTS("
