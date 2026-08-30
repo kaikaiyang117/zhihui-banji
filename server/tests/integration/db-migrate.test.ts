@@ -39,7 +39,7 @@ describe('schema 与启动迁移', () => {
   it('新库完成全部迁移并创建默认上下文', () => {
     const db = makeDb();
     db.open();
-    expect(db.schemaVersion()).toBe(39);
+    expect(db.schemaVersion()).toBe(40);
     const counts = rowCounts(db.connInstance);
     expect(counts.classes).toBe(1);
     expect(counts.terms).toBe(1);
@@ -58,7 +58,7 @@ describe('schema 与启动迁移', () => {
     const first = rowCounts(db.connInstance);
     db.close();
     db.open();
-    expect(db.schemaVersion()).toBe(39);
+    expect(db.schemaVersion()).toBe(40);
     expect(rowCounts(db.connInstance)).toEqual(first);
     expect(db.connInstance.pragma('integrity_check', { simple: true })).toBe('ok');
   });
@@ -134,11 +134,13 @@ describe('迁移中断恢复', () => {
     const original37 = schemaModule.MIGRATIONS[37];
     const original38 = schemaModule.MIGRATIONS[38];
     const original39 = schemaModule.MIGRATIONS[39];
+    const original40 = schemaModule.MIGRATIONS[40];
     try {
       delete schemaModule.MIGRATIONS[36];
       delete schemaModule.MIGRATIONS[37];
       delete schemaModule.MIGRATIONS[38];
       delete schemaModule.MIGRATIONS[39];
+      delete schemaModule.MIGRATIONS[40];
       const partial = makeDb();
       partial.open();
       expect(partial.schemaVersion()).toBe(35);
@@ -159,14 +161,16 @@ describe('迁移中断恢复', () => {
       schemaModule.MIGRATIONS[37] = original37;
       schemaModule.MIGRATIONS[38] = original38;
       schemaModule.MIGRATIONS[39] = original39;
+      schemaModule.MIGRATIONS[40] = original40;
       const fixed = makeDb();
       fixed.open();
-      expect(fixed.schemaVersion()).toBe(39);
+      expect(fixed.schemaVersion()).toBe(40);
     } finally {
       schemaModule.MIGRATIONS[36] = original36;
       schemaModule.MIGRATIONS[37] = original37;
       schemaModule.MIGRATIONS[38] = original38;
       schemaModule.MIGRATIONS[39] = original39;
+      schemaModule.MIGRATIONS[40] = original40;
     }
   });
 });

@@ -45,8 +45,8 @@ function addClass(name = '高一5班'): number {
 }
 
 describe('教师个人周课表', () => {
-  it('迁移到 v39，并支持按星期、节次和班级维护个人课表', () => {
-    expect(schemaVersion(db.connInstance)).toBe(39);
+  it('迁移到 v40，并支持按星期、节次和班级维护个人课表', () => {
+    expect(schemaVersion(db.connInstance)).toBe(40);
     const classId = addClass();
     const created = createTeacherScheduleEntry({ classId, weekday: 2, periodNo: 3, subject: '政治', room: '教学楼305' });
     expect(created).toMatchObject({ class_name: '高一5班', weekday: 2, period_no: 3, subject: '政治' });

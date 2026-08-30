@@ -1,4 +1,4 @@
-/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v39）。
+/* MIG-03 迁移引擎：维护当前 SQLite 基础 schema 与全部历史迁移（v1→v40）。
  *
  * 迁移纪律：
  * - 仅仅翻译不增加 schema 版本；Node 新增表/列时才创建下一版本并同步 Python 策略。
@@ -8,7 +8,7 @@
 import type { Database } from 'better-sqlite3';
 
 export const BASE_SCHEMA_VERSION = 1;
-export const CURRENT_SCHEMA_VERSION = 39;
+export const CURRENT_SCHEMA_VERSION = 40;
 
 /** 与 Python _add_column 一致：按 PRAGMA table_info 判断并补列。 */
 export function addColumn(conn: Database, table: string, column: string, definition: string): void {
@@ -2081,6 +2081,11 @@ function migration39(conn: Database): void {
   `);
 }
 
+function migration40(conn: Database): void {
+  addColumn(conn, 'score_exams', 'full_score', 'REAL NOT NULL DEFAULT 0');
+  addColumn(conn, 'score_exams', 'remark', "TEXT NOT NULL DEFAULT ''");
+}
+
 function migration32(conn: Database): void {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notification_templates (
@@ -2145,6 +2150,7 @@ export const MIGRATIONS: Record<number, (conn: Database) => void> = {
   37: migration37,
   38: migration38,
   39: migration39,
+  40: migration40,
 };
 
 /** 基础 schema（v1）：与 Python init_schema 的 executescript 逐条一致。 */
