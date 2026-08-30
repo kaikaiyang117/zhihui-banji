@@ -241,11 +241,11 @@ describe('更新状态机', () => {
   });
 });
 
-describe('GitHub 更新源', () => {
+describe('更新源', () => {
   const INSTALLER_NAMES = [
     'MeimeiWorkbench-Setup-Windows-x64.exe',
     'MeimeiWorkbench-macOS-arm64.dmg',
-    'MeimeiWorkbench-macOS-x64.dmg',
+    'MeimeiWorkbench-macOS-x86_64.dmg',
   ];
   const installerBytes = Buffer.from('fake-installer-bytes-v9.9.9');
   const installerSha = createHash('sha256').update(installerBytes).digest('hex');
@@ -253,10 +253,12 @@ describe('GitHub 更新源', () => {
   let server: http.Server;
   let base = '';
   let processPlatformDescriptor: PropertyDescriptor | undefined;
+  let serverAuthHeaders: Array<string | undefined> = [];
+  let githubInstallerRequests = 0;
 
   function expectedMarker(): string {
     if (process.platform === 'win32') return 'MeimeiWorkbench-Setup-Windows-x64.exe';
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
     return `MeimeiWorkbench-macOS-${arch}.dmg`;
   }
 
@@ -316,12 +318,50 @@ describe('GitHub 更新源', () => {
         }));
         return;
       }
+      if (url === '/api/server/manifest') {
+        serverAuthHeaders.push(req.headers.authorization);
+        send(JSON.stringify({
+          tag_name: 'v9.9.9',
+          html_url: 'https://updates.test/workbench/v9.9.9',
+          assets: INSTALLER_NAMES.map((name) => ({
+            name,
+            browser_download_url: `${base}/server/file/${name}`,
+            size: installerBytes.length,
+            sha256: installerSha,
+          })),
+        }));
+        return;
+      }
+      if (url === '/api/server/broken-manifest') {
+        send(JSON.stringify({
+          tag_name: 'v9.9.9',
+          assets: INSTALLER_NAMES.map((name) => ({
+            name,
+            browser_download_url: `${base}/broken/file/${name}`,
+            size: installerBytes.length,
+            sha256: installerSha,
+          })),
+        }));
+        return;
+      }
       if (url === '/github/file/SHA256SUMS.txt') {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.end(INSTALLER_NAMES.map((name) => `${installerSha}  ${name}`).join('\n'));
         return;
       }
       if (url.startsWith('/github/file/')) {
+        githubInstallerRequests += 1;
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.end(installerBytes);
+        return;
+      }
+      if (url.startsWith('/broken/file/')) {
+        res.statusCode = 503;
+        res.end('temporarily unavailable');
+        return;
+      }
+      if (url.startsWith('/server/file/')) {
+        serverAuthHeaders.push(req.headers.authorization);
         res.setHeader('Content-Type', 'application/octet-stream');
         res.end(installerBytes);
         return;
@@ -347,22 +387,41 @@ describe('GitHub 更新源', () => {
     process.env = { ...previousEnv };
   });
 
-  it('GitHub Release 可用时作为唯一更新源', async () => {
+  beforeEach(() => {
+    serverAuthHeaders = [];
+    githubInstallerRequests = 0;
+  });
+
+  it('自建更新服务器可用时作为主源', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
+      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
+      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
+    });
+    const result = await updateService.checkForUpdate();
+    expect(result.source).toBe('server');
+    expect(result.update_available).toBe(true);
+    expect(result.asset.sha256).toBe(installerSha);
+    expect(result.release_url).toBe('https://updates.test/workbench/v9.9.9');
+  });
+
+  it('自建更新服务器失败时回退 GitHub Release', async () => {
+    withEnv({
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
     const result = await updateService.checkForUpdate();
     expect(result.source).toBe('github');
-    expect(result.update_available).toBe(true);
     expect(result.asset.sha256).toBe(installerSha);
-    expect(result.release_url).toBe('https://github.com/test/workbench/releases/tag/v9.9.9');
   });
 
-  it('GitHub API 失败时使用清单中的 browser_download_url', async () => {
+  it('GitHub API 失败时使用 GitHub 清单中的 browser_download_url', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
       WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
     });
@@ -372,26 +431,60 @@ describe('GitHub 更新源', () => {
     expect(result.asset.url).toBe(`${base}/github/file/${expectedMarker()}`);
   });
 
-  it('GitHub Release 不可达时报告错误', async () => {
+  it('所有更新源不可达时报告错误', async () => {
     withEnv({
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: 'http://127.0.0.1:1/api/server/manifest',
       WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
       WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
     });
     await expect(updateService.checkForUpdate()).rejects.toThrow(/fetch failed|ECONNREFUSED/);
   });
 
-  it('从 GitHub 下载并完成 SHA-256 校验', async () => {
+  it('从自建更新服务器下载、校验且不泄露 GitHub Token', async () => {
     withEnv({
       WORKBENCH_VERSION: '9.8.7',
-      WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
-      WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
+      WORKBENCH_UPDATE_URL: 'http://127.0.0.1:1/api/github/latest',
+      WORKBENCH_UPDATE_MANIFEST_URL: 'http://127.0.0.1:1/api/github/manifest',
     });
+    updateService.saveGithubToken('ghp_testtoken1234567890');
     updateService.startUpdateWorker(db);
     await waitFinished();
     expect(updateService.updateStatus().status).toBe('ready_to_install');
     const info = updateService.installerPath(db);
     expect(path.basename(info.path)).toBe(expectedMarker());
     expect(fs.readFileSync(info.path)).toEqual(installerBytes);
+    expect(serverAuthHeaders).toEqual([undefined, undefined]);
+  });
+
+  it('自建服务器下载失败时改用同版本 GitHub 安装包', async () => {
+    withEnv({
+      WORKBENCH_VERSION: '9.8.7',
+      WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/broken-manifest`,
+      WORKBENCH_UPDATE_URL: `${base}/api/github/latest`,
+      WORKBENCH_UPDATE_MANIFEST_URL: `${base}/api/github/manifest`,
+    });
+    updateService.startUpdateWorker(db);
+    await waitFinished();
+    expect(updateService.updateStatus().status).toBe('ready_to_install');
+    expect(githubInstallerRequests).toBeGreaterThan(0);
+    const info = updateService.installerPath(db);
+    expect(fs.readFileSync(info.path)).toEqual(installerBytes);
+  });
+
+  it('Intel macOS 兼容 x86_64 安装包命名', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'arch');
+    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+    try {
+      withEnv({
+        WORKBENCH_VERSION: '9.8.7',
+        WORKBENCH_UPDATE_SERVER_MANIFEST_URL: `${base}/api/server/manifest`,
+      });
+      const result = await updateService.checkForUpdate();
+      expect(result.asset.name).toBe('MeimeiWorkbench-macOS-x86_64.dmg');
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'arch', descriptor);
+    }
   });
 
   it('Token 校验只接受 GitHub 格式', () => {

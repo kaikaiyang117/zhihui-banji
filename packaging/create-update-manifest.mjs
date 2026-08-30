@@ -3,6 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
+const repository = String(process.env.REPOSITORY ?? '').trim();
+const releaseTag = String(process.env.RELEASE_TAG ?? '').trim();
+const updateBaseUrl = String(process.env.UPDATE_BASE_URL ?? '').replace(/\/+$/, '');
+
+if (!releaseTag) throw new Error('缺少 RELEASE_TAG');
+if (!updateBaseUrl && !repository) throw new Error('缺少 REPOSITORY 或 UPDATE_BASE_URL');
+
 const checksums = new Map();
 for (const line of fs.readFileSync(path.join(root, 'SHA256SUMS.txt'), 'utf8').split(/\r?\n/)) {
   if (!line.trim()) continue;
@@ -15,16 +22,23 @@ const assets = fs.readdirSync(root, { withFileTypes: true })
   .sort((a, b) => a.name.localeCompare(b.name))
   .map((entry) => {
     const file = path.join(root, entry.name);
+    const checksum = checksums.get(entry.name) ?? '';
+    if (!/^[a-f0-9]{64}$/i.test(checksum)) {
+      throw new Error(`缺少有效 SHA-256：${entry.name}`);
+    }
     return {
       name: entry.name,
-      browser_download_url: `https://github.com/${process.env.REPOSITORY}/releases/download/${process.env.RELEASE_TAG}/${entry.name}`,
+      browser_download_url: updateBaseUrl
+        ? `${updateBaseUrl}/${encodeURIComponent(entry.name)}`
+        : `https://github.com/${repository}/releases/download/${releaseTag}/${encodeURIComponent(entry.name)}`,
       size: fs.statSync(file).size,
-      sha256: checksums.get(entry.name) ?? '',
+      sha256: checksum,
     };
   });
 
 fs.writeFileSync(path.join(root, 'update-manifest.json'), `${JSON.stringify({
-  tag_name: process.env.RELEASE_TAG,
-  html_url: `https://github.com/${process.env.REPOSITORY}/releases/tag/${process.env.RELEASE_TAG}`,
+  tag_name: releaseTag,
+  html_url: process.env.RELEASE_URL
+    ?? (repository ? `https://github.com/${repository}/releases/tag/${releaseTag}` : updateBaseUrl),
   assets,
 }, null, 2)}\n`);

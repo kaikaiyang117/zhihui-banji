@@ -179,7 +179,7 @@ onUnmounted(clearPoll)
       </div>
       <div v-if="showTokenInput" class="update-token-section">
         <div class="update-token-title">配置 GitHub 更新 Token（私有仓库必需）</div>
-        <div class="update-token-desc">更新从 GitHub Release 获取。私有仓库使用 ghp_ 或 github_pat_ 开头令牌。</div>
+        <div class="update-token-desc">自建更新服务器不可用时会回退 GitHub。私有仓库使用 ghp_ 或 github_pat_ 开头令牌。</div>
         <div class="update-token-row">
           <input v-model="tokenValue" type="password" class="update-token-input" placeholder="ghp_ / github_pat_ Token" @keydown.enter="saveToken" />
           <button class="btn btn-primary btn-sm" type="button" :disabled="!tokenValue.trim() || tokenSaving" @click="saveToken">
@@ -194,7 +194,7 @@ onUnmounted(clearPoll)
           <span>当前版本 {{ result.current_version }}</span>
           <span>最新版本 {{ result.latest_version || '暂不可用' }}</span>
         </div>
-        <div v-if="result.source" class="update-source-row">更新源：GitHub Release</div>
+        <div v-if="result.source" class="update-source-row">更新源：{{ result.source === 'server' ? '自建更新服务器' : 'GitHub Release' }}</div>
         <div v-if="updateStatus" class="update-progress">
           <LoaderCircle v-if="['starting', 'checking', 'backing_up', 'downloading', 'verifying'].includes(updateStatus.status)" class="spin" :size="18" />
           <CheckCircle v-else-if="['ready_to_install', 'up_to_date'].includes(updateStatus.status)" :size="18" />

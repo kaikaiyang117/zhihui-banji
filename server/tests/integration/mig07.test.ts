@@ -143,7 +143,10 @@ describe('成绩：配置/导入/统计/规则', () => {
   it('科目+考试+成绩提交 → 汇总口径（缺考不计 0 分）', () => {
     scores.createSubject({ name: '物理', fullScore: 100 });
     scores.createSubject({ name: '化学', fullScore: 100 });
-    scores.createExam({ name: '月考1', subjectIds: [1, 2] });
+    scores.createExam({ name: '月考1', subjectIds: [1, 2], fullScore: 200, remark: '阶段复习' });
+    const configuredExam = (scores.listConfig().exams as Array<Record<string, unknown>>)
+      .find((item) => item.name === '月考1');
+    expect(configuredExam).toMatchObject({ full_score: 200, remark: '阶段复习' });
     scores.commitExamRows([
       { row: 1, valid: true, student_id: 1, exam_name: '月考1', exam_date: '2026-04-20', subject: '物理', score: 90, rank: 1, record_status: '正常', note: '' },
       { row: 2, valid: true, student_id: 1, exam_name: '月考1', exam_date: '2026-04-20', subject: '化学', score: null, rank: null, record_status: '缺考', note: '' },

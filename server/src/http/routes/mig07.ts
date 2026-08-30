@@ -122,6 +122,7 @@ export function registerMig07Routes(app: FastifyInstance): void {
     return wrap(reply, () => scores.createExam({
       name: String(body.name ?? ''), examDate: String(body.exam_date ?? ''),
       subjectIds: Array.isArray(body.subject_ids) ? (body.subject_ids as number[]) : [],
+      fullScore: body.full_score, remark: body.remark,
       enabled: body.enabled === undefined || body.enabled === null ? true : Boolean(body.enabled),
       sortOrder: Number(body.sort_order ?? 0),
     }));
@@ -134,6 +135,7 @@ export function registerMig07Routes(app: FastifyInstance): void {
       name: body.name,
       examDate: body.exam_date,
       subjectIds: Array.isArray(body.subject_ids) ? (body.subject_ids as number[]) : null,
+      fullScore: body.full_score, remark: body.remark,
       enabled: body.enabled === undefined || body.enabled === null ? null : Boolean(body.enabled),
       sortOrder: body.sort_order,
     }));

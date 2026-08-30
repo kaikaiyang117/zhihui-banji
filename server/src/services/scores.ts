@@ -635,7 +635,7 @@ export function saveStudentSubjectsBatch(
 
 export function createExam(options: {
   name?: unknown; examDate?: unknown; subjectIds?: unknown[] | null; enabled?: boolean;
-  sortOrder?: unknown; conn?: Database;
+  sortOrder?: unknown; fullScore?: unknown; remark?: unknown; conn?: Database;
 } = {}): Record<string, unknown> {
   const conn = options.conn ?? getDb().connInstance;
   const name = text(options.name);
@@ -643,20 +643,23 @@ export function createExam(options: {
   const examDate = dateText(options.examDate);
   const enabled = options.enabled ?? true;
   const sortOrder = options.sortOrder ?? 0;
+  const fullScore = options.fullScore === undefined || options.fullScore === null || text(options.fullScore) === ''
+    ? 0 : positiveNumber(options.fullScore, '考试满分');
+  const remark = text(options.remark);
   const [classId, termId] = scopeIds({ write: true, conn });
   let examId: number;
   try {
     examId = conn.transaction(() => {
       const inserted = conn.prepare(
         `INSERT INTO score_exams(
-           class_id, term_id, name, exam_date, sort_order, enabled
-         ) VALUES(?,?,?,?,?,?)`,
-      ).run(classId, termId, name, examDate, Number(sortOrder), enabled ? 1 : 0);
+           class_id, term_id, name, exam_date, full_score, remark, sort_order, enabled
+         ) VALUES(?,?,?,?,?,?,?,?)`,
+      ).run(classId, termId, name, examDate, fullScore, remark, Number(sortOrder), enabled ? 1 : 0);
       const id = Number(inserted.lastInsertRowid);
       replaceExamSubjects(id, options.subjectIds ?? [], conn);
       audit.record('score_exam', id, 'create', {
         summary: `新增考试：${name}`,
-        params: { name, exam_date: examDate, subject_ids: options.subjectIds ?? [] },
+        params: { name, exam_date: examDate, full_score: fullScore, remark, subject_ids: options.subjectIds ?? [] },
         classId, termId, conn,
       });
       return id;
@@ -672,7 +675,7 @@ export function createExam(options: {
 
 export function updateExam(examId: number, options: {
   name?: unknown; examDate?: unknown; subjectIds?: unknown[] | null; enabled?: boolean | null;
-  sortOrder?: unknown; conn?: Database;
+  sortOrder?: unknown; fullScore?: unknown; remark?: unknown; conn?: Database;
 } = {}): Record<string, unknown> {
   const conn = options.conn ?? getDb().connInstance;
   const current = examRow(Number(examId), { write: true, conn });
@@ -684,15 +687,20 @@ export function updateExam(examId: number, options: {
       ? (options.enabled ? 1 : 0) : current.enabled,
     sort_order: options.sortOrder !== undefined && options.sortOrder !== null
       ? Number(options.sortOrder) : current.sort_order,
+    full_score: options.fullScore !== undefined && options.fullScore !== null
+      ? positiveNumber(options.fullScore, '考试满分') : Number(current.full_score ?? 0),
+    remark: options.remark !== undefined && options.remark !== null
+      ? text(options.remark) : String(current.remark ?? ''),
   };
   if (!text(values.name)) throw new ScoreError('考试名称不能为空');
   const [classId, termId] = scopeIds({ write: true, conn });
   try {
     conn.transaction(() => {
       conn.prepare(
-        `UPDATE score_exams SET name=?, exam_date=?, enabled=?, sort_order=?,
+        `UPDATE score_exams SET name=?, exam_date=?, full_score=?, remark=?, enabled=?, sort_order=?,
            updated_at=datetime('now','localtime') WHERE id=?`,
-      ).run(values.name, values.exam_date, values.enabled, values.sort_order, Number(examId));
+      ).run(values.name, values.exam_date, values.full_score, values.remark,
+        values.enabled, values.sort_order, Number(examId));
       conn.prepare(
         `UPDATE exam_records SET exam_name=?, exam_date=?,
            updated_at=datetime('now','localtime')

@@ -81,6 +81,10 @@ jobs:
             artifact: macos-arm64
             platform: macos
             arch: arm64
+          - runner: macos-15-intel
+            artifact: macos-x86_64
+            platform: macos
+            arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
