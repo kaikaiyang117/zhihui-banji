@@ -26,6 +26,8 @@ let mirrorSha256 = SHA256;
 const previousEnv = { ...process.env };
 let platformDescriptor: PropertyDescriptor | undefined;
 let archDescriptor: PropertyDescriptor | undefined;
+let hostPlatform = process.platform;
+let hostArch = process.arch;
 
 function manifest(urls = mirrorAssetUrls ?? [`${base}/cos/file/${ASSET_NAME}`, `${base}/github/file/${ASSET_NAME}`]): string {
   return JSON.stringify({
@@ -69,6 +71,8 @@ function sendFile(request: http.IncomingMessage, response: http.ServerResponse, 
 }
 
 beforeAll(async () => {
+  hostPlatform = process.platform;
+  hostArch = process.arch;
   platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch');
   Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
@@ -104,8 +108,14 @@ beforeAll(async () => {
 
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-resilience-'));
+  // 先用宿主平台加载 better-sqlite3，再模拟 darwin/arm64 选择安装包。
+  // 否则 Linux CI 会尝试加载 macOS 原生扩展。
+  Object.defineProperty(process, 'platform', { value: hostPlatform, configurable: true });
+  Object.defineProperty(process, 'arch', { value: hostArch, configurable: true });
   db = new WorkbenchDb({ dataDir: tempDir });
   db.open();
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
   mirrorStatus = 200;
   githubHits = 0;
   cosDownloads = 0;

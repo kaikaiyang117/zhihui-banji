@@ -255,6 +255,8 @@ describe('GitHub 更新源', () => {
   }
 
   function withEnv(patch: Record<string, string | undefined>): void {
+    // 这些用例专门验证 GitHub 源，避免命中生产默认的 COS 清单。
+    process.env.WORKBENCH_UPDATE_MIRROR_MANIFEST_URL = 'http://127.0.0.1:1/api/mirror/manifest';
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
