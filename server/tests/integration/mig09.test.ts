@@ -216,6 +216,14 @@ describe('迁移包', () => {
     expect((db.connInstance.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c).toBe(3);
   });
 
+  it('导出时拒绝未登记的证据文件', async () => {
+    const orphanPath = path.join(db.paths.dataDir, 'evidence', '1', '1', 'attendance', '5', 'orphan.png');
+    fs.mkdirSync(path.dirname(orphanPath), { recursive: true });
+    fs.writeFileSync(orphanPath, Buffer.from('orphan-evidence'));
+
+    await expect(migrationService.createPackage()).rejects.toThrow(/未登记文件/);
+  });
+
   it('拒绝不安全路径的迁移包', async () => {
     await expect(migrationService.restorePackage(unsafeZip()))
       .rejects.toThrow(/不安全|不合法|缺少/);

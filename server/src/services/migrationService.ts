@@ -492,13 +492,26 @@ function isoSeconds(date: Date): string {
 
 export async function createPackage(): Promise<string> {
   const db = getDb();
+  const dataFiles = iterFiles(db.paths.dataDir, 'data', EXCLUDED_DATA_FILES, EXCLUDED_DATA_DIRS);
+  const registeredEvidence = new Set(
+    (db.connInstance.prepare('SELECT relative_path FROM evidence_attachments').all() as Array<{ relative_path: string }>)
+      .map((row) => row.relative_path),
+  );
+  for (const [archivePath] of dataFiles) {
+    if (archivePath.startsWith('data/evidence/') && !archivePath.endsWith('.thumb.jpg')) {
+      const relativePath = archivePath.slice('data/'.length);
+      if (!registeredEvidence.has(relativePath)) {
+        throw new MigrationError(`本地证据目录包含未登记文件：${relativePath}`);
+      }
+    }
+  }
   fs.mkdirSync(db.paths.backupsDir, { recursive: true });
   const databaseBackup = await db.createBackup('migration');
   const databasePath = path.join(db.paths.backupsDir, databaseBackup);
   const entries: Array<Record<string, unknown>> = [
     fileEntry('database/workbench.db', databasePath, 'database'),
   ];
-  for (const [archivePath, sourcePath] of iterFiles(db.paths.dataDir, 'data', EXCLUDED_DATA_FILES, EXCLUDED_DATA_DIRS)) {
+  for (const [archivePath, sourcePath] of dataFiles) {
     entries.push(fileEntry(archivePath, sourcePath, 'data'));
   }
   for (const [archivePath, sourcePath] of iterFiles(db.paths.kbDir, 'knowledge')) {
