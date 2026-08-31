@@ -247,7 +247,9 @@ jobs:
           set -euo pipefail
           python3 -m pip install --disable-pip-version-check --quiet coscmd
           coscmd config -a "$TENCENT_COS_SECRET_ID" -s "$TENCENT_COS_SECRET_KEY" -b "$COS_BUCKET" -r "$COS_REGION"
-          coscmd upload -r release-assets "releases/$RELEASE_TAG/"
+          for file in release-assets/*; do
+            coscmd upload "$file" "releases/$RELEASE_TAG/$(basename "$file")"
+          done
 
       - name: Verify COS release files before publishing latest
         env:
