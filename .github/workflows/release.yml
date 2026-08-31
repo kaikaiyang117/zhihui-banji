@@ -271,7 +271,8 @@ jobs:
             content_range="$(awk 'tolower($1) == "content-range:" { print $3 }' "$range_headers" | tr -d '\r' | tail -n 1)"
             rm -f "$range_headers"
             [[ "$status" == "206" ]] || { echo "COS Range 校验失败：$name，HTTP $status"; exit 1; }
-            [[ "$content_range" == bytes\ 0-1023/* ]] || { echo "COS Content-Range 校验失败：$name，$content_range"; exit 1; }
+            expected_end=$((expected < 1024 ? expected - 1 : 1023))
+            [[ "$content_range" == "0-$expected_end/$expected" ]] || { echo "COS Content-Range 校验失败：$name，$content_range"; exit 1; }
           done
 
       - name: Publish latest update manifest to Tencent COS
