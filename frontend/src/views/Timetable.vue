@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { CalendarDays, Clock3, Download, Edit3, FileUp, Plus, RotateCcw, Save, X, Trash2 } from 'lucide-vue-next'
-import { download, get, post, put, upload, getTeacherSchedule, createTeacherScheduleEntry, updateTeacherScheduleEntry, removeTeacherScheduleEntry } from '../api'
+import { del, download, get, post, put, upload, getTeacherSchedule, createTeacherScheduleEntry, updateTeacherScheduleEntry, removeTeacherScheduleEntry } from '../api'
 
 const activeView = ref('single')
 
@@ -137,6 +137,16 @@ async function saveEntry() {
     if (editingEntryId.value) await put(`/api/timetable/entries/${editingEntryId.value}`, { ...entryForm, weekday: Number(entryForm.weekday), period_no: Number(entryForm.period_no), week_start: Number(entryForm.week_start), week_end: Number(entryForm.week_end) })
     else await post('/api/timetable/entries', { ...entryForm, weekday: Number(entryForm.weekday), period_no: Number(entryForm.period_no), week_start: Number(entryForm.week_start), week_end: Number(entryForm.week_end) })
     notice.value = editingEntryId.value ? '课程安排已更新。' : '课程安排已添加。'; showEntryEditor.value = false; await load()
+  } catch (e) { error.value = e.message } finally { saving.value = false }
+}
+async function deleteEntry() {
+  if (!editingEntryId.value || !confirm('删除这条固定课程安排吗？')) return
+  saving.value = true; error.value = ''
+  try {
+    await del(`/api/timetable/entries/${editingEntryId.value}`)
+    notice.value = '课程安排已删除。'
+    showEntryEditor.value = false
+    await load()
   } catch (e) { error.value = e.message } finally { saving.value = false }
 }
 async function savePeriod() {
@@ -343,7 +353,7 @@ onMounted(load)
       </div>
     </template>
 
-    <div v-if="showEntryEditor" class="modal-overlay show" @click.self="showEntryEditor = false"><div class="modal timetable-modal"><div class="modal-title-row"><div><div class="modal-kicker">固定周课表</div><h3>{{ editingEntryId ? '编辑课程安排' : '添加课程安排' }}</h3></div><button class="icon-button" @click="showEntryEditor = false"><X :size="18" /></button></div><div class="form-grid"><label>星期<select class="form-select" v-model.number="entryForm.weekday"><option v-for="(day, index) in weekdays" :key="day" :value="index + 1">{{ day }}</option></select></label><label>节次<select class="form-select" v-model.number="entryForm.period_no"><option v-for="period in periods" :key="period.id" :value="period.period_no">{{ period.label || `${period.period_no}节` }}</option></select></label><label>科目<input class="form-input" v-model="entryForm.subject" placeholder="如：数学"></label><label>任课教师<input class="form-input" v-model="entryForm.teacher_name" placeholder="可选"></label><label>教室<input class="form-input" v-model="entryForm.room" placeholder="如：高一（1）班"></label><label>时段类型<select class="form-select" v-model="entryForm.session_type"><option v-for="item in sessionTypes" :key="item">{{ item }}</option></select></label><label>单双周<select class="form-select" v-model="entryForm.week_pattern"><option v-for="item in weekPatterns" :key="item">{{ item }}</option></select></label><label>开始周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_start"></label><label>结束周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_end"></label><label class="form-grid-wide">备注<textarea class="form-textarea" rows="2" v-model="entryForm.note"></textarea></label></div><div class="modal-actions"><button class="btn btn-outline" @click="showEntryEditor = false">取消</button><button class="btn btn-primary" :disabled="saving || !entryForm.subject.trim()" @click="saveEntry"><Save :size="14" /> 保存课程</button></div></div></div>
+    <div v-if="showEntryEditor" class="modal-overlay show" @click.self="showEntryEditor = false"><div class="modal timetable-modal"><div class="modal-title-row"><div><div class="modal-kicker">固定周课表</div><h3>{{ editingEntryId ? '编辑课程安排' : '添加课程安排' }}</h3></div><button class="icon-button" @click="showEntryEditor = false"><X :size="18" /></button></div><div class="form-grid"><label>星期<select class="form-select" v-model.number="entryForm.weekday"><option v-for="(day, index) in weekdays" :key="day" :value="index + 1">{{ day }}</option></select></label><label>节次<select class="form-select" v-model.number="entryForm.period_no"><option v-for="period in periods" :key="period.id" :value="period.period_no">{{ period.label || `${period.period_no}节` }}</option></select></label><label>科目<input class="form-input" v-model="entryForm.subject" placeholder="如：数学"></label><label>任课教师<input class="form-input" v-model="entryForm.teacher_name" placeholder="可选"></label><label>教室<input class="form-input" v-model="entryForm.room" placeholder="如：高一（1）班"></label><label>时段类型<select class="form-select" v-model="entryForm.session_type"><option v-for="item in sessionTypes" :key="item">{{ item }}</option></select></label><label>单双周<select class="form-select" v-model="entryForm.week_pattern"><option v-for="item in weekPatterns" :key="item">{{ item }}</option></select></label><label>开始周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_start"></label><label>结束周<input class="form-input" type="number" min="1" max="99" v-model.number="entryForm.week_end"></label><label class="form-grid-wide">备注<textarea class="form-textarea" rows="2" v-model="entryForm.note"></textarea></label></div><div class="modal-actions"><button v-if="editingEntryId" class="btn btn-outline timetable-entry-delete" :disabled="saving" @click="deleteEntry"><Trash2 :size="14" /> 删除课程</button><button class="btn btn-outline" @click="showEntryEditor = false">取消</button><button class="btn btn-primary" :disabled="saving || !entryForm.subject.trim()" @click="saveEntry"><Save :size="14" /> 保存课程</button></div></div></div>
 
     <div v-if="showPeriodEditor" class="modal-overlay show" @click.self="showPeriodEditor = false"><div class="modal timetable-modal"><div class="modal-title-row"><div><div class="modal-kicker">节次与作息</div><h3>维护课程节次</h3></div><button class="icon-button" @click="showPeriodEditor = false"><X :size="18" /></button></div><div class="period-list"><div v-for="period in periods" :key="period.id" class="period-row"><span><strong>{{ period.label || `${period.period_no}节` }}</strong><small>{{ period.start_time }}–{{ period.end_time }} · {{ period.session_type }}</small></span><button class="btn btn-sm btn-outline" @click="openPeriod(period)"><Edit3 :size="13" /> 编辑</button></div><div v-if="!periods.length" class="empty-state compact-empty">还没有节次。</div></div><div class="form-grid"><label>节次<input class="form-input" type="number" min="1" max="20" v-model.number="periodForm.period_no"></label><label>名称<input class="form-input" v-model="periodForm.label" placeholder="如：第1节"></label><label>上课时间<input class="form-input" type="time" v-model="periodForm.start_time"></label><label>下课时间<input class="form-input" type="time" v-model="periodForm.end_time"></label><label>时段类型<select class="form-select" v-model="periodForm.session_type"><option v-for="item in sessionTypes" :key="item">{{ item }}</option></select></label></div><div class="modal-actions"><button class="btn btn-primary" :disabled="saving" @click="savePeriod"><Save :size="14" /> 保存节次</button></div></div></div>
 
@@ -421,6 +431,8 @@ onMounted(load)
 .timetable-preview-table { max-height: 320px; overflow: auto; }
 .preview-counts { display: flex; gap: 12px; margin-bottom: 10px; font-size: 13px; }
 .preview-error-row { background: var(--danger-bg, #fef2f2); }
+.timetable-entry-delete { margin-right: auto; color: var(--danger); }
+.timetable-entry-delete:hover { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
 .tag-green { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--success-bg, #ecfdf5); color: var(--success, #10b981); font-size: 11px; }
 .tag-gray { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--bg); color: var(--text-tertiary); font-size: 11px; }
 .tag-blue { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--primary-bg); color: var(--primary); font-size: 11px; }

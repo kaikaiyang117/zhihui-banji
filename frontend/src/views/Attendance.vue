@@ -1,9 +1,9 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import {
   AlertTriangle, BarChart3, CheckCircle, Clock, Download, FileEdit,
-  History, MessageSquareText, Save, Trash2, UserRound, XCircle
+  History, MessageSquareText, Paperclip, Save, Trash2, UserRound, XCircle
 } from 'lucide-vue-next'
 import { del, get, post, put, scopedUrl } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
@@ -34,13 +34,16 @@ const statsScene = ref('全部场景')
 const showAllStudentStats = ref(false)
 const batchNote = ref('')
 const batchTarget = ref('异常学生')
-const studentView = ref('anomaly')
-const studentEntryMode = ref(false)
+const studentView = ref('all')
+const studentEntryMode = ref(true)
 const studentKeyword = ref('')
 const studentSearchInput = ref(null)
 const expandedStudentIds = ref(new Set())
 const expandedRecordIds = ref(new Map())
+const expandedEvidenceIds = ref(new Set())
+const preparingEvidenceIds = ref(new Set())
 const batchNoteExpanded = ref(false)
+const fullSessionConfirmed = ref(false)
 const newRule = ref({
   name: '一周迟到提醒', metric: '迟到次数', threshold: 2,
   period_days: 7, priority: '重要', scene: '全部场景'
@@ -95,8 +98,34 @@ function recordSnapshot() {
 }
 
 const hasUnsavedChanges = computed(() => (
-  JSON.stringify(recordSnapshot()) !== JSON.stringify(savedSnapshot.value)
+  changedStudentCount.value > 0 || fullSessionConfirmed.value
 ))
+
+function recordMatchesSnapshot(student) {
+  const current = records.value[student.id] || defaultRecord(student)
+  const saved = savedSnapshot.value[student.id] || defaultRecord(student)
+  return JSON.stringify({
+    status: current.status || '出勤', reason: current.reason || '',
+    arrive: current.arrive || '', leave: current.leave || '', note: current.note || '',
+  }) === JSON.stringify({
+    status: saved.status || '出勤', reason: saved.reason || '',
+    arrive: saved.arrive || '', leave: saved.leave || '', note: saved.note || '',
+  })
+}
+
+const changedStudentCount = computed(() => students.value.filter(student => !recordMatchesSnapshot(student)).length)
+const recordedStudentIds = computed(() => new Set(dayRecords.value.map(item => Number(item.student_id))))
+const sessionRecordCount = computed(() => students.value.filter(student => recordedStudentIds.value.has(Number(student.id))).length)
+const sessionIsComplete = computed(() => students.value.length > 0 && sessionRecordCount.value === students.value.length)
+const needsFullSessionSave = computed(() => fullSessionConfirmed.value || !sessionIsComplete.value)
+const quickEntryHint = computed(() => sessionIsComplete.value
+  ? '搜索后直接选择异常状态，只提交本次修改。'
+  : '搜索后补录异常；首次保存会同时写入全班出勤。')
+const saveButtonLabel = computed(() => {
+  if (saving.value) return '保存中…'
+  if (needsFullSessionSave.value) return '保存本场点名'
+  return studentEntryMode.value ? '保存异常修改' : '保存全班点名'
+})
 
 async function loadDayRecords() {
   const query = new URLSearchParams({ date: selectedDate.value, scene: selectedScene.value })
@@ -106,7 +135,10 @@ async function loadDayRecords() {
   loadedScene.value = selectedScene.value
   savedSnapshot.value = recordSnapshot()
   expandedStudentIds.value = new Set()
+  expandedEvidenceIds.value = new Set()
+  preparingEvidenceIds.value = new Set()
   batchNoteExpanded.value = false
+  fullSessionConfirmed.value = false
 }
 
 async function loadStats() {
@@ -141,7 +173,7 @@ async function load() {
 }
 
 async function changeAttendanceScope() {
-  if (hasUnsavedChanges.value && !confirm('当前点名有未保存修改，切换日期或场景会放弃这些修改。确定继续吗？')) {
+  if (!confirmDiscardChanges('切换日期或场景')) {
     selectedDate.value = loadedDate.value
     selectedScene.value = loadedScene.value
     return
@@ -226,6 +258,49 @@ function toggleStudentDetails(studentId) {
   expandedStudentIds.value = next
 }
 
+async function ensureRecordForEvidence(studentId) {
+  if (expandedRecordIds.value.get(studentId)) return true
+  const pending = new Set(preparingEvidenceIds.value)
+  if (pending.has(studentId)) return false
+  pending.add(studentId)
+  preparingEvidenceIds.value = pending
+  try {
+    await post('/api/attendance/daily', {
+      date: selectedDate.value,
+      scene: selectedScene.value,
+      records: [records.value[studentId]]
+    })
+    const query = new URLSearchParams({ date: selectedDate.value, scene: selectedScene.value })
+    const data = await get(`/api/attendance/records?${query}`)
+    const savedRecord = (data.records || []).find(item => Number(item.student_id) === Number(studentId))
+    if (!savedRecord?.id) throw new Error('考勤记录创建失败')
+    const nextRecordIds = new Map(expandedRecordIds.value)
+    nextRecordIds.set(studentId, savedRecord.id)
+    expandedRecordIds.value = nextRecordIds
+    savedSnapshot.value = recordSnapshot()
+    return true
+  } catch (error) {
+    savedMessage.value = `凭证准备失败：${error.message}`
+    return false
+  } finally {
+    const next = new Set(preparingEvidenceIds.value)
+    next.delete(studentId)
+    preparingEvidenceIds.value = next
+  }
+}
+
+async function toggleEvidence(studentId) {
+  const next = new Set(expandedEvidenceIds.value)
+  if (next.has(studentId)) {
+    next.delete(studentId)
+    expandedEvidenceIds.value = next
+    return
+  }
+  if (!(await ensureRecordForEvidence(studentId))) return
+  next.add(studentId)
+  expandedEvidenceIds.value = next
+}
+
 function hasStudentDetails(record) {
   return Boolean(record?.reason || record?.arrive || record?.leave || record?.note)
 }
@@ -250,12 +325,23 @@ function handleStatusChange(student) {
   }
 }
 
-function setAll(status) {
-  for (const student of students.value) {
-    const record = records.value[student.id]
-    record.status = status
-    normalizeStatusFields(record)
+function setStudentStatus(student, status) {
+  const record = records.value[student.id]
+  record.status = status
+  handleStatusChange(student)
+}
+
+function confirmPresentStudents() {
+  if (sessionIsComplete.value && !changedStudentCount.value) {
+    savedMessage.value = anomalyStudents.value.length
+      ? '本场次已完整保存，异常记录保持不变'
+      : '本场次已保存为全员到校'
+    return
   }
+  fullSessionConfirmed.value = true
+  savedMessage.value = ''
+  studentEntryMode.value = false
+  studentView.value = 'all'
 }
 
 function applyBatchNote() {
@@ -285,49 +371,57 @@ const anomalyStudents = computed(() => students.value.filter(student => (
   records.value[student.id]?.status && records.value[student.id].status !== '出勤'
 )))
 const visibleStudents = computed(() => {
-  if (studentView.value === 'anomaly') return anomalyStudents.value
+  if (!studentEntryMode.value && studentView.value === 'anomaly') return anomalyStudents.value
   if (!studentEntryMode.value) return students.value
   const keyword = studentKeyword.value.trim().toLowerCase()
   if (!keyword) return []
   return students.value.filter(student => `${student.姓名}${student.学号}`.toLowerCase().includes(keyword))
 })
+const isReadOnlyAnomalyView = computed(() => !studentEntryMode.value && studentView.value === 'anomaly')
 
 function showStudentView(view) {
   studentView.value = view
   studentEntryMode.value = false
   studentKeyword.value = ''
+  if (view === 'anomaly') {
+    expandedStudentIds.value = new Set()
+    expandedEvidenceIds.value = new Set()
+    batchNoteExpanded.value = false
+  }
 }
 
 async function startExceptionEntry() {
-  studentView.value = 'all'
   studentEntryMode.value = true
   studentKeyword.value = ''
   await nextTick()
   studentSearchInput.value?.focus()
 }
 
-function cancelExceptionEntry() {
-  showStudentView('anomaly')
-}
-
 async function saveDaily() {
+  const saveWholeSession = needsFullSessionSave.value || !studentEntryMode.value
+  const recordsToSave = saveWholeSession
+    ? Object.values(records.value)
+    : students.value
+      .filter(student => !recordMatchesSnapshot(student))
+      .map(student => records.value[student.id])
+  if (!recordsToSave.length) return
   saving.value = true
   savedMessage.value = ''
   try {
     const result = await post('/api/attendance/daily', {
       date: selectedDate.value, scene: selectedScene.value,
-      records: Object.values(records.value)
+      records: recordsToSave
     })
-    const evaluation = result.evaluation
-    const ruleText = result.evaluation_error
+    const evaluationErrorText = result.evaluation_error
       ? `；规则检查失败：${result.evaluation_error}`
-      : evaluation
-        ? `；规则命中 ${evaluation.hit_count}，新建 ${evaluation.created_count}，重开 ${evaluation.reopened_count}，解除 ${evaluation.resolved_count}`
-        : ''
-    savedMessage.value = `已保存 ${result.saved} 名学生的${selectedScene.value}考勤${ruleText}`
+      : ''
+    savedMessage.value = saveWholeSession
+      ? `已保存 ${result.saved} 名学生的${selectedScene.value}考勤${evaluationErrorText}`
+      : `已保存 ${result.saved} 名学生的考勤修改${evaluationErrorText}`
     await loadDayRecords()
     await loadStats()
     await loadRules()
+    if (studentEntryMode.value) studentKeyword.value = ''
   } catch (error) {
     savedMessage.value = `保存失败：${error.message}`
   } finally {
@@ -348,7 +442,22 @@ function runLabel(trigger) {
   return ({ save: '保存后自动检查', startup: '启动检查', manual: '手动检查', rule_change: '规则变更检查' })[trigger] || trigger
 }
 
-onMounted(load)
+function confirmDiscardChanges(action = '离开页面') {
+  return !hasUnsavedChanges.value || window.confirm(`当前点名有未保存修改，${action}会放弃这些修改。确定继续吗？`)
+}
+
+function handleBeforeUnload(event) {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(() => confirmDiscardChanges())
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  load()
+})
+onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnload))
 </script>
 
 <template>
@@ -374,11 +483,8 @@ onMounted(load)
         <label class="attendance-date">点名日期<input type="date" v-model="selectedDate" @change="changeAttendanceScope"></label>
         <label class="attendance-date">考勤场景<select class="form-select" v-model="selectedScene" @change="changeAttendanceScope"><option v-for="scene in SCENES" :key="scene">{{ scene }}</option></select></label>
         <div class="attendance-actions">
-          <button class="btn btn-outline" @click="setAll('出勤')"><CheckCircle :size="14" /> 全员到校</button>
-          <button class="btn btn-primary" :disabled="saving || loading" @click="saveDaily"><Save :size="14" /> {{ saving ? '保存中…' : `保存${selectedScene}考勤` }}</button>
+          <button class="btn btn-outline" @click="confirmPresentStudents"><CheckCircle :size="14" /> {{ anomalyStudents.length ? '确认其余到校' : '确认全员到校' }}</button>
         </div>
-        <div v-if="hasUnsavedChanges" class="attendance-draft-status" role="status">未保存修改</div>
-        <div v-if="savedMessage" class="attendance-message" aria-live="polite" :class="{ error: savedMessage.startsWith('保存失败') }">{{ savedMessage }}</div>
       </section>
 
       <section class="attendance-summary" aria-label="当前场次人数统计">
@@ -390,24 +496,26 @@ onMounted(load)
       </section>
 
       <section class="card">
-        <div class="card-title"><UserRound :size="16" /> 全班点名 <span class="count">{{ students.length }} 人 · {{ selectedScene }}</span></div>
-        <div class="attendance-list-toolbar">
-          <div class="attendance-view-tabs" role="group" aria-label="学生列表显示范围">
-            <button type="button" :class="{ active: studentView === 'anomaly' && !studentEntryMode }" @click="showStudentView('anomaly')">异常 {{ anomalyStudents.length }}</button>
-            <button type="button" :class="{ active: studentView === 'all' && !studentEntryMode }" @click="showStudentView('all')">全部 {{ students.length }}</button>
-          </div>
-          <div class="attendance-list-actions">
-            <button type="button" class="attendance-view-action" :class="{ active: studentEntryMode }" @click="startExceptionEntry">登记异常</button>
-            <button v-if="visibleStudents.length" type="button" class="attendance-view-action" :class="{ active: batchNoteExpanded }" @click="batchNoteExpanded = !batchNoteExpanded">批量备注</button>
-          </div>
-          <span v-if="studentEntryMode" class="hint">输入姓名或学号后登记异常</span>
-          <span v-else-if="studentView === 'anomaly' && anomalyStudents.length" class="hint">只显示迟到、请假、早退和缺勤学生</span>
+        <div class="attendance-card-head">
+          <div class="card-title"><UserRound :size="16" /> 全班点名 <span class="count">{{ students.length }} 人 · {{ selectedScene }}</span></div>
+          <button v-if="!isReadOnlyAnomalyView" class="btn btn-primary attendance-save-button" :disabled="saving || loading || !hasUnsavedChanges" @click="saveDaily">
+            <Save :size="14" /> {{ saveButtonLabel }}
+          </button>
+          <span class="attendance-status-live" role="status" aria-live="polite">{{ savedMessage }}</span>
         </div>
-        <div v-if="studentEntryMode" class="attendance-exception-search">
-          <label><span>查找学生</span><input ref="studentSearchInput" v-model="studentKeyword" class="form-input" placeholder="输入姓名或学号"></label>
-          <button class="btn btn-outline" @click="cancelExceptionEntry">返回异常列表</button>
+        <div class="attendance-mode-row">
+          <div class="attendance-mode-tabs" role="tablist" aria-label="点名方式">
+            <button type="button" role="tab" :aria-selected="studentEntryMode" :class="{ active: studentEntryMode }" @click="startExceptionEntry">快速登记异常</button>
+            <button type="button" role="tab" :aria-selected="!studentEntryMode && studentView === 'all'" :class="{ active: !studentEntryMode && studentView === 'all' }" @click="showStudentView('all')">全班复核</button>
+          </div>
+          <button v-if="anomalyStudents.length" type="button" class="attendance-filter-link" :class="{ active: !studentEntryMode && studentView === 'anomaly' }" @click="showStudentView('anomaly')">只看异常 {{ anomalyStudents.length }}</button>
+          <button v-if="!studentEntryMode && visibleStudents.length && !isReadOnlyAnomalyView" type="button" class="attendance-filter-link" :class="{ active: batchNoteExpanded }" @click="batchNoteExpanded = !batchNoteExpanded">批量备注</button>
         </div>
-        <div v-if="visibleStudents.length && batchNoteExpanded" class="batch-note-row">
+        <div v-if="studentEntryMode" class="attendance-quick-panel">
+          <label class="attendance-search-field"><span>查找需要登记的学生</span><input ref="studentSearchInput" v-model="studentKeyword" class="form-input" placeholder="输入姓名或学号"></label>
+          <span class="attendance-search-hint">{{ quickEntryHint }}</span>
+        </div>
+        <div v-if="!studentEntryMode && visibleStudents.length && batchNoteExpanded" class="batch-note-row">
           <MessageSquareText :size="15" />
           <label class="batch-note-target"><span>备注对象</span><select v-model="batchTarget" class="form-select" aria-label="备注对象"><option>异常学生</option><option>全班</option></select></label>
           <input v-model="batchNote" class="form-input" placeholder="填写批量备注，例如：暴雨天气统一延迟到校">
@@ -415,26 +523,29 @@ onMounted(load)
         </div>
         <div v-if="loading" class="loading">加载中…</div>
         <div v-else-if="!students.length" class="empty-state">请先导入学生名单</div>
-        <div v-else-if="visibleStudents.length" class="attendance-list">
+        <div v-else-if="visibleStudents.length" class="attendance-list" :class="{ 'attendance-list-quick': studentEntryMode }">
           <div v-for="student in visibleStudents" :key="student.id" class="attendance-row" :class="`attendance-${records[student.id]?.status || '出勤'}`">
             <div class="attendance-row-main">
-              <div class="attendance-student"><strong>{{ student.姓名 }}</strong><span>{{ student.学号 }}</span></div>
-              <select :aria-label="`${student.姓名}考勤状态`" class="form-select attendance-status" v-model="records[student.id].status" @change="handleStatusChange(student)"><option v-for="status in STATUS_OPTIONS" :key="status">{{ status }}</option></select>
-              <span v-if="hasStudentDetails(records[student.id]) && !expandedStudentIds.has(student.id)" class="attendance-detail-status">已补充详情</span>
-              <button type="button" class="attendance-details-toggle" :aria-expanded="expandedStudentIds.has(student.id)" @click="toggleStudentDetails(student.id)">{{ studentDetailsLabel(student) }}</button>
+              <div class="attendance-student"><span>{{ student.学号 }}</span><strong>{{ student.姓名 }}</strong></div>
+              <div v-if="!isReadOnlyAnomalyView" class="attendance-status-picker" role="group" :aria-label="`${student.姓名}考勤状态`">
+                <button v-for="status in STATUS_OPTIONS" :key="status" type="button" :aria-pressed="records[student.id].status === status" :class="{ active: records[student.id].status === status }" @click="setStudentStatus(student, status)">{{ status }}</button>
+              </div>
+              <span v-else class="attendance-readonly-status">{{ records[student.id].status }}</span>
+              <span v-if="!isReadOnlyAnomalyView && hasStudentDetails(records[student.id]) && !expandedStudentIds.has(student.id)" class="attendance-detail-status">已补充详情</span>
+              <button v-if="!isReadOnlyAnomalyView" type="button" class="attendance-details-toggle" :aria-expanded="expandedStudentIds.has(student.id)" @click="toggleStudentDetails(student.id)">{{ studentDetailsLabel(student) }}</button>
             </div>
             <div v-if="expandedStudentIds.has(student.id)" class="attendance-row-details">
-              <input v-if="records[student.id].status !== '出勤'" :aria-label="`${student.姓名}异常原因`" class="form-input attendance-note" v-model="records[student.id].reason" :placeholder="records[student.id].status === '请假' ? '请假原因' : '异常原因（可选）'">
-              <input v-if="records[student.id].status === '迟到'" :aria-label="`${student.姓名}到校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].arrive">
-              <input v-if="records[student.id].status === '早退'" :aria-label="`${student.姓名}离校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].leave">
-              <input :aria-label="`${student.姓名}考勤备注`" class="form-input attendance-note" v-model="records[student.id].note" placeholder="备注（可选）">
-              <EvidenceArea v-if="records[student.id].status === '请假' && expandedRecordIds.get(student.id)" owner-type="attendance" :owner-id="expandedRecordIds.get(student.id)" :student-id="student.id" />
+              <label v-if="records[student.id].status !== '出勤'" class="attendance-field"><span>{{ records[student.id].status === '请假' ? '请假原因' : '异常原因' }}</span><input :aria-label="`${student.姓名}异常原因`" class="form-input" v-model="records[student.id].reason" :placeholder="records[student.id].status === '请假' ? '例如：发烧休息' : '可选'"></label>
+              <label v-if="records[student.id].status === '迟到'" class="attendance-field"><span>到校时间</span><input :aria-label="`${student.姓名}到校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].arrive"></label>
+              <label v-if="records[student.id].status === '早退'" class="attendance-field"><span>离校时间</span><input :aria-label="`${student.姓名}离校时间`" class="form-input attendance-time" type="time" v-model="records[student.id].leave"></label>
+              <button v-if="records[student.id].status === '请假'" type="button" class="attendance-evidence-toggle" :disabled="preparingEvidenceIds.has(student.id)" @click="toggleEvidence(student.id)"><Paperclip :size="14" /> {{ preparingEvidenceIds.has(student.id) ? '准备中…' : expandedEvidenceIds.has(student.id) ? '收起凭证' : '添加凭证' }}</button>
+              <EvidenceArea v-if="records[student.id].status === '请假' && expandedRecordIds.get(student.id) && expandedEvidenceIds.has(student.id)" owner-type="attendance" :owner-id="expandedRecordIds.get(student.id)" :student-id="student.id" />
             </div>
           </div>
         </div>
-        <div v-else-if="studentEntryMode && !studentKeyword.trim()" class="attendance-ready-state"><CheckCircle :size="22" /><strong>查找需要登记的学生</strong><span>输入姓名或学号后，只显示匹配学生。</span></div>
+        <div v-else-if="studentEntryMode && !studentKeyword.trim()" class="attendance-ready-state"><CheckCircle :size="22" /><strong>从一位学生开始</strong><span>输入姓名或学号，直接选择迟到、请假、早退或缺勤。</span></div>
         <div v-else-if="studentEntryMode" class="empty-state compact-empty">没有找到匹配的学生</div>
-        <div v-else class="attendance-ready-state"><CheckCircle :size="22" /><strong>当前没有异常学生</strong><span>全班暂按出勤处理，需要登记时点击“登记异常”。</span><button class="btn btn-outline" @click="startExceptionEntry">登记异常学生</button></div>
+        <div v-else-if="studentView === 'anomaly' && !anomalyStudents.length" class="attendance-ready-state"><CheckCircle :size="22" /><strong>当前没有异常记录</strong><span>切换到“全班复核”查看全部学生。</span><button class="btn btn-outline" @click="showStudentView('all')">查看全班</button></div>
       </section>
 
       <section class="card attendance-rules-card">

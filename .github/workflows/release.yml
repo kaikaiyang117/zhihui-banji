@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+env:
+  COS_BUCKET: zhihui-banji-update-1304673766
+  COS_REGION: ap-chengdu
+  COS_BASE_URL: https://zhihui-banji-update-1304673766.cos.ap-chengdu.myqcloud.com
+
 jobs:
   verify:
     name: Verify source
@@ -225,7 +230,57 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.version || github.ref_name }}
           REPOSITORY: ${{ github.repository }}
+          UPDATE_BASE_URL: ${{ env.COS_BASE_URL }}/releases/${{ inputs.version || github.ref_name }}
         run: node "$GITHUB_WORKSPACE/packaging/create-update-manifest.mjs"
+
+      - name: Set up Python for COSCMD
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Upload release files to Tencent COS
+        env:
+          TENCENT_COS_SECRET_ID: ${{ secrets.TENCENT_COS_SECRET_ID }}
+          TENCENT_COS_SECRET_KEY: ${{ secrets.TENCENT_COS_SECRET_KEY }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet coscmd
+          coscmd config -a "$TENCENT_COS_SECRET_ID" -s "$TENCENT_COS_SECRET_KEY" -b "$COS_BUCKET" -r "$COS_REGION"
+          coscmd upload -r release-assets "releases/$RELEASE_TAG/"
+
+      - name: Verify COS release files before publishing latest
+        env:
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          for file in release-assets/*; do
+            name="$(basename "$file")"
+            url="$COS_BASE_URL/releases/$RELEASE_TAG/$name"
+            expected="$(stat -c '%s' "$file")"
+            actual="$(curl -fsSI "$url" | awk 'tolower($1) == "content-length:" { print $2; exit }' | tr -d '\r')"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "COS Content-Length 校验失败：$name，期望 $expected，实际 ${actual:-缺失}"
+              exit 1
+            fi
+            range_headers="$(mktemp)"
+            curl -fsS -D "$range_headers" -o /dev/null -H 'Range: bytes=0-1023' "$url"
+            status="$(awk '$1 ~ /^HTTP/ { code=$2 } END { print code }' "$range_headers")"
+            content_range="$(awk 'tolower($1) == "content-range:" { print $3 }' "$range_headers" | tr -d '\r' | tail -n 1)"
+            rm -f "$range_headers"
+            [[ "$status" == "206" ]] || { echo "COS Range 校验失败：$name，HTTP $status"; exit 1; }
+            [[ "$content_range" == bytes\ 0-1023/* ]] || { echo "COS Content-Range 校验失败：$name，$content_range"; exit 1; }
+          done
+
+      - name: Publish latest update manifest to Tencent COS
+        env:
+          TENCENT_COS_SECRET_ID: ${{ secrets.TENCENT_COS_SECRET_ID }}
+          TENCENT_COS_SECRET_KEY: ${{ secrets.TENCENT_COS_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          coscmd config -a "$TENCENT_COS_SECRET_ID" -s "$TENCENT_COS_SECRET_KEY" -b "$COS_BUCKET" -r "$COS_REGION"
+          coscmd upload release-assets/update-manifest.json latest/
+          curl -fsSI "$COS_BASE_URL/latest/update-manifest.json" >/dev/null
 
       - name: Prepare release notes
         env:

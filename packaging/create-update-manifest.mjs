@@ -17,6 +17,24 @@ for (const line of fs.readFileSync(path.join(root, 'SHA256SUMS.txt'), 'utf8').sp
   checksums.set(path.basename(parts.join(' ').replace(/^\*/, '')), digest);
 }
 
+const githubBase = repository ? `https://github.com/${repository}/releases/download/${releaseTag}` : '';
+const configuredBases = [
+  updateBaseUrl,
+  ...(process.env.UPDATE_MIRROR_BASE_URLS || '').split(/[;,\n]/),
+  githubBase,
+].map((value) => String(value || '').trim().replace(/\/+$/, '')).filter(Boolean);
+
+function assetUrls(filename) {
+  const urls = [];
+  for (const base of configuredBases) {
+    const url = `${base}/${encodeURIComponent(filename)}`;
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error(`只允许 HTTP/HTTPS URL：${url}`);
+    if (!urls.includes(url)) urls.push(url);
+  }
+  return urls;
+}
+
 const assets = fs.readdirSync(root, { withFileTypes: true })
   .filter((entry) => entry.isFile() && !['SHA256SUMS.txt', 'update-manifest.json'].includes(entry.name))
   .sort((a, b) => a.name.localeCompare(b.name))
@@ -26,11 +44,11 @@ const assets = fs.readdirSync(root, { withFileTypes: true })
     if (!/^[a-f0-9]{64}$/i.test(checksum)) {
       throw new Error(`缺少有效 SHA-256：${entry.name}`);
     }
+    const urls = assetUrls(entry.name);
     return {
       name: entry.name,
-      browser_download_url: updateBaseUrl
-        ? `${updateBaseUrl}/${encodeURIComponent(entry.name)}`
-        : `https://github.com/${repository}/releases/download/${releaseTag}/${encodeURIComponent(entry.name)}`,
+      browser_download_url: urls[0],
+      urls,
       size: fs.statSync(file).size,
       sha256: checksum,
     };

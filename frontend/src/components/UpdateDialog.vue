@@ -19,6 +19,28 @@ const isDesktop = typeof window !== 'undefined' && Boolean(window.workbenchDeskt
 const installing = ref(false)
 const installMessage = ref('')
 
+function sourceLabel(source) {
+  const value = String(source || '')
+  if (!value) return ''
+  if (value.toLowerCase() === 'cos' || value.includes('cos.ap-chengdu.myqcloud.com') || value.includes('腾讯云 COS')) return '腾讯云 COS（成都）'
+  if (value.toLowerCase().includes('github')) return 'GitHub Release'
+  if (value.includes('mirror')) return '镜像源'
+  return value
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0)
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let size = bytes / 1024
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unit]}`
+}
+
 function clearPoll() {
   if (pollTimer) window.clearTimeout(pollTimer)
   pollTimer = null
@@ -31,6 +53,14 @@ async function checkUpdate() {
   try {
     result.value = await get('/api/system/update/check')
     if (result.value.error) errorMessage.value = result.value.error
+    try {
+      const persisted = await get('/api/system/update/status')
+      if (['paused', 'downloading', 'verifying', 'ready_to_install', 'error'].includes(persisted.status)) {
+        updateStatus.value = persisted
+      }
+    } catch {
+      // 更新检查结果仍然可以正常展示。
+    }
   } catch (error) {
     errorMessage.value = error.message
   } finally {
@@ -143,11 +173,21 @@ onUnmounted(clearPoll)
           <span>当前版本 {{ result.current_version }}</span>
           <span>最新版本 {{ result.latest_version || '暂不可用' }}</span>
         </div>
-        <div v-if="result.source" class="update-source-row">更新源：GitHub Release</div>
+        <div v-if="result.source" class="update-source-row">可用来源：{{ sourceLabel(result.source) }}</div>
         <div v-if="updateStatus" class="update-progress">
           <LoaderCircle v-if="['starting', 'checking', 'backing_up', 'downloading', 'verifying'].includes(updateStatus.status)" class="spin" :size="18" />
           <CheckCircle v-else-if="['ready_to_install', 'up_to_date'].includes(updateStatus.status)" :size="18" />
-          <span>{{ updateStatus.message || updateStatus.error }}</span>
+          <div class="update-progress-copy">
+            <strong>{{ updateStatus.status === 'error' ? updateStatus.error || updateStatus.message : updateStatus.message }}</strong>
+            <small v-if="updateStatus.status === 'error' && updateStatus.message && updateStatus.error">{{ updateStatus.message }}</small>
+          </div>
+          <div v-if="updateStatus.total_bytes" class="update-progress-meta">
+            <span>{{ formatBytes(updateStatus.downloaded_bytes) }} / {{ formatBytes(updateStatus.total_bytes) }}</span>
+            <span>{{ Number(updateStatus.progress || 0).toFixed(1) }}%</span>
+            <span v-if="updateStatus.speed_bytes_per_second">{{ formatBytes(updateStatus.speed_bytes_per_second) }}/s</span>
+            <span v-if="updateStatus.source">当前源：{{ sourceLabel(updateStatus.source) }}</span>
+            <span v-if="updateStatus.retry_count">已自动重试 {{ updateStatus.retry_count }} 次</span>
+          </div>
         </div>
         <div v-else-if="result.update_available" class="update-available">
           <div class="update-available-title">发现新版本 {{ result.latest_version }}</div>
@@ -169,11 +209,8 @@ onUnmounted(clearPoll)
             </button>
             <span v-else class="update-warning">安装包已就绪，请在运行工作台的桌面客户端中点击安装。</span>
           </template>
-          <button v-else-if="result.update_available && result.downloadable && isDesktop && !updateStatus" class="btn btn-primary" type="button" @click="installUpdate">
-            <Download :size="15" /> 下载并安装
-          </button>
-          <button v-else-if="updateStatus?.status === 'error'" class="btn btn-primary" type="button" @click="installUpdate">
-            <RefreshCw :size="15" /> 重试安装
+          <button v-else-if="result.update_available && result.downloadable && isDesktop && (!updateStatus || ['paused', 'error'].includes(updateStatus.status))" class="btn btn-primary" type="button" @click="installUpdate">
+            <Download :size="15" /> {{ ['paused', 'error'].includes(updateStatus?.status) ? '继续下载' : '下载并安装' }}
           </button>
           <button v-else class="btn btn-outline" type="button" @click="checkUpdate">
             <RefreshCw :size="15" /> 重新检查
@@ -201,7 +238,11 @@ onUnmounted(clearPoll)
 .update-available { margin-top: 18px; padding: 14px; border-radius: 14px; background: var(--primary-bg); }
 .update-available-title { color: var(--primary); font-weight: 650; }
 .update-available-copy { margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
-.update-progress { display: flex; align-items: center; gap: 9px; min-height: 100px; color: var(--primary); font-size: 13px; }
+.update-progress { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; min-height: 100px; padding-top: 26px; color: var(--primary); font-size: 13px; }
+.update-progress-copy { display: grid; gap: 5px; min-width: 0; }
+.update-progress-copy strong { color: inherit; font-weight: 650; }
+.update-progress-copy small { color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.update-progress-meta { display: flex; grid-column: 2; flex-wrap: wrap; gap: 5px 12px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
 .update-notes { max-height: 130px; margin-top: 14px; padding: 11px 12px; overflow: auto; border-radius: 10px; background: var(--bg); color: var(--text-secondary); font-size: 12px; line-height: 1.55; white-space: pre-line; }
 .update-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 .update-warning { margin-top: 12px; color: var(--warning); font-size: 11px; line-height: 1.5; }

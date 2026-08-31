@@ -272,6 +272,19 @@ export function updateEntry(id: number, options: {
   return conn.prepare('SELECT * FROM timetable_entries WHERE id=?').get(id) as Record<string, unknown>;
 }
 
+export function deleteEntry(id: number): void {
+  const conn = getDb().connInstance;
+  const [classId, termId] = scope({ write: true, conn });
+  const current = conn.prepare('SELECT * FROM timetable_entries WHERE id=? AND class_id=? AND term_id=?').get(id, classId, termId) as Record<string, unknown> | undefined;
+  if (!current) throw new TimetableError('课程安排不存在');
+  conn.prepare('DELETE FROM timetable_entries WHERE id=? AND class_id=? AND term_id=?').run(id, classId, termId);
+  audit.record('timetable_entry', id, 'delete', {
+    summary: '删除课程安排',
+    params: { weekday: current.weekday, period_no: current.period_no, subject: current.subject },
+    classId, termId, conn,
+  });
+}
+
 export function saveChange(options: {
   changeDate: string; periodNo: number; action?: string; subject?: string; teacherName?: string; room?: string;
   sessionType?: string; note?: string; status?: string;

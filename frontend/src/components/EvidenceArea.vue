@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { ImagePlus, Trash2, X, ZoomIn, Paperclip, Upload, Download, RotateCcw } from 'lucide-vue-next'
-import { upload, get, del, post, scopedUrl } from '../api'
+import { uploadEvidence, get, del, post, scopedUrl } from '../api'
 import { useConfirmDialog } from '../composables/confirmDialog'
 
 const props = defineProps({
@@ -23,7 +23,6 @@ const previewFiles = ref([])
 const previewKinds = ref([])
 const lightboxItem = ref(null)
 const deleteTarget = ref(null)
-const deleteReason = ref('')
 const deleting = ref(false)
 const restoring = ref({})
 const dragActive = ref(false)
@@ -57,7 +56,7 @@ async function doUpload() {
       fd.append('owner_id', String(props.ownerId))
       if (props.studentId) fd.append('student_id', String(props.studentId))
       fd.append('evidence_kind', previewKinds.value[i] || '请假凭证')
-      await upload('/api/evidence/upload', fd)
+      await uploadEvidence(fd)
     }
     previewFiles.value = []
     previewKinds.value = []
@@ -121,19 +120,16 @@ function closeLightbox() {
 
 function startDelete(item) {
   deleteTarget.value = item
-  deleteReason.value = ''
 }
 
 function cancelDelete() {
   deleteTarget.value = null
-  deleteReason.value = ''
 }
 
 async function confirmDelete() {
-  if (!deleteReason.value.trim()) return
   deleting.value = true
   try {
-    await del(`/api/evidence/${deleteTarget.value.id}`, { delete_reason: deleteReason.value.trim() })
+    await del(`/api/evidence/${deleteTarget.value.id}`, {})
     await load()
     emit('counts-updated')
   } catch (e) {
@@ -141,7 +137,6 @@ async function confirmDelete() {
   } finally {
     deleting.value = false
     deleteTarget.value = null
-    deleteReason.value = ''
   }
 }
 
@@ -238,13 +233,7 @@ onBeforeUnmount(() => {
             <img v-if="item.mime_type?.startsWith('image/')" :src="thumbnailUrl(item)" class="evidence-thumb" loading="lazy" />
             <div v-else class="evidence-thumb evidence-thumb-file"><Paperclip :size="18" /></div>
             <ZoomIn v-if="!item.deleted_at && item.mime_type?.startsWith('image/')" :size="14" class="evidence-zoom-icon" />
-          </div>
-          <div class="evidence-meta">
-            <span class="evidence-kind">{{ kindLabel(item.evidence_kind) }}</span>
-            <span v-if="channelLabel(item.source_channel)" class="evidence-channel">{{ channelLabel(item.source_channel) }}</span>
-            <span class="evidence-time">{{ formatTime(item.created_at) }}</span>
-            <span v-if="item.note" class="evidence-note">{{ item.note }}</span>
-            <span v-if="item.deleted_at" class="evidence-deleted-label">已删除</span>
+            <span v-if="item.deleted_at" class="evidence-deleted-badge">已删除</span>
           </div>
           <button v-if="!item.deleted_at" class="evidence-delete-btn" @click="startDelete(item)" aria-label="删除凭证"><Trash2 :size="13" /></button>
           <button v-if="item.deleted_at" class="evidence-restore-btn" :disabled="restoring[item.id]" @click="restoreItem(item)" aria-label="恢复凭证"><RotateCcw :size="13" /></button>
@@ -255,11 +244,10 @@ onBeforeUnmount(() => {
     <div v-if="deleteTarget" class="evidence-delete-overlay" @click.self="cancelDelete">
       <div class="evidence-delete-dialog">
         <h4>删除凭证</h4>
-        <p>删除后凭证将标记为已删除，请填写删除原因：</p>
-        <textarea class="form-input evidence-delete-reason" v-model="deleteReason" placeholder="填写删除原因" rows="2"></textarea>
+        <p>删除后凭证将标记为已删除，确定要删除吗？</p>
         <div class="evidence-delete-actions">
           <button class="btn btn-outline" @click="cancelDelete">取消</button>
-          <button class="btn btn-primary" :disabled="!deleteReason.trim() || deleting" @click="confirmDelete">{{ deleting ? '删除中…' : '确认删除' }}</button>
+          <button class="btn btn-primary" :disabled="deleting" @click="confirmDelete">{{ deleting ? '删除中…' : '确认删除' }}</button>
         </div>
       </div>
     </div>
@@ -293,19 +281,13 @@ onBeforeUnmount(() => {
 .evidence-preview-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: var(--ds-radius-pill); background: var(--ds-color-danger); color: #fff; cursor: pointer; }
 .evidence-confirm-upload { margin-left: auto; }
 .evidence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: var(--ds-space-3); }
-.evidence-item { position: relative; display: grid; gap: var(--ds-space-1); padding: var(--ds-space-2); border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-control); background: var(--ds-color-surface); }
+.evidence-item { position: relative; display: block; padding: 0; border: 0; border-radius: var(--ds-radius-control); background: transparent; }
 .evidence-item-deleted { opacity: .5; }
-.evidence-item-deleted .evidence-kind { text-decoration: line-through; }
-.evidence-thumb-wrap { position: relative; cursor: pointer; border-radius: var(--ds-radius-sm); overflow: hidden; }
+.evidence-thumb-wrap { position: relative; cursor: pointer; border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-control); overflow: hidden; background: var(--ds-color-surface); }
 .evidence-thumb { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--ds-color-surface-subtle); }
 .evidence-thumb-file { display: grid; place-items: center; aspect-ratio: 1; background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-secondary); }
 .evidence-zoom-icon { position: absolute; bottom: 4px; right: 4px; color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
-.evidence-meta { display: grid; gap: 2px; min-width: 0; }
-.evidence-kind { color: var(--ds-color-ink); font: var(--ds-type-meta); font-weight: 600; }
-.evidence-channel { display: inline-block; padding: 0 4px; border-radius: var(--ds-radius-sm); background: var(--ds-color-surface-subtle); color: var(--ds-color-ink-secondary); font-size: 10px; }
-.evidence-time { color: var(--ds-color-ink-muted); font-size: 11px; }
-.evidence-note { overflow: hidden; color: var(--ds-color-ink-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.evidence-deleted-label { color: var(--ds-color-danger); font-size: 11px; font-weight: 600; }
+.evidence-deleted-badge { position: absolute; right: 6px; bottom: 6px; padding: 2px 6px; border-radius: var(--ds-radius-pill); background: rgba(255,255,255,.9); color: var(--ds-color-danger); font: var(--ds-type-meta); font-weight: 600; }
 .evidence-delete-btn, .evidence-restore-btn { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--ds-radius-sm); background: var(--ds-color-surface); color: var(--ds-color-ink-secondary); cursor: pointer; opacity: 0; transition: opacity var(--ds-duration-fast) var(--ds-ease-out); }
 .evidence-item:hover .evidence-delete-btn, .evidence-item:hover .evidence-restore-btn { opacity: 1; }
 .evidence-delete-btn:hover { background: var(--ds-color-danger-soft); color: var(--ds-color-danger); }
@@ -315,7 +297,6 @@ onBeforeUnmount(() => {
 .evidence-delete-dialog { width: min(360px, 90vw); padding: var(--ds-space-5); border-radius: var(--ds-radius-card); background: var(--ds-color-surface); box-shadow: var(--ds-shadow-overlay); }
 .evidence-delete-dialog h4 { margin: 0 0 var(--ds-space-2); color: var(--ds-color-ink); font: var(--ds-type-section); }
 .evidence-delete-dialog p { margin: 0 0 var(--ds-space-3); color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); }
-.evidence-delete-reason { width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; }
 .evidence-delete-actions { display: flex; justify-content: flex-end; gap: var(--ds-space-2); margin-top: var(--ds-space-3); }
 .evidence-lightbox { position: fixed; inset: 0; z-index: 101; display: grid; place-items: center; background: rgba(0,0,0,.85); cursor: pointer; }
 .evidence-lightbox-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: var(--ds-radius-control); background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }

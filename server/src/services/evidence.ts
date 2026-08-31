@@ -236,18 +236,16 @@ export function deleteEvidence(evidenceId: number, options: {
     "SELECT * FROM evidence_attachments WHERE id=? AND class_id=? AND term_id=? AND deleted_at=''",
   ).get(evidenceId, classId, termId) as Record<string, unknown> | undefined;
   if (!row) throw new EvidenceError('凭证不存在或已删除');
-  if (!String(options.deleteReason ?? '').trim()) {
-    throw new EvidenceError('删除凭证时必须填写原因');
-  }
+  const deleteReason = String(options.deleteReason ?? '').trim();
   conn.transaction(() => {
     conn.prepare(
       `UPDATE evidence_attachments SET deleted_at=datetime('now','localtime'),
          deleted_by=?, delete_reason=?
        WHERE id=? AND class_id=? AND term_id=?`,
-    ).run(String(options.deletedBy ?? ''), String(options.deleteReason).trim(), evidenceId, classId, termId);
+    ).run(String(options.deletedBy ?? ''), deleteReason, evidenceId, classId, termId);
     audit.record('evidence', evidenceId, 'delete', {
       summary: `删除凭证：${row.original_name}`,
-      params: { owner_type: row.owner_type, owner_id: row.owner_id, delete_reason: options.deleteReason },
+      params: { owner_type: row.owner_type, owner_id: row.owner_id, delete_reason: deleteReason },
       classId, termId, conn,
     });
   })();

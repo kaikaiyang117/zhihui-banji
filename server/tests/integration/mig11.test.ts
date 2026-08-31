@@ -10,7 +10,7 @@ import { WorkbenchDb } from '../../src/db/connection.js';
 import { schemaVersion } from '../../src/db/schema.js';
 import { setDatabase } from '../../src/services/context.js';
 import {
-  cancelChange, commitImport, createEntry, createPeriod, daySchedule, listTimetable,
+  cancelChange, commitImport, createEntry, createPeriod, daySchedule, deleteEntry, listTimetable,
   previewImport, saveChange,
 } from '../../src/services/timetable.js';
 import { getTeacherTimetable } from '../../src/services/teacherClasses.js';
@@ -71,6 +71,15 @@ describe('课程表服务', () => {
     expect(daySchedule('2026-04-15').entries[0].entry).toMatchObject({ subject: '数学' });
   });
 
+  it('可以删除单条固定课程安排', () => {
+    createPeriod({ periodNo: 1 });
+    const entry = createEntry({ weekday: 5, periodNo: 1, subject: '政治', weekPattern: '单周' });
+    expect(listTimetable().entries).toHaveLength(1);
+    deleteEntry(Number(entry.id));
+    expect(listTimetable().entries).toHaveLength(0);
+    expect(() => deleteEntry(Number(entry.id))).toThrow('课程安排不存在');
+  });
+
   it('导入预览校验并按 request_id 幂等提交', () => {
     const rows = [
       ['星期', '节次', '节次名称', '开始时间', '结束时间', '科目', '任课教师', '教室', '单双周'],
@@ -118,6 +127,8 @@ describe('课程表服务', () => {
   });
 
   it('接口支持课程表读取与模板下载', async () => {
+    createPeriod({ periodNo: 1 });
+    const entry = createEntry({ weekday: 5, periodNo: 1, subject: '政治', weekPattern: '单周' });
     const app = buildApp({ config: testConfig() });
     await app.ready();
     const response = await app.inject({ method: 'GET', url: '/api/timetable/day?date=2026-04-15' });
@@ -125,6 +136,9 @@ describe('课程表服务', () => {
     const template = await app.inject({ method: 'GET', url: '/api/timetable/template' });
     expect(template.statusCode).toBe(200);
     expect(template.headers['content-type']).toContain('spreadsheetml');
+    const deleted = await app.inject({ method: 'DELETE', url: `/api/timetable/entries/${entry.id}` });
+    expect(deleted.statusCode).toBe(200);
+    expect(listTimetable().entries).toHaveLength(0);
     await app.close();
   });
 

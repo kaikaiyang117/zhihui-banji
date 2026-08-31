@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   AlertTriangle, ArrowRight, CalendarDays, CheckCircle, ClipboardList, Clock3,
-  FileText, Phone, Plus, Tag, TrendingUp, UserRound, Users
+  ChevronLeft, ChevronRight, FileText, Phone, Plus, Tag, TrendingUp, UserRound, Users
 } from 'lucide-vue-next'
 import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -15,6 +15,8 @@ const stats = ref(null)
 const errorMsg = ref('')
 const modalMode = ref(null)
 const selectedDate = ref('')
+const calendarLoading = ref(false)
+const calendarError = ref('')
 const todaySchedule = ref(null)
 const upcomingExams = ref([])
 const schoolCalendarEntries = ref([])
@@ -31,6 +33,10 @@ const actionSections = computed(() => {
   return sections.filter(section => section.key !== 'overdue' || section.items.length)
 })
 const calendarData = computed(() => stats.value?.calendar || { days: [], upcoming: [], summary: {} })
+const currentCalendarMonth = computed(() => String(stats.value?.date || '').slice(0, 7))
+const calendarTitle = computed(() => calendarData.value.month === currentCalendarMonth.value
+  ? '本月安排'
+  : `${calendarData.value.month_title || calendarData.value.month}安排`)
 const selectedDay = computed(() => calendarData.value.days.find(day => day.date === selectedDate.value) || calendarData.value.days.find(day => day.is_today) || calendarData.value.days[0] || null)
 const upcomingPlans = computed(() => calendarData.value.upcoming.filter(item => item.item_count))
 const countdownItems = computed(() => {
@@ -71,6 +77,14 @@ function countdownLabel(days) {
   if (days === 1) return '明天'
   return `${days}天后`
 }
+function courseMeta(entry) {
+  return [entry.teacher_name, entry.room, entry.is_change ? '临时调整' : ''].filter(Boolean).join(' · ')
+}
+function shiftMonth(monthText, offset) {
+  const [year, month] = String(monthText || currentCalendarMonth.value).split('-').map(Number)
+  const date = new Date(Date.UTC(year, (month || 1) - 1 + offset, 1))
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
 function localDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -79,7 +93,9 @@ const calendarOptions = computed(() => ({
   locales: [zhCnLocale],
   locale: 'zh-cn',
   initialView: 'dayGridMonth',
-  initialDate: stats.value?.date,
+  initialDate: calendarData.value.month === currentCalendarMonth.value
+    ? stats.value?.date
+    : `${calendarData.value.month}-01`,
   firstDay: 1,
   fixedWeekCount: false,
   height: 520,
@@ -113,6 +129,7 @@ async function load() {
   try {
     stats.value = await get('/api/stats/dashboard')
     selectedDate.value = stats.value.date
+    calendarError.value = ''
     countdownIndex.value = 0
     try {
       todaySchedule.value = await get(`/api/timetable/day?date=${encodeURIComponent(stats.value.date)}`)
@@ -133,6 +150,31 @@ async function load() {
   } catch (error) {
     errorMsg.value = error.message
   }
+}
+
+async function loadCalendarMonth(month, selectToday = false) {
+  if (calendarLoading.value || !month) return
+  calendarLoading.value = true
+  calendarError.value = ''
+  try {
+    const calendar = await get(`/api/stats/calendar?month=${encodeURIComponent(month)}`)
+    stats.value = { ...stats.value, calendar }
+    selectedDate.value = selectToday && month === currentCalendarMonth.value
+      ? stats.value.date
+      : calendar.days.find(day => day.is_today)?.date || calendar.days[0]?.date || ''
+  } catch (error) {
+    calendarError.value = error.message
+  } finally {
+    calendarLoading.value = false
+  }
+}
+
+function changeCalendarMonth(offset) {
+  return loadCalendarMonth(shiftMonth(calendarData.value.month, offset))
+}
+
+function returnToCurrentMonth() {
+  return loadCalendarMonth(currentCalendarMonth.value, true)
 }
 
 function taskRoute(task, action = 'edit', bucket = 'open') {
@@ -209,7 +251,7 @@ onUnmounted(() => {
       <div v-if="todaySchedule.entries.some(item => item.entry)" class="today-schedule-list">
         <router-link v-for="item in todaySchedule.entries.filter(slot => slot.entry).slice(0, 8)" :key="item.period_no" :to="`/timetable?date=${todaySchedule.date}`" class="today-schedule-row">
           <span class="today-schedule-time"><strong>{{ item.label }}</strong><small>{{ item.start_time || '--:--' }}–{{ item.end_time || '--:--' }}</small></span>
-          <span class="today-schedule-copy"><strong>{{ item.entry.subject }}</strong><small>{{ item.entry.teacher_name || '未填写教师' }}<template v-if="item.entry.room"> · {{ item.entry.room }}</template><template v-if="item.entry.is_change"> · 临时调整</template></small></span>
+          <span class="today-schedule-copy"><strong>{{ item.entry.subject }}</strong><small v-if="courseMeta(item.entry)">{{ courseMeta(item.entry) }}</small></span>
           <ArrowRight :size="13" />
         </router-link>
       </div>
@@ -243,12 +285,21 @@ onUnmounted(() => {
 
     <section class="card ds-card dashboard-calendar-card" aria-labelledby="dashboard-calendar-title">
       <div class="section-heading ds-section-heading dashboard-calendar-heading">
-        <div><h2 id="dashboard-calendar-title"><CalendarDays :size="17" /> 本月安排</h2><p>点击日期查看当天校历和待办，未来 7 天安排也会集中列在下方</p></div>
-        <router-link to="/school-calendar">管理完整校历 <ArrowRight :size="13" /></router-link>
+        <div><h2 id="dashboard-calendar-title"><CalendarDays :size="17" /> {{ calendarTitle }}</h2><p>点击日期查看当天校历和待办<span v-if="calendarData.month === currentCalendarMonth">，未来 7 天安排也会集中列在下方</span></p></div>
+        <div class="dashboard-calendar-actions">
+          <div class="dashboard-calendar-month-control" role="group" aria-label="切换月份">
+            <button class="dashboard-calendar-nav" type="button" aria-label="上一个月" :disabled="calendarLoading" @click="changeCalendarMonth(-1)"><ChevronLeft :size="16" /></button>
+            <button v-if="calendarData.month !== currentCalendarMonth" class="dashboard-calendar-today" type="button" :disabled="calendarLoading" @click="returnToCurrentMonth">回到本月</button>
+            <span v-else class="dashboard-calendar-current">本月</span>
+            <button class="dashboard-calendar-nav" type="button" aria-label="下一个月" :disabled="calendarLoading" @click="changeCalendarMonth(1)"><ChevronRight :size="16" /></button>
+          </div>
+          <router-link to="/school-calendar">管理完整校历 <ArrowRight :size="13" /></router-link>
+        </div>
       </div>
+      <div v-if="calendarError" class="dashboard-calendar-error">{{ calendarError }} <button type="button" @click="loadCalendarMonth(calendarData.month)">重试</button></div>
       <div class="dashboard-calendar-layout">
         <div class="dashboard-calendar-month">
-          <FullCalendar v-if="stats" class="dashboard-calendar-component" :options="calendarOptions" />
+          <FullCalendar v-if="stats" :key="calendarData.month" class="dashboard-calendar-component" :options="calendarOptions" />
         </div>
         <aside v-if="selectedDay" class="dashboard-day-detail">
           <div class="dashboard-day-title"><strong>{{ selectedDay.date }}</strong><span>{{ selectedDay.weekday_label }}</span></div>
@@ -257,7 +308,7 @@ onUnmounted(() => {
           <router-link v-for="task in selectedDay.tasks" :key="task.id" :to="taskRoute(task, 'edit', 'open')" class="dashboard-day-task"><span>{{ task.title }}</span><small>{{ task.student_name || task.source_label || '班级事务' }}</small><ArrowRight :size="13" /></router-link>
         </aside>
       </div>
-      <div class="dashboard-upcoming">
+      <div v-if="calendarData.month === currentCalendarMonth" class="dashboard-upcoming">
         <div class="dashboard-upcoming-title"><strong>未来 7 天</strong><span>{{ calendarData.summary.upcoming_items || 0 }} 项安排</span></div>
         <div v-if="!upcomingPlans.length" class="empty-state compact-empty">未来 7 天没有已安排的校历事项或待办</div>
         <router-link v-for="item in upcomingPlans" :key="item.date" :to="item.tasks[0] ? taskRoute(item.tasks[0], 'edit', 'open') : '/school-calendar'" class="dashboard-upcoming-row">
@@ -398,15 +449,29 @@ onUnmounted(() => {
 .dashboard-calendar-card { background: var(--ds-color-surface); }
 .dashboard-calendar-heading { align-items: center; margin-bottom: var(--ds-space-4); }
 .dashboard-calendar-heading h2 { display: flex; align-items: center; gap: 7px; }
-.dashboard-calendar-heading > a { display: inline-flex; align-items: center; gap: var(--ds-space-1); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.dashboard-calendar-actions { display: flex; align-items: center; gap: var(--ds-space-2); flex-wrap: wrap; justify-content: flex-end; }
+.dashboard-calendar-actions > a { display: inline-flex; align-items: center; gap: var(--ds-space-1); margin-left: var(--ds-space-2); color: var(--ds-color-primary); font: var(--ds-type-label); text-decoration: none; }
+.dashboard-calendar-month-control { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid color-mix(in srgb, var(--ds-color-border) 72%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--ds-color-surface-subtle) 78%, transparent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%), 0 1px 2px rgb(27 37 55 / 5%); }
+.dashboard-calendar-nav, .dashboard-calendar-today, .dashboard-calendar-current { display: inline-flex; min-height: 30px; box-sizing: border-box; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: var(--ds-color-ink-secondary); font: var(--ds-type-label); }
+.dashboard-calendar-nav, .dashboard-calendar-today { cursor: pointer; transition: background-color 140ms var(--ds-ease-out), color 140ms var(--ds-ease-out), transform 100ms var(--ds-ease-out); }
+.dashboard-calendar-nav { width: 30px; padding: 0; }
+.dashboard-calendar-today { padding: 4px 10px; color: var(--ds-color-primary-hover); }
+.dashboard-calendar-current { min-width: 38px; padding: 4px 8px; color: var(--ds-color-ink-secondary); }
+.dashboard-calendar-nav:hover, .dashboard-calendar-today:hover { background: var(--ds-color-surface); color: var(--ds-color-primary-hover); box-shadow: 0 1px 2px rgb(27 37 55 / 7%); }
+.dashboard-calendar-nav:active, .dashboard-calendar-today:active { transform: scale(.96); }
+.dashboard-calendar-nav:focus-visible, .dashboard-calendar-today:focus-visible { outline: 2px solid var(--ds-color-primary); outline-offset: 2px; }
+.dashboard-calendar-nav:disabled, .dashboard-calendar-today:disabled { cursor: wait; opacity: .55; }
+.dashboard-calendar-error { margin: calc(var(--ds-space-2) * -1) 0 var(--ds-space-3); color: var(--ds-color-danger); font: var(--ds-type-meta); }
+.dashboard-calendar-error button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .dashboard-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .55fr); grid-template-rows: 520px; gap: var(--ds-space-4); align-items: stretch; }
 .dashboard-calendar-month { min-width: 0; height: 100%; }
 .dashboard-calendar-component :deep(.fc) { --fc-border-color: var(--ds-color-border); --fc-today-bg-color: var(--ds-color-primary-soft); color: var(--ds-color-ink); font: var(--ds-type-meta); }
 .dashboard-calendar-component :deep(.fc-scrollgrid) { border: 1px solid var(--ds-color-border); border-radius: var(--ds-radius-control); overflow: hidden; }
 .dashboard-calendar-component :deep(.fc-col-header-cell) { background: var(--ds-color-surface-subtle); }
 .dashboard-calendar-component :deep(.fc-col-header-cell-cushion) { padding: 8px 4px; color: var(--ds-color-ink-secondary); font: var(--ds-type-label); text-decoration: none; }
-.dashboard-calendar-component :deep(.fc-daygrid-day-frame) { min-height: 76px; padding: 3px; }
-.dashboard-calendar-component :deep(.fc-daygrid-day-number) { padding: 4px 5px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-frame) { display: flex; min-height: 76px; padding: 3px; flex-direction: column; box-sizing: border-box; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-top) { display: flex; width: 100%; flex: 1; align-items: center; justify-content: center; }
+.dashboard-calendar-component :deep(.fc-daygrid-day-number) { float: none; padding: 4px 5px; color: var(--ds-color-ink-secondary); font: var(--ds-type-meta); text-decoration: none; }
 .dashboard-calendar-component :deep(.fc-day-other .fc-daygrid-day-number) { color: var(--ds-color-ink-muted); }
 .dashboard-calendar-component :deep(.fc-day-today .fc-daygrid-day-number) { color: var(--ds-color-primary-hover); font-weight: 700; }
 .dashboard-calendar-component :deep(.fc-daygrid-event) { margin: 2px 3px; padding: 2px 4px; border: 0; border-radius: var(--ds-radius-sm); font: var(--ds-type-meta); line-height: 1.3; cursor: pointer; }
@@ -469,6 +534,7 @@ onUnmounted(() => {
   .action-columns, .action-columns-compact { grid-template-columns: 1fr; }
   .dashboard-calendar-layout { grid-template-columns: 1fr; grid-template-rows: auto; }
   .dashboard-day-detail { height: auto; max-height: none; overflow: visible; }
+  .dashboard-calendar-actions > a { margin-left: 0; }
 }
 @media (max-width: 640px) {
   .dashboard-toolbar { width: 100%; }
@@ -487,6 +553,12 @@ onUnmounted(() => {
   .section-heading { align-items: flex-start; }
   .section-heading p { display: block; }
   .dashboard-calendar-card { padding: var(--ds-space-4); }
+  .dashboard-calendar-heading { display: grid; }
+  .dashboard-calendar-actions { justify-content: flex-start; }
   .material-row { grid-template-columns: minmax(0, 1fr) 60px 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-calendar-nav, .dashboard-calendar-today { transition: none; }
+  .dashboard-calendar-nav:active, .dashboard-calendar-today:active { transform: none; }
 }
 </style>

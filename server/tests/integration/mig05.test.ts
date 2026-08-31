@@ -372,6 +372,17 @@ describe('座位表与 HTTP 冒烟', () => {
     const grid = (seating.json() as { grid: string[][] }).grid;
     expect(grid[0][0]).toBe('讲台');
 
+    const resize = await app.inject({
+      method: 'POST', url: '/api/seating/resize',
+      payload: { rows: 2, cols: 2 },
+    });
+    expect(resize.statusCode).toBe(200);
+    const resized = await app.inject({ method: 'GET', url: '/api/seating' });
+    const resizedBody = resized.json() as { grid: string[][]; rows: number; cols: number };
+    expect(resizedBody.rows).toBe(2);
+    expect(resizedBody.cols).toBe(2);
+    expect(resizedBody.grid[0][0]).toBe('讲台');
+
     const exportRes = await app.inject({ method: 'GET', url: '/api/students/export' });
     expect(exportRes.statusCode).toBe(200);
     expect(exportRes.headers['content-type']).toContain('spreadsheetml');

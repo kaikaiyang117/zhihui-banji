@@ -97,6 +97,9 @@ export function registerMig11Routes(app: FastifyInstance): void {
     }) }));
   });
 
+  app.delete('/api/timetable/entries/:entryId', async (request, reply) =>
+    wrap(reply, () => { timetable.deleteEntry(Number((request.params as { entryId: string }).entryId)); return { ok: true }; }));
+
   app.post('/api/timetable/changes', async (request, reply) => {
     const body = request.body as Record<string, unknown>;
     return wrap(reply, () => ({ ok: true, change: timetable.saveChange({

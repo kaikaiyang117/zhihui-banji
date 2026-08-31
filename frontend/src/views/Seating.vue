@@ -10,9 +10,20 @@ const editing = ref(false)
 const editingCell = ref(null)
 const dragSource = ref(null)
 const saving = ref(false)
+const layoutEditing = ref(false)
+const layoutRows = ref(1)
+const layoutCols = ref(1)
 const columnCount = computed(() => grid.value.reduce((max, row) => Math.max(max, row.length), 0))
 const specialValues = new Set(['讲台', '前门', '后门', '过道', '黑板'])
 const hasFrontStage = computed(() => grid.value[0]?.some(value => ['讲台', '黑板'].includes(value)))
+const podiumStyle = computed(() => {
+  const span = columnCount.value > 2 ? 2 : Math.max(columnCount.value, 1)
+  return {
+    gridColumn: '1 / -1',
+    justifySelf: 'center',
+    width: `${(span / Math.max(columnCount.value, 1)) * 100}%`,
+  }
+})
 const studentRows = computed(() => {
   const offset = hasFrontStage.value ? 1 : 0
   return grid.value.slice(offset)
@@ -39,6 +50,8 @@ async function load() {
     const [seating, roster] = await Promise.all([get('/api/seating'), get('/api/students')])
     grid.value = normalizeGrid(seating.grid || [])
     students.value = roster.students || []
+    layoutRows.value = Number(seating.rows) || grid.value.length || 1
+    layoutCols.value = Number(seating.cols) || columnCount.value || 1
   } finally {
     loading.value = false
   }
@@ -107,7 +120,41 @@ async function addSeatRow() {
   saving.value = true
   try {
     await Promise.all(Array.from({ length: width }, (_, col) => post('/api/seating/update', { row, col, value: '' })))
+    layoutRows.value = row + 1
     return row
+  } finally {
+    saving.value = false
+  }
+}
+
+function startLayoutEdit() {
+  layoutRows.value = grid.value.length || 1
+  layoutCols.value = columnCount.value || 1
+  layoutEditing.value = true
+}
+
+function cancelLayoutEdit() {
+  layoutEditing.value = false
+}
+
+async function saveLayout() {
+  const rows = Number(layoutRows.value)
+  const cols = Number(layoutCols.value)
+  if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows < 1 || rows > 50 || cols < 1 || cols > 50) {
+    window.alert('排数和列数必须是 1 至 50 的整数')
+    return
+  }
+  const occupied = grid.value.flat().filter(value => value && !specialValues.has(value)).length
+  if (rows * cols < occupied) {
+    window.alert(`新布局容量不足：当前已有 ${occupied} 个学生座位，新布局只有 ${rows * cols} 个座位`)
+    return
+  }
+  if (!window.confirm(`将座位表调整为 ${rows} 排 × ${cols} 列，并按当前座位顺序重新排列。继续吗？`)) return
+  saving.value = true
+  try {
+    await post('/api/seating/resize', { rows, cols })
+    layoutEditing.value = false
+    await load()
   } finally {
     saving.value = false
   }
@@ -182,15 +229,21 @@ onMounted(load)
         <div class="seating-card-actions">
           <button class="btn btn-outline seating-print-button" @click="printSeating"><Printer :size="14" /> 打印 / 保存 PDF</button>
           <button v-if="editing" class="btn btn-outline" @click="autoFill">按学号自动排座</button>
-          <button v-if="editing" class="btn btn-outline" @click="addSeatRow">新增一排</button>
-          <button class="btn btn-outline seat-edit-btn" @click="editing = !editing; editingCell = null; dragSource = null"><Pencil :size="14" /> {{ editing ? '完成编辑' : '编辑座位' }}</button>
+          <button v-if="editing && !layoutEditing" class="btn btn-outline" @click="startLayoutEdit">设置行列</button>
+          <button class="btn btn-outline seat-edit-btn" @click="editing = !editing; editingCell = null; dragSource = null; layoutEditing = false"><Pencil :size="14" /> {{ editing ? '完成编辑' : '编辑座位' }}</button>
         </div>
+      </div>
+      <div v-if="editing && layoutEditing" class="seating-layout-editor">
+        <label>排数<input v-model.number="layoutRows" class="form-input" type="number" min="1" max="50"></label>
+        <label>列数<input v-model.number="layoutCols" class="form-input" type="number" min="1" max="50"></label>
+        <span>调整后会按当前座位顺序重新排入网格</span>
+        <button class="btn btn-primary" @click="saveLayout">应用布局</button>
+        <button class="btn btn-outline" @click="cancelLayoutEdit">取消</button>
       </div>
       <div v-if="!loading && grid.length && unassignedStudents.length" class="seating-unassigned">
         <div class="seating-unassigned-head"><div><strong>尚未分配座位（{{ unassignedStudents.length }}人）</strong><span>当前空位 {{ emptySeats.length }} 个；安排后仍可拖动调整</span></div><span class="seating-unassigned-tip">不会改变已有学生座位</span></div>
         <div class="seating-unassigned-list"><div v-for="student in unassignedStudents" :key="student.id" class="unassigned-student"><span><strong>{{ student.姓名 }}</strong><small>{{ student.学号 }} · {{ student.性别 }}</small></span><button class="btn btn-sm btn-primary" @click="placeStudent(student)">{{ emptySeats.length ? '安排到空位' : '增加一排并安排' }}</button></div></div>
       </div>
-      <div v-else-if="!loading && grid.length" class="seating-all-assigned">全部在读学生都已有座位。</div>
       <div v-if="loading" class="loading">加载中...</div>
       <div v-else-if="!grid.length" class="empty-state">座位表还是空的</div>
       <div v-else>
@@ -200,7 +253,7 @@ onMounted(load)
             <div class="seating-legend" aria-label="性别颜色图例"><span><i class="legend-male"></i>男生</span><span><i class="legend-female"></i>女生</span><span><i class="legend-neutral"></i>未标记</span></div>
             <div class="seating-front" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
               <div class="seating-blackboard">黑板</div>
-              <div class="seating-podium" :style="{ gridColumn: columnCount > 2 ? '3 / span 2' : '1 / -1' }">讲台</div>
+              <div class="seating-podium" :style="podiumStyle">讲台</div>
             </div>
             <div class="seating-grid" :style="{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }">
               <div v-for="(seatRow, rowIndex) in studentRows" :key="seatRow.sourceRow" style="display:contents">

@@ -418,7 +418,8 @@ export function registerMig05Routes(app: FastifyInstance): void {
         specials[`${row.r},${row.c}`] = row.val;
       }
     }
-    return { grid, specials, rows: grid.length, cols: grid.length > 0 ? grid[0].length : 0 };
+    const cols = grid.reduce((max, row) => Math.max(max, row.length), 0);
+    return { grid, specials, rows: grid.length, cols };
   });
 
   app.post('/api/seating/update', async (request, reply) => {
@@ -430,6 +431,44 @@ export function registerMig05Routes(app: FastifyInstance): void {
         'INSERT OR REPLACE INTO seating(class_id, term_id, r, c, val) VALUES(?,?,?,?,?)',
       ).run(classId, termId, Number(body.row), Number(body.col), String(body.value ?? ''));
       return { ok: true };
+    } catch (error) {
+      const mapped = errorHandler(reply, error);
+      if (mapped) return mapped;
+      throw error;
+    }
+  });
+
+  app.post('/api/seating/resize', async (request, reply) => {
+    try {
+      const conn = getDb().connInstance;
+      const [classId, termId] = scopeIds({ write: true, conn });
+      const body = request.body as { rows?: unknown; cols?: unknown };
+      const rows = Number(body.rows);
+      const cols = Number(body.cols);
+      if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows < 1 || rows > 50 || cols < 1 || cols > 50) {
+        return reply.status(400).send({ detail: '排数和列数必须是 1 至 50 的整数' });
+      }
+
+      const current = conn.prepare(
+        'SELECT r, c, val FROM seating WHERE class_id=? AND term_id=? ORDER BY r, c',
+      ).all(classId, termId) as Array<{ r: number; c: number; val: string }>;
+      const values = current.map((seat) => seat.val).filter((value) => String(value).trim() !== '');
+      if (values.length > rows * cols) {
+        return reply.status(400).send({ detail: `新布局容量不足：当前有 ${values.length} 个已安排座位，但新布局只有 ${rows * cols} 个座位` });
+      }
+
+      conn.transaction(() => {
+        conn.prepare('DELETE FROM seating WHERE class_id=? AND term_id=?').run(classId, termId);
+        const insert = conn.prepare(
+          'INSERT INTO seating(class_id, term_id, r, c, val) VALUES(?,?,?,?,?)',
+        );
+        for (let r = 0; r < rows; r += 1) {
+          for (let c = 0; c < cols; c += 1) {
+            insert.run(classId, termId, r, c, values[r * cols + c] ?? '');
+          }
+        }
+      })();
+      return { ok: true, rows, cols };
     } catch (error) {
       const mapped = errorHandler(reply, error);
       if (mapped) return mapped;

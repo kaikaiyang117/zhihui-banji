@@ -155,8 +155,8 @@ server/
 - `exportService.ts` 扩展：通用工作表/考勤/成绩/积分/班费/评语/座位/健康导出（exceljs）。
 - `migrationService.ts`：迁移包导出（db+知识库 zip）与恢复（结构校验、路径穿越拒绝、
   完整性检查、备份后原子替换）。
-- `update.ts`：更新检查（GitHub API + manifest 回退、平台资产选择、SHA-256 校验）、
-  下载状态机（checking→backing_up→downloading→verifying→ready_to_install）、
+- `update.ts`：更新检查（腾讯云 COS manifest 主源、GitHub API + manifest 灾备、平台资产选择、SHA-256 校验）、
+  下载状态机（checking→backing_up→downloading→verifying→ready_to_install，支持 `.part`、Range、多源续传和持久化恢复）、
   installer-path（本机）。
 - `db/index.ts`：数据库单例 + 备份恢复（deserialize 校验 + 替换 + 重开）。
 

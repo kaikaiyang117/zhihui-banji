@@ -294,20 +294,16 @@ export function registerMig09Routes(app: FastifyInstance): void {
     try {
       return await updateService.checkForUpdate();
     } catch (error) {
-    const record = error as { message?: string };
-    let hint = '暂时无法检查更新';
-    if (String(record.message).includes('HTTP 404')) hint = '尚未找到公开的 GitHub Release，请稍后重试。';
-    else if (String(record.message).includes('HTTP 403')) hint = 'GitHub Release 暂时不可访问或触发限流，请稍后重试。';
-    else if (String(record.message).includes('HTTP 401')) hint = 'GitHub Release 访问未授权，请稍后重试。';
-    return {
-      current_version: loadAppVersion(), latest_version: '',
-      update_available: false, downloadable: false,
-      error: `暂时无法检查更新：${hint}（${record.message}）`,
-    };
+      const record = error as { message?: string };
+      return {
+        current_version: loadAppVersion(), latest_version: '',
+        update_available: false, downloadable: false,
+        error: `暂时无法检查更新：国内更新源和 GitHub 备用源暂时均不可用，请稍后重试。（${record.message ?? '未知错误'}）`,
+      };
     }
   });
 
-  app.get('/api/system/update/status', async () => updateService.updateStatus());
+  app.get('/api/system/update/status', async () => updateService.updateStatus(dbModule()));
 
   app.post('/api/system/update/install', async (request, reply) => {
     if (!isLocalHost(request.ip)) {
@@ -317,8 +313,9 @@ export function registerMig09Routes(app: FastifyInstance): void {
     if (!frozen) {
       return reply.status(400).send({ detail: '当前启动方式不支持直接安装更新，请使用正式安装版完成更新' });
     }
+    updateService.updateStatus(dbModule());
     if (updateService.isBusy()) {
-      return { started: false, status: updateService.updateStatus().status };
+      return { started: false, status: updateService.updateStatus(dbModule()).status };
     }
     updateService.startUpdateWorker(dbModule());
     return { started: true, status: 'starting' };
