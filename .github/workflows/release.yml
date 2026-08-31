@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+env:
+  COS_BUCKET: zhihui-banji-update-1304673766
+  COS_REGION: ap-chengdu
+  COS_BASE_URL: https://zhihui-banji-update-1304673766.cos.ap-chengdu.myqcloud.com
+
 jobs:
   verify:
     name: Verify source
@@ -197,7 +202,7 @@ jobs:
         run: gh release upload "$RELEASE_TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   release:
-    name: Publish GitHub Release
+    name: Publish GitHub Release and COS mirror
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.version, 'v'))
     needs: build
     runs-on: ubuntu-latest
@@ -220,11 +225,12 @@ jobs:
         working-directory: release-assets
         run: sha256sum * > SHA256SUMS.txt
 
-      - name: Create update manifest
+      - name: Create update manifest with COS primary URLs
         working-directory: release-assets
         env:
           RELEASE_TAG: ${{ inputs.version || github.ref_name }}
           REPOSITORY: ${{ github.repository }}
+          UPDATE_BASE_URL: ${{ env.COS_BASE_URL }}/releases/${{ inputs.version || github.ref_name }}
         run: node "$GITHUB_WORKSPACE/packaging/create-update-manifest.mjs"
 
       - name: Prepare release notes
@@ -256,6 +262,10 @@ jobs:
           cat > release-notes.md <<EOF
           本版本安装包已通过自动构建、版本号检查和 SHA-256 校验。
 
+          下载源：
+          - 腾讯云 COS（成都）：国内优先
+          - GitHub Release：备用
+
           安全状态：
           - Windows：${windows_signing}
           - macOS：${macos_signing}，${macos_notarization}
@@ -263,7 +273,71 @@ jobs:
           未签名安装包仅建议在可信环境中测试使用。配置对应 GitHub Actions Secrets 后，后续标签发布会自动启用签名和 macOS 公证。
           EOF
 
-      - name: Upload checksums and update manifest
+      - name: Install COSCMD
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install coscmd
+
+      - name: Configure COSCMD
+        env:
+          TENCENT_COS_SECRET_ID: ${{ secrets.TENCENT_COS_SECRET_ID }}
+          TENCENT_COS_SECRET_KEY: ${{ secrets.TENCENT_COS_SECRET_KEY }}
+        run: |
+          test -n "$TENCENT_COS_SECRET_ID" || { echo '缺少 TENCENT_COS_SECRET_ID'; exit 1; }
+          test -n "$TENCENT_COS_SECRET_KEY" || { echo '缺少 TENCENT_COS_SECRET_KEY'; exit 1; }
+          coscmd config \
+            -a "$TENCENT_COS_SECRET_ID" \
+            -s "$TENCENT_COS_SECRET_KEY" \
+            -b "$COS_BUCKET" \
+            -r "$COS_REGION"
+
+      - name: Upload immutable release files to COS
+        env:
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          for file in release-assets/*; do
+            name="$(basename "$file")"
+            coscmd upload "$file" "releases/$RELEASE_TAG/$name"
+          done
+
+      - name: Verify COS release files are publicly readable
+        env:
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          with open('release-assets/update-manifest.json', encoding='utf-8') as f:
+              manifest = json.load(f)
+          for asset in manifest['assets']:
+              url = asset['urls'][0]
+              req = urllib.request.Request(url, method='HEAD')
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  size = int(response.headers.get('Content-Length', '0'))
+                  if response.status != 200:
+                      raise RuntimeError(f'{url}: HTTP {response.status}')
+                  if size and size != int(asset['size']):
+                      raise RuntimeError(f'{url}: size {size} != {asset["size"]}')
+                  print(f'COS OK: {asset["name"]} ({size or asset["size"]} bytes)')
+          PY
+
+      - name: Publish latest manifest to COS last
+        run: |
+          coscmd upload release-assets/update-manifest.json latest/update-manifest.json
+          coscmd upload release-assets/SHA256SUMS.txt latest/SHA256SUMS.txt
+
+      - name: Verify latest COS manifest
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          url = 'https://zhihui-banji-update-1304673766.cos.ap-chengdu.myqcloud.com/latest/update-manifest.json'
+          with urllib.request.urlopen(url, timeout=20) as response:
+              manifest = json.load(response)
+          if not manifest.get('tag_name') or not manifest.get('assets'):
+              raise RuntimeError('COS latest manifest 内容不完整')
+          print('COS latest manifest:', manifest['tag_name'])
+          PY
+
+      - name: Upload checksums and update manifest to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.version || github.ref_name }}
