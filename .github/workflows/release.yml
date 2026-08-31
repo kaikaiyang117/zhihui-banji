@@ -295,10 +295,20 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.version || github.ref_name }}
         run: |
+          set -euo pipefail
+          pids=()
           for file in release-assets/*; do
             name="$(basename "$file")"
-            coscmd upload "$file" "releases/$RELEASE_TAG/$name"
+            coscmd upload "$file" "releases/$RELEASE_TAG/$name" &
+            pids+=("$!")
           done
+          upload_status=0
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              upload_status=1
+            fi
+          done
+          exit "$upload_status"
 
       - name: Verify COS release files are publicly readable
         env:
