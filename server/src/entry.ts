@@ -16,6 +16,17 @@ import { migrateStoredSecrets } from './services/secretMigration.js';
 import { cleanExpiredArtifacts } from './excel/artifacts/artifactService.js';
 import { pathToFileURL } from 'node:url';
 
+const DEFAULT_UPDATE_MIRROR_MANIFEST_URL =
+  'https://zhihui-banji-update-1304673766.cos.ap-chengdu.myqcloud.com/latest/update-manifest.json';
+
+function configureDefaultUpdateMirror(): void {
+  const configured = process.env.WORKBENCH_UPDATE_MIRROR_MANIFEST_URLS
+    ?? process.env.WORKBENCH_UPDATE_MIRROR_MANIFEST_URL;
+  if (!String(configured ?? '').trim()) {
+    process.env.WORKBENCH_UPDATE_MIRROR_MANIFEST_URL = DEFAULT_UPDATE_MIRROR_MANIFEST_URL;
+  }
+}
+
 function print(message: string): void {
   process.stdout.write(`${message}\n`);
 }
@@ -46,6 +57,7 @@ export function parseArgs(argv: string[]): {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  configureDefaultUpdateMirror();
   const args = parseArgs(argv);
   const config: ServerConfig = loadConfig({
     lan: args.lan,
