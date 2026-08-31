@@ -293,7 +293,7 @@ async function checkGitHubSource(): Promise<UpdateSourceInfo> {
     release = await fetchJson(githubApiUrl(), { accept: 'application/vnd.github+json' });
   } catch (primaryError) {
     try {
-      return await checkManifestSource(githubManifestUrl(), 'github-manifest');
+      return await checkManifestSource(githubManifestUrl(), 'github');
     } catch {
       throw primaryError;
     }
@@ -414,6 +414,14 @@ async function downloadAttempt(
   if (totalBytes > 0 && offset > totalBytes) {
     fs.rmSync(partial, { force: true });
     offset = 0;
+  }
+  if (totalBytes > 0 && offset === totalBytes) {
+    patchState(db, {
+      status: 'downloading', source: sourceLabel, total_bytes: totalBytes,
+      downloaded_bytes: offset, progress: 100, speed_bytes_per_second: 0,
+      message: '下载已完成，正在准备校验…', error: '',
+    });
+    return;
   }
 
   const controller = new AbortController();
