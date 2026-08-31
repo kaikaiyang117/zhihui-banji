@@ -492,6 +492,9 @@ async function downloadAttempt(
       meter,
       fs.createWriteStream(partial, { flags: offset > 0 ? 'a' : 'w' }),
     );
+    if (effectiveTotal > 0 && downloaded !== effectiveTotal) {
+      throw new Error(`下载文件大小不完整：${downloaded}/${effectiveTotal}`);
+    }
     patchState(db, {
       downloaded_bytes: downloaded,
       total_bytes: effectiveTotal,
