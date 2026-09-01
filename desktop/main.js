@@ -1143,12 +1143,29 @@ function appBundlePath() {
 
 function installPackageAndQuit(packagePath) {
   if (process.platform === 'win32') {
-    logLine(`启动 Windows 安装器：${packagePath}`);
-    const child = spawn(packagePath, [], {
+    const helper = app.isPackaged
+      ? path.join(process.resourcesPath, 'backend', 'updater', 'windows-updater.ps1')
+      : path.join(__dirname, '..', 'packaging', 'windows-updater.ps1');
+    if (!fs.existsSync(helper)) {
+      failBackend('缺少 Windows 更新助手，更新已取消。');
+      return;
+    }
+    logLine(`启动 Windows 静默更新助手：${helper}`);
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', helper,
+      '-InstallerPath', packagePath,
+      '-AppExePath', app.getPath('exe'),
+      '-ProcessId', String(process.pid),
+    ], {
       cwd: path.dirname(packagePath),
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
+    child.on('error', error => logLine(`Windows 更新助手启动失败：${error.message}`));
     child.unref();
   } else if (process.platform === 'darwin') {
     const appPath = appBundlePath();

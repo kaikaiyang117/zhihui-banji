@@ -7,6 +7,7 @@
     "dev": "vite",
     "watch": "vite build --watch",
     "build": "vite build",
+    "test:update": "node tests/updateState.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

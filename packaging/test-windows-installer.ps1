@@ -4,6 +4,24 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$WindowsUpdaterScript = Join-Path $PSScriptRoot 'windows-updater.ps1'
+$parseTokens = $null
+$parseErrors = $null
+if (-not (Test-Path -LiteralPath $WindowsUpdaterScript -PathType Leaf)) {
+  throw "Windows updater helper was not found: $WindowsUpdaterScript"
+}
+[System.Management.Automation.Language.Parser]::ParseFile($WindowsUpdaterScript, [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+if ($parseErrors.Count -gt 0) {
+  throw "Windows updater helper has PowerShell syntax errors: $($parseErrors[0].Message)"
+}
+$helperParameters = (Get-Command -Name $WindowsUpdaterScript).Parameters
+foreach ($requiredParameter in @('InstallerPath', 'AppExePath')) {
+  if (-not $helperParameters.ContainsKey($requiredParameter)) {
+    throw "Windows updater helper is missing the $requiredParameter parameter"
+  }
+}
+Write-Host 'Windows updater helper syntax and parameters parsed successfully.'
+
 $ResolvedInstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
 $SmokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('meimei-workbench-installer-smoke-' + [guid]::NewGuid().ToString('N'))
 $InstallDirectory = Join-Path $SmokeRoot 'installed'

@@ -111,6 +111,22 @@ function persistState(): void {
   }
 }
 
+function isUpdateStateStale(state: UpdateState): boolean {
+  return Boolean(state.version) && compareVersions(state.version, loadAppVersion()) <= 0;
+}
+
+function clearCompletedUpdateState(db: WorkbenchDb): void {
+  const updateDir = path.join(db.paths.dataDir, 'updates');
+  const assetName = path.basename(updateState.asset_name);
+  if (assetName && assetName !== '.' && assetName !== '..') {
+    const installer = path.join(updateDir, assetName);
+    fs.rmSync(installer, { force: true });
+    fs.rmSync(`${installer}.part`, { force: true });
+  }
+  updateState = { ...EMPTY_STATE };
+  persistState();
+}
+
 function hydrateState(db: WorkbenchDb): void {
   const nextPath = stateFileFor(db);
   if (statePath !== nextPath) {
@@ -121,6 +137,10 @@ function hydrateState(db: WorkbenchDb): void {
   try {
     const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Partial<UpdateState>;
     updateState = { ...EMPTY_STATE, ...parsed };
+    if (isUpdateStateStale(updateState)) {
+      clearCompletedUpdateState(db);
+      return;
+    }
     if (!updateRunning && ['starting', 'checking', 'backing_up', 'downloading', 'verifying'].includes(updateState.status)) {
       updateState.status = 'paused';
       updateState.message = '上次更新未完成，已保留下载进度，可继续下载。';
@@ -145,6 +165,15 @@ async function fetchJson(url: string, options: { accept?: string } = {}): Promis
 function versionKey(version: string): number[] {
   const numbers = (version.match(/\d+/g) ?? []).map(Number);
   return [numbers[0] ?? 0, numbers[1] ?? 0, numbers[2] ?? 0];
+}
+
+function compareVersions(a: string, b: string): number {
+  const left = versionKey(a);
+  const right = versionKey(b);
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+  }
+  return 0;
 }
 
 function platformAsset(assets: Array<Record<string, unknown>>): Record<string, unknown> | null {
@@ -289,11 +318,7 @@ async function checkMirrorSource(): Promise<UpdateSourceInfo> {
 
 function buildCheckResult(info: UpdateSourceInfo): UpdateCheckResult {
   const currentVersion = loadAppVersion();
-  const current = versionKey(currentVersion);
-  const latest = versionKey(info.version);
-  const newer = latest[0] > current[0]
-    || (latest[0] === current[0] && latest[1] > current[1])
-    || (latest[0] === current[0] && latest[1] === current[1] && latest[2] > current[2]);
+  const newer = compareVersions(info.version, currentVersion) > 0;
   const downloadable = Boolean(
     info.asset.name && info.asset.urls.length && info.asset.size > 0 && validSha256(info.asset.sha256),
   );
@@ -586,6 +611,10 @@ export function startUpdateWorker(db: WorkbenchDb): void {
 /** 仅供本机 Electron 使用：返回已校验安装包路径。 */
 export function installerPath(db: WorkbenchDb): { path: string; name: string } {
   hydrateState(db);
+  if (updateState.version && compareVersions(updateState.version, loadAppVersion()) <= 0) {
+    clearCompletedUpdateState(db);
+    throw new Error('当前更新版本不高于已安装版本，无需再次安装');
+  }
   if (updateState.status !== 'ready_to_install') throw new Error('当前没有待安装的更新');
   const assetName = updateState.asset_name;
   if (!assetName) throw new Error('缺少安装包信息');

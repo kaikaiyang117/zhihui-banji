@@ -23,6 +23,7 @@ let cosDownloads = 0;
 let githubRanges: string[] = [];
 let mirrorAssetUrls: string[] | null = null;
 let mirrorSha256 = SHA256;
+let mirrorVersion = '9.9.9';
 const previousEnv = { ...process.env };
 let platformDescriptor: PropertyDescriptor | undefined;
 let archDescriptor: PropertyDescriptor | undefined;
@@ -31,7 +32,7 @@ let hostArch = process.arch;
 
 function manifest(urls = mirrorAssetUrls ?? [`${base}/cos/file/${ASSET_NAME}`, `${base}/github/file/${ASSET_NAME}`]): string {
   return JSON.stringify({
-    tag_name: 'v9.9.9',
+    tag_name: `v${mirrorVersion}`,
     release_notes: '更新测试',
     html_url: 'https://github.com/test/workbench/releases/tag/v9.9.9',
     assets: [{ name: ASSET_NAME, size: INSTALLER.length, sha256: mirrorSha256, urls }],
@@ -122,6 +123,7 @@ beforeEach(() => {
   githubRanges = [];
   mirrorAssetUrls = null;
   mirrorSha256 = SHA256;
+  mirrorVersion = '9.9.9';
   process.env.WORKBENCH_VERSION = '9.8.7';
   delete process.env.WORKBENCH_UPDATE_MIRROR_MANIFEST_URLS;
   delete process.env.WORKBENCH_UPDATE_MANIFEST_URL;
@@ -151,12 +153,34 @@ async function waitFinished(timeoutMs = 12000): Promise<void> {
   throw new Error(`更新状态未结束：${JSON.stringify(updateService.updateStatus())}`);
 }
 
+function writeReadyState(version: string): string {
+  const updatesDir = path.join(tempDir, 'updates');
+  const installerPath = path.join(updatesDir, ASSET_NAME);
+  fs.mkdirSync(updatesDir, { recursive: true });
+  fs.writeFileSync(installerPath, INSTALLER);
+  fs.writeFileSync(`${installerPath}.part`, INSTALLER);
+  fs.writeFileSync(path.join(updatesDir, 'update-state.json'), JSON.stringify({
+    status: 'ready_to_install', message: '校验通过', error: '', asset_name: ASSET_NAME,
+    version, source: 'cos.ap-chengdu.myqcloud.com', sha256: SHA256,
+    total_bytes: INSTALLER.length, downloaded_bytes: INSTALLER.length, progress: 100,
+    retry_count: 0, backup_created: true, verified: true,
+  }));
+  return installerPath;
+}
+
 describe('更新源与断点恢复', () => {
   it('COS manifest 成功时不请求 GitHub', async () => {
     const result = await updateService.checkForUpdate();
     expect(result.source).toBe('cos');
     expect(result.asset.urls[0]).toContain('/cos/file/');
     expect(githubHits).toBe(0);
+  });
+
+  it('同版本或旧版本不标记为可更新', async () => {
+    mirrorVersion = '9.8.7';
+    expect((await updateService.checkForUpdate()).update_available).toBe(false);
+    mirrorVersion = '9.8.6';
+    expect((await updateService.checkForUpdate()).update_available).toBe(false);
   });
 
   it('COS manifest 失败时回退 GitHub', async () => {
@@ -190,6 +214,36 @@ describe('更新源与断点恢复', () => {
     expect(state).toMatchObject({
       status: 'paused', downloaded_bytes: 1234, asset_name: ASSET_NAME, backup_created: true,
     });
+  });
+
+  it.each([
+    ['same version', '9.8.7'],
+    ['older version', '9.8.6'],
+  ])('已安装版本为 %s 时清理过期更新状态和安装包', (_label, version) => {
+    const installerPath = writeReadyState(version);
+    const backupPath = path.join(db.backupDir(), 'keep-me.db');
+    fs.mkdirSync(db.backupDir(), { recursive: true });
+    fs.writeFileSync(backupPath, 'backup');
+
+    expect(updateService.updateStatus(db).status).toBe('idle');
+    expect(fs.existsSync(installerPath)).toBe(false);
+    expect(fs.existsSync(`${installerPath}.part`)).toBe(false);
+    expect(fs.existsSync(backupPath)).toBe(true);
+  });
+
+  it('新版本 ready_to_install 状态保留，安装包仍可用', () => {
+    const installerPath = writeReadyState('9.8.8');
+
+    expect(updateService.updateStatus(db).status).toBe('ready_to_install');
+    expect(fs.existsSync(installerPath)).toBe(true);
+    expect(fs.existsSync(`${installerPath}.part`)).toBe(true);
+  });
+
+  it('installer-path 拒绝同版本或旧版本安装包', () => {
+    const installerPath = writeReadyState('9.8.7');
+
+    expect(() => updateService.installerPath(db)).toThrow(/没有待安装|不高于/);
+    expect(fs.existsSync(installerPath)).toBe(false);
   });
 
   it('完整 .part 只做本地 SHA-256 校验，不再请求网络', async () => {

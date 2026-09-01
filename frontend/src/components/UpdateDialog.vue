@@ -2,6 +2,7 @@
 import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { CheckCircle, Download, ExternalLink, LoaderCircle, RefreshCw, X } from 'lucide-vue-next'
 import { get, post } from '../api'
+import { canInstallUpdate, shouldRestorePersistedUpdate } from '../updateState'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -55,7 +56,7 @@ async function checkUpdate() {
     if (result.value.error) errorMessage.value = result.value.error
     try {
       const persisted = await get('/api/system/update/status')
-      if (['paused', 'downloading', 'verifying', 'ready_to_install', 'error'].includes(persisted.status)) {
+      if (shouldRestorePersistedUpdate(result.value, persisted)) {
         updateStatus.value = persisted
       }
     } catch {
@@ -203,7 +204,7 @@ onUnmounted(clearPoll)
           <a v-if="result.release_url" class="btn btn-outline" :href="result.release_url" target="_blank" rel="noreferrer">
             <ExternalLink :size="15" /> 查看发布说明
           </a>
-          <template v-if="updateStatus?.status === 'ready_to_install'">
+          <template v-if="canInstallUpdate(result, updateStatus?.status)">
             <button v-if="isDesktop" class="btn btn-primary" type="button" :disabled="installing" @click="launchInstaller">
               <Download :size="15" /> 安装并重启工作台
             </button>

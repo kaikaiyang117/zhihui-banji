@@ -18,6 +18,8 @@ extraResources:
       - '**/*'
   - from: ../packaging/macos-updater.sh
     to: backend/updater/macos-updater.sh
+  - from: ../packaging/windows-updater.ps1
+    to: backend/updater/windows-updater.ps1
   - from: assets/icon.ico
     to: icon.ico
   - from: assets/icon.png
